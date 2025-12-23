@@ -1,6 +1,7 @@
 import { replyToMessage } from "#/features/reply-to-message";
 import { aiModel } from "#/utils/ai";
 import { botDiscord } from "#/utils/discord";
+import { logger } from "#/utils/logger";
 import { generateText, Output } from "ai";
 import dedent from "dedent";
 import { MessageType } from "discord.js";
@@ -16,6 +17,7 @@ botDiscord.on("messageCreate", async (message) => {
 
   // Based on bot mention:
   if (message.mentions.has(botDiscord.user.id)) {
+    logger.info(`Reply to ${message.author.displayName} based on mention`);
     await replyToMessage(message);
     return;
   }
@@ -25,6 +27,7 @@ botDiscord.on("messageCreate", async (message) => {
     const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
 
     if (repliedMessage.author.id === botDiscord.user.id) {
+      logger.info(`Reply to ${message.author.displayName} based on a reply to the bot`);
       await replyToMessage(message);
       return;
     }
@@ -54,7 +57,9 @@ botDiscord.on("messageCreate", async (message) => {
     }) }),
   });
 
+  logger.info(`Need to reply percent: ${String(completion.output.needToReplyPercent * 100)}%`);
   if (completion.output.needToReplyPercent > 0.7) {
+    logger.info(`Reply to ${message.author.displayName} based on the last 20 messages`);
     await replyToMessage(message);
   }
 });
