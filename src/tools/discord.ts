@@ -1,15 +1,15 @@
 import type { ToolSet } from "ai";
+import { botDiscord } from "#/utils/discord";
 import { tool } from "ai";
-import { z } from "zod";
-import { botDiscord } from "../utils/discord";
 import { ChannelType } from "discord.js";
+import { z } from "zod";
 
 export const discordTools: ToolSet = {
   getGuilds: tool({
     description: "Get all Discord servers (guilds)",
     inputSchema: z.object({}),
     execute: async () => {
-      const guilds = botDiscord.guilds.cache.map(guild => ({
+      const guilds = botDiscord.guilds.cache.map((guild) => ({
         id: guild.id,
         name: guild.name,
         memberCount: guild.memberCount,
@@ -30,16 +30,16 @@ export const discordTools: ToolSet = {
         throw new Error("Guild not found");
       }
 
-      let channels = guild.channels.cache.map(channel => ({
+      let channels = guild.channels.cache.map((channel) => ({
         id: channel.id,
         name: channel.name,
         type: ChannelType[channel.type],
       }));
 
       if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, '');
-        channels = channels.filter(c => {
-          const channelName = c.name.toLowerCase().replace(/\s+/g, '');
+        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+        channels = channels.filter((c) => {
+          const channelName = c.name.toLowerCase().replace(/\s+/g, "");
           return channelName.includes(filter) || filter.includes(channelName);
         });
       }
@@ -62,9 +62,9 @@ export const discordTools: ToolSet = {
 
       await guild.members.fetch();
 
-      let members = guild.members.cache.map(member => {
+      let members = guild.members.cache.map((member) => {
         const presence = member.presence;
-        const activities = presence?.activities.map(activity => ({
+        const activities = presence?.activities.map((activity) => ({
           name: activity.name,
           type: activity.type,
           details: activity.details,
@@ -84,14 +84,14 @@ export const discordTools: ToolSet = {
       });
 
       if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, '');
-        members = members.filter(m => {
-          const username = m.username.toLowerCase().replace(/\s+/g, '');
-          const displayName = m.displayName.toLowerCase().replace(/\s+/g, '');
-          return username.includes(filter) || 
-                 displayName.includes(filter) ||
-                 filter.includes(username) ||
-                 filter.includes(displayName);
+        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+        members = members.filter((m) => {
+          const username = m.username.toLowerCase().replace(/\s+/g, "");
+          const displayName = m.displayName.toLowerCase().replace(/\s+/g, "");
+          return username.includes(filter)
+            || displayName.includes(filter)
+            || filter.includes(username)
+            || filter.includes(displayName);
         });
       }
 
@@ -171,7 +171,7 @@ export const discordTools: ToolSet = {
         throw new Error("Guild not found");
       }
 
-      let roles = guild.roles.cache.map(role => ({
+      let roles = guild.roles.cache.map((role) => ({
         id: role.id,
         name: role.name,
         color: role.hexColor,
@@ -179,9 +179,9 @@ export const discordTools: ToolSet = {
       }));
 
       if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, '');
-        roles = roles.filter(r => {
-          const roleName = r.name.toLowerCase().replace(/\s+/g, '');
+        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+        roles = roles.filter((r) => {
+          const roleName = r.name.toLowerCase().replace(/\s+/g, "");
           return roleName.includes(filter) || filter.includes(roleName);
         });
       }
@@ -205,7 +205,7 @@ export const discordTools: ToolSet = {
 
       const role = await guild.roles.create({
         name,
-        color: color ? parseInt(color.replace('#', ''), 16) : undefined,
+        color: color ? parseInt(color.replace("#", ""), 16) : undefined,
       });
 
       return `Created role ${role.name} (ID: ${role.id})`;
@@ -306,16 +306,16 @@ export const discordTools: ToolSet = {
       }
 
       let categories = guild.channels.cache
-        .filter(channel => channel.type === ChannelType.GuildCategory)
-        .map(channel => ({
+        .filter((channel) => channel.type === ChannelType.GuildCategory)
+        .map((channel) => ({
           id: channel.id,
           name: channel.name,
         }));
 
       if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, '');
-        categories = categories.filter(c => {
-          const categoryName = c.name.toLowerCase().replace(/\s+/g, '');
+        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+        categories = categories.filter((c) => {
+          const categoryName = c.name.toLowerCase().replace(/\s+/g, "");
           return categoryName.includes(filter) || filter.includes(categoryName);
         });
       }
@@ -338,9 +338,9 @@ export const discordTools: ToolSet = {
         throw new Error("Guild not found");
       }
 
-      const channelType = type === "text" ? ChannelType.GuildText : 
-                          type === "voice" ? ChannelType.GuildVoice : 
-                          ChannelType.GuildCategory;
+      const channelType = type === "text" ? ChannelType.GuildText
+        : type === "voice" ? ChannelType.GuildVoice
+          : ChannelType.GuildCategory;
 
       const channel = await guild.channels.create({
         name,
@@ -364,7 +364,7 @@ export const discordTools: ToolSet = {
         throw new Error("Channel not found");
       }
 
-      const channelName = 'name' in channel ? channel.name : 'Unknown';
+      const channelName = "name" in channel ? channel.name : "Unknown";
       await channel.delete();
 
       return `Deleted channel ${channelName}`;
@@ -383,8 +383,8 @@ export const discordTools: ToolSet = {
         throw new Error("Channel not found");
       }
 
-      const oldName = 'name' in channel ? channel.name : 'Unknown';
-      if ('setName' in channel) {
+      const oldName = "name" in channel ? channel.name : "Unknown";
+      if ("setName" in channel) {
         await channel.setName(newName);
       }
 
@@ -486,7 +486,7 @@ export const discordTools: ToolSet = {
 
       await member.kick(reason);
 
-      return `Kicked ${member.displayName}${reason ? ` for: ${reason}` : ''}`;
+      return `Kicked ${member.displayName}${reason ? ` for: ${reason}` : ""}`;
     },
   }),
 
@@ -510,7 +510,7 @@ export const discordTools: ToolSet = {
 
       await member.ban({ reason });
 
-      return `Banned ${member.displayName}${reason ? ` for: ${reason}` : ''}`;
+      return `Banned ${member.displayName}${reason ? ` for: ${reason}` : ""}`;
     },
   }),
 
@@ -522,11 +522,11 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, content }) => {
       const channel = botDiscord.channels.cache.get(channelId);
-      if (!channel || !channel.isTextBased()) {
+      if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
 
-      if ('send' in channel) {
+      if ("send" in channel) {
         await channel.send(content);
       }
 
@@ -549,18 +549,18 @@ export const discordTools: ToolSet = {
       buttons: z.array(z.object({
         label: z.string(),
         url: z.string().optional(),
-        style: z.enum(['primary', 'secondary', 'success', 'danger', 'link']).optional(),
+        style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional(),
       })).optional(),
     }),
     execute: async ({ channelId, title, description, color, fields, buttons }) => {
       const channel = botDiscord.channels.cache.get(channelId);
-      if (!channel || !channel.isTextBased()) {
+      if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
 
-      if ('send' in channel) {
+      if ("send" in channel) {
         const components: any[] = [];
-        
+
         if (buttons && buttons.length > 0) {
           const buttonStyleMap: any = {
             primary: 1,
@@ -569,23 +569,24 @@ export const discordTools: ToolSet = {
             danger: 4,
             link: 5,
           };
-          
+
           components.push({
             type: 1,
             components: buttons.map((btn: any) => {
-              const style = buttonStyleMap[btn.style || 'primary'];
+              const style = buttonStyleMap[btn.style || "primary"];
               const button: any = {
                 type: 2,
                 label: btn.label,
                 style,
               };
-              
+
               if (btn.url && style === 5) {
                 button.url = btn.url;
-              } else if (!btn.url) {
+              }
+              else if (!btn.url) {
                 button.custom_id = `btn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
               }
-              
+
               return button;
             }),
           });
@@ -595,7 +596,7 @@ export const discordTools: ToolSet = {
           embeds: [{
             title,
             description,
-            color: color ? parseInt(color.replace('#', ''), 16) : undefined,
+            color: color ? parseInt(color.replace("#", ""), 16) : undefined,
             fields,
           }],
           components: components.length > 0 ? components : undefined,
@@ -675,7 +676,7 @@ export const discordTools: ToolSet = {
 
       if (data.AbstractText) {
         results.push({
-          title: data.Heading || 'Summary',
+          title: data.Heading || "Summary",
           snippet: data.AbstractText,
           url: data.AbstractURL,
         });
@@ -686,7 +687,7 @@ export const discordTools: ToolSet = {
           .filter((topic: any) => topic.Text && topic.FirstURL)
           .slice(0, maxResults - results.length)
           .map((topic: any) => ({
-            title: topic.Text.split(' - ')[0] || 'Related',
+            title: topic.Text.split(" - ")[0] || "Related",
             snippet: topic.Text,
             url: topic.FirstURL,
           }));
@@ -710,14 +711,14 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, userId, limit = 100 }) => {
       const channel = botDiscord.channels.cache.get(channelId);
-      if (!channel || !channel.isTextBased()) {
+      if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
 
-      if ('messages' in channel && 'bulkDelete' in channel) {
+      if ("messages" in channel && "bulkDelete" in channel) {
         const messages = await channel.messages.fetch({ limit: Math.min(limit, 100) });
-        const userMessages = messages.filter(msg => msg.author.id === userId);
-        
+        const userMessages = messages.filter((msg) => msg.author.id === userId);
+
         if (userMessages.size === 0) {
           throw new Error("No messages found from this user");
         }
@@ -739,13 +740,13 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, limit = 100 }) => {
       const channel = botDiscord.channels.cache.get(channelId);
-      if (!channel || !channel.isTextBased()) {
+      if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
 
-      if ('messages' in channel && 'bulkDelete' in channel) {
+      if ("messages" in channel && "bulkDelete" in channel) {
         const messages = await channel.messages.fetch({ limit: Math.min(limit, 100) });
-        
+
         if (messages.size === 0) {
           throw new Error("No messages found in this channel");
         }
@@ -792,7 +793,7 @@ export const discordTools: ToolSet = {
       buttons: z.array(z.object({
         label: z.string(),
         url: z.string().optional(),
-        style: z.enum(['primary', 'secondary', 'success', 'danger', 'link']).optional(),
+        style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional(),
       })).optional(),
     }),
     execute: async ({ userId, title, description, color, fields, buttons }) => {
@@ -802,7 +803,7 @@ export const discordTools: ToolSet = {
       }
 
       const components: any[] = [];
-      
+
       if (buttons && buttons.length > 0) {
         const buttonStyleMap: any = {
           primary: 1,
@@ -811,23 +812,24 @@ export const discordTools: ToolSet = {
           danger: 4,
           link: 5,
         };
-        
+
         components.push({
           type: 1,
           components: buttons.map((btn: any) => {
-            const style = buttonStyleMap[btn.style || 'primary'];
+            const style = buttonStyleMap[btn.style || "primary"];
             const button: any = {
               type: 2,
               label: btn.label,
               style,
             };
-            
+
             if (btn.url && style === 5) {
               button.url = btn.url;
-            } else if (!btn.url) {
+            }
+            else if (!btn.url) {
               button.custom_id = `btn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             }
-            
+
             return button;
           }),
         });
@@ -837,7 +839,7 @@ export const discordTools: ToolSet = {
         embeds: [{
           title,
           description,
-          color: color ? parseInt(color.replace('#', ''), 16) : undefined,
+          color: color ? parseInt(color.replace("#", ""), 16) : undefined,
           fields,
         }],
         components: components.length > 0 ? components : undefined,

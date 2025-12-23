@@ -9,4 +9,7 @@ export default eslintConfig(
       "@typescript-eslint/no-misused-promises": "off",
     },
   },
+  {
+    ignores: ["**/tools"],
+  },
 );

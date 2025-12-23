@@ -1,4 +1,7 @@
+import { config } from "dotenv";
 import z from "zod";
+
+config();
 
 const schema = z.object({
   DISCORD_BOT_ID: z.string(),

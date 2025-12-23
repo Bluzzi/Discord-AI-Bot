@@ -1,5 +1,6 @@
-import { botDiscord } from "./utils/discord";
 import { env } from "#/utils/env";
+// env
+import { botDiscord } from "./utils/discord";
 import { logger } from "#/utils/logger";
 import "./events/message-create";
 

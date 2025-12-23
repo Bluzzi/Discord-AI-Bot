@@ -14,6 +14,7 @@ botDiscord.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.guildId) return;
   if (!botDiscord.user?.bot) return;
+  if (!message.channel.isTextBased()) return;
 
   // Based on bot mention:
   if (message.mentions.has(botDiscord.user.id)) {

@@ -7,11 +7,15 @@ import { generateText, type ModelMessage } from "ai";
 import dedent from "dedent";
 
 export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
+  // Get the bot information on the server:
   const botMember = await message.guild?.members.fetch(env.DISCORD_BOT_ID);
   if (!botMember) throw Error("Unable to get the bot member instance");
 
-  const lastMessages = await message.channel.messages.fetch({ limit: 20 });
+  // Start typing:
+  await message.channel.sendTyping();
 
+  // Create and send the reply:
+  const lastMessages = await message.channel.messages.fetch({ limit: 20 });
   const completion = await generateText({
     model: aiModel,
     messages: [
