@@ -6,7 +6,7 @@ import { MessageType } from "discord.js";
 import z from "zod";
 
 /**
- * Check if the IA need to reply to the message or not.
+ * Check if the AI need to reply to the message or not.
  */
 botDiscord.on("messageCreate", async (message) => {
   if (message.author.bot) return;
