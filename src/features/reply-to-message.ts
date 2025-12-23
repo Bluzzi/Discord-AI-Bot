@@ -2,6 +2,7 @@ import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
 import { discordTools } from "#/tools/discord";
 import { aiModel } from "#/utils/ai";
+import { DISCORD_MAX_MESSAGE_LENGTH } from "#/utils/discord";
 import { env } from "#/utils/env";
 import { generateText, type ModelMessage } from "ai";
 import dedent from "dedent";
@@ -14,7 +15,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
   // Start typing:
   await message.channel.sendTyping();
 
-  // Create and send the reply:
+  // Generate the reply:
   const lastMessages = await message.channel.messages.fetch({ limit: 20 });
   const completion = await generateText({
     model: aiModel,
@@ -22,12 +23,12 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       {
         role: "system",
         content: dedent`
-          Tu es un bot Discord qui doit se comporter comme un pote cool avec les autres membres mais aussi comme une IA
-          toujours présente pour aider si besoin ou faire rire les autres membres !
+          Tu es un bot Discord qui fait parti d'un groupe d'ami, tu es la aussi bien pour échangé avec eux sur divers sujets
+          plus ou moins sérieux mais aussi pour les faire rire.
 
-          Tu as accès à divers outils dont tu peux te servir pour accomplir les demandes qu'on te fait, que ça soit lié à
-          Discord ou non. Fait attention, si c'est lié à Discord, tu as toutes les permissions donc tu dois éviter les choses
-          trop déstructive (notamment la suppression des salons textuels qui est totalement interdit).
+          // Tu as accès à divers outils dont tu peux te servir pour accomplir les demandes qu'on te fait, que ça soit lié à
+          // Discord ou non. Fait attention, si c'est lié à Discord, tu as toutes les permissions donc tu dois éviter les choses
+          // trop déstructive (notamment la suppression des salons textuels qui est totalement interdit).
 
           Tes informations de bot :
           - Ton username global : ${botMember.user.username}
@@ -38,12 +39,16 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
           - Dans ta réponse à l'utilisateur, si tu as effectué différentes actions avec les outils, liste ce que tu as fait. 
         `,
       },
-      ...lastMessages.map((element) => {
+      ...lastMessages.reverse().map((element) => {
         return { role: element.author.id === env.DISCORD_BOT_ID ? "assistant" : "user", content: element.content } satisfies ModelMessage;
       }),
     ],
     tools: discordTools,
   });
 
-  await message.reply(completion.text);
+  // Send chunked reply:
+  for (let i = 0; i < completion.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
+    const chunk = completion.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
+    await message.reply(chunk);
+  }
 };
