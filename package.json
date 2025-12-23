@@ -1,7 +1,8 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "node --import @swc-node/register/esm-register ./src/main.ts",
+    "start": "node --import @swc-node/register/esm-register ./src/main.ts",
+    "dev": "node --watch --import @swc-node/register/esm-register ./src/main.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "ts:check": "tsc --noEmit"
