@@ -1,3 +1,4 @@
+import { replyToMessage } from "#/features/reply-to-message";
 import { aiModel } from "#/utils/ai";
 import { botDiscord } from "#/utils/discord";
 import { generateText, Output } from "ai";
@@ -12,6 +13,22 @@ botDiscord.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.guildId) return;
   if (!botDiscord.user?.bot) return;
+
+  // Based on bot mention:
+  if (message.mentions.has(botDiscord.user.id)) {
+    await replyToMessage(message);
+    return;
+  }
+
+  // Based on a reply to the bot:
+  if (message.type === MessageType.Reply && message.reference?.messageId) {
+    const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
+
+    if (repliedMessage.author.id === botDiscord.user.id) {
+      await replyToMessage(message);
+      return;
+    }
+  }
 
   // Based on the last 20 channel messages:
   const lastMessages = await message.channel.messages.fetch({ limit: 20 });
@@ -38,20 +55,6 @@ botDiscord.on("messageCreate", async (message) => {
   });
 
   if (completion.output.needToReplyPercent > 0.7) {
-    // Pass
-  }
-
-  // Based on bot mention:
-  if (message.mentions.has(botDiscord.user.id)) {
-    // Pass
-  }
-
-  // Based on a reply to the bot:
-  if (message.type === MessageType.Reply && message.reference?.messageId) {
-    const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-
-    if (repliedMessage.author.id === botDiscord.user.id) {
-      // Pass
-    }
+    await replyToMessage(message);
   }
 });
