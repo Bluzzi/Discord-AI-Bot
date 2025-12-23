@@ -39,7 +39,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
         `,
       },
       ...lastMessages.map((element) => {
-        return { role: element.author.id === env.DISCORD_BOT_ID ? "assistant" : "user", content: message.content } satisfies ModelMessage;
+        return { role: element.author.id === env.DISCORD_BOT_ID ? "assistant" : "user", content: element.content } satisfies ModelMessage;
       }),
     ],
     tools: discordTools,
