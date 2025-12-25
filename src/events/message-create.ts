@@ -33,14 +33,14 @@ botDiscord.on("messageCreate", async (message) => {
     }
   }
 
-  // Based on the last 20 channel messages:
+  // Based on the last 5 channel messages:
   const lastMessages = await message.channel.messages.fetch({ limit: 5 });
   const botMember = await message.guild?.members.fetch(botDiscord.user.id);
 
   const completion = await generateText({
     model: aiModel,
     prompt: dedent`
-      Voici les 20 derniers messages de la conversation, tu dois me renvoyer le pourcentage
+      Voici les 5 derniers messages de la conversation, tu dois me renvoyer le pourcentage
       pertinence que le bot (nommé "${botDiscord.user.username}", ou "${botMember?.displayName}") aurait à
       répondre quelque chose à la suite de ces messages.
 
@@ -62,7 +62,7 @@ botDiscord.on("messageCreate", async (message) => {
 
   logger.info(`Need to reply percent: ${String(completion.output.needToReplyPercent * 100)}%`);
   if (completion.output.needToReplyPercent > 0.7) {
-    logger.info(`Reply to ${message.author.displayName} based on the last 20 messages`);
+    logger.info(`Reply to ${message.author.displayName} based on the last 5 messages`);
     await replyToMessage(message);
   }
 });
