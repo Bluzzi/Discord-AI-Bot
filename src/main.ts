@@ -1,9 +1,13 @@
+// Env loading:
 import { env } from "#/utils/env";
-// env
-import { botDiscord } from "./utils/discord";
+
+// Imports:
+import { botDiscord } from "#/utils/discord";
 import { logger } from "#/utils/logger";
-import "./events/message-create";
 
+// Start bot:
 await botDiscord.login(env.DISCORD_BOT_TOKEN);
-
 logger.info("Bot started!");
+
+// Load events:
+await import("#/events/message-create");
