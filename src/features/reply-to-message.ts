@@ -480,7 +480,35 @@ GESTION DES ERREURS:
     }
     
     if (chunks.length > 0 && chunks[0]) {
-      if (searchResults && searchResults.length > 0) {
+      await message.reply(chunks[0]);
+      
+      for (let i = 1; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        if (chunk) {
+          if (i === chunks.length - 1 && searchResults && searchResults.length > 0) {
+            const pasteContent = formatSearchResultsForPaste(searchResults);
+            const pasteUrl = await createPaste(pasteContent, "Search Results");
+            
+            if (pasteUrl) {
+              const row = new ActionRowBuilder<ButtonBuilder>()
+                .addComponents(
+                  new ButtonBuilder()
+                    .setLabel('📋 Sources')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(pasteUrl)
+                );
+              
+              await message.channel.send({ content: chunk, components: [row] });
+            } else {
+              await message.channel.send(chunk);
+            }
+          } else {
+            await message.channel.send(chunk);
+          }
+        }
+      }
+      
+      if (chunks.length === 1 && searchResults && searchResults.length > 0) {
         const pasteContent = formatSearchResultsForPaste(searchResults);
         const pasteUrl = await createPaste(pasteContent, "Search Results");
         
@@ -493,18 +521,7 @@ GESTION DES ERREURS:
                 .setURL(pasteUrl)
             );
           
-          await message.reply({ content: chunks[0], components: [row] });
-        } else {
-          await message.reply(chunks[0]);
-        }
-      } else {
-        await message.reply(chunks[0]);
-      }
-      
-      for (let i = 1; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        if (chunk) {
-          await message.channel.send(chunk);
+          await message.channel.send({ content: '⬆️', components: [row] });
         }
       }
     }
