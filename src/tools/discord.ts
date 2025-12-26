@@ -3,8 +3,7 @@ import { discord } from "#/discord";
 import { tool } from "ai";
 import { ChannelType } from "discord.js";
 import { z } from "zod";
-import { join, leave } from "../discord/(features)/voice";
-import { logger } from "../utils/logger";
+import { getVoiceConnection, joinVoiceChannel } from "@discordjs/voice";
 
 const PERMISSION_REQUIREMENTS: Record<string, string[]> = {
   kickMember: ["KickMembers"],
@@ -1226,22 +1225,27 @@ export const discordTools: ToolSet = {
   joinVoiceChannel: tool({
     description: "Join a voice channel. IMPORTANT: To join the user's voice channel, first use getMembers to find the user, then use their voiceChannelId from the response.",
     inputSchema: z.object({
-      channelId: z.string().describe("The voice channel ID to join. Get this from getMembers response (voiceChannelId field)."),
+      channelID: z.string().describe("The voice channel ID to join. Get this from getMembers response (voiceChannelId field)."),
       guildId: z.string().describe("The guild/server ID"),
     }),
     outputSchema: z.object({
-      success: z.boolean().describe("Whether the operation was successful"),
       channelId: z.string().describe("ID of the voice channel joined"),
       guildId: z.string().describe("ID of the guild"),
     }),
-    execute: async ({ channelId, guildId }) => {
-      const connection = join(channelId, guildId);
-      if (!connection) {
-        throw new Error("Failed to create voice connection");
+    execute: async ({ channelID, guildId }) => {
+      const channel = discord.client.channels.cache.get(channelID);
+      if (!channel?.isVoiceBased()) {
+        throw new Error("Channel not found or not a voice channel");
       }
+
+      joinVoiceChannel({
+        channelId: channel.id,
+        guildId: guildId,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+      });
+
       return {
-        success: true,
-        channelId: channelId,
+        channelId: channelID,
         guildId: guildId
       };
     },
@@ -1249,17 +1253,20 @@ export const discordTools: ToolSet = {
 
   leaveVoiceChannel: tool({
     description: "Leave the current voice channel",
-    inputSchema: z.object({}),
-    outputSchema: z.object({
-      success: z.boolean().describe("Whether the operation was successful"),
-      action: z.string().describe("Action performed"),
+    inputSchema: z.object({
+      guildID: z.string().describe("ID of the guild/server where the voice channel is"),
     }),
-    execute: async () => {
-      leave();
-      return {
-        success: true,
-        action: "left_voice"
-      };
+    outputSchema: z.object({
+      action: z
+        .enum(["bot_not_connected_to_any_channel", "left_voice"])
+        .describe("Action performed, left_voice if a channel is leaved"),
+    }),
+    execute: async ({ guildID }) => {
+      const connection = getVoiceConnection(guildID);
+      if (!connection) return { action: "bot_not_connected_to_any_channel" }
+
+      connection.destroy();
+      return { action: "left_voice" };
     },
   }),
 
