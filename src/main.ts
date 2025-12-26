@@ -1,12 +1,16 @@
-import "./utils/discord";
+// Env loading:
+import { env } from "#/utils/env";
+
+// Imports:
+import { discord } from "#/discord";
 import { logger } from "#/utils/logger";
-import "./events/message-create";
-import { setupInteractionHandler } from "./events/interaction-create";
-import { setupVoicePresenceHandler } from "./events/voice-presence";
-import { setupMotd } from "./events/motd";
 
-setupInteractionHandler();
-setupVoicePresenceHandler();
-setupMotd();
-
+// Start bot:
+await discord.client.login(env.DISCORD_BOT_TOKEN);
+await discord.motd.setup();
 logger.info("Bot started!");
+
+// Load events:
+await import("#/events/message-create");
+await import("#/events/interaction-create");
+await import("#/events/voice-presence");

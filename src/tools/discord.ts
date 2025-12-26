@@ -1,6 +1,6 @@
-import { botDiscord } from "../utils/discord";
+import { discord } from "#/discord";
 import { ChannelType } from "discord.js";
-import { joinVoice, leaveVoice } from "../utils/voice";
+import { join, leave } from "../discord/(features)/voice";
 import { logger } from "../utils/logger";
 
 export const toolDefinitions = [
@@ -694,7 +694,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
     
     if (requesterId && args.guildId && toolName !== "listBotGuilds" && toolName !== "checkUserInGuild" && toolName !== "getGuilds") {
       const guildId = args.guildId;
-      const guild = botDiscord.guilds.cache.get(guildId);
+      const guild = discord.client.guilds.cache.get(guildId);
       
       if (!guild) {
         return { 
@@ -746,7 +746,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
     switch (toolName) {
       case "listBotGuilds": {
-        const guilds = botDiscord.guilds.cache.map((guild) => ({
+        const guilds = discord.client.guilds.cache.map((guild) => ({
           id: guild.id,
           name: guild.name,
           memberCount: guild.memberCount,
@@ -757,7 +757,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "checkUserInGuild": {
         const { userId, guildId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         
         if (!guild) {
           return { 
@@ -810,7 +810,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "checkPermissions": {
         const { guildId, memberId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -836,7 +836,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
       }
 
       case "getGuilds": {
-        const guilds = botDiscord.guilds.cache.map((guild) => ({
+        const guilds = discord.client.guilds.cache.map((guild) => ({
           id: guild.id,
           name: guild.name,
           memberCount: guild.memberCount,
@@ -846,7 +846,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "getChannels": {
         const { guildId, nameFilter } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) {
           return { error: "Guild not found" };
         }
@@ -870,7 +870,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "getMembers": {
         const { guildId, nameFilter } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) {
           return { error: "Guild not found" };
         }
@@ -941,7 +941,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "moveMember": {
         const { guildId, memberId, channelId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) {
           return { error: "Guild not found" };
         }
@@ -967,7 +967,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "disconnectMember": {
         const { guildId, memberId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) {
           return { error: "Guild not found" };
         }
@@ -988,7 +988,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "renameMember": {
         const { guildId, memberId, nickname } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) {
           return { error: "Guild not found" };
         }
@@ -1006,7 +1006,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "getRoles": {
         const { guildId, nameFilter } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) {
           return { error: "Guild not found" };
         }
@@ -1031,7 +1031,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "createRole": {
         const { guildId, name, color } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const role = await guild.roles.create({
@@ -1043,7 +1043,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "deleteRole": {
         const { guildId, roleId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const role = guild.roles.cache.get(roleId);
@@ -1055,7 +1055,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "addRoleToMember": {
         const { guildId, memberId, roleId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -1070,7 +1070,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "removeRoleFromMember": {
         const { guildId, memberId, roleId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -1085,7 +1085,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "getCategories": {
         const { guildId, nameFilter } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         let categories = guild.channels.cache
@@ -1107,7 +1107,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "createChannel": {
         const { guildId, name, type, categoryId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const channelType = type === "text" ? ChannelType.GuildText : 
@@ -1124,7 +1124,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "deleteChannel": {
         const { channelId } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel) return { error: "Channel not found" };
         
         const channelName = 'name' in channel ? channel.name : 'Unknown';
@@ -1134,7 +1134,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "renameChannel": {
         const { channelId, newName } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel) return { error: "Channel not found" };
         
         const oldName = 'name' in channel ? channel.name : 'Unknown';
@@ -1146,7 +1146,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "editRolePermissions": {
         const { guildId, roleId, permissions } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const role = guild.roles.cache.get(roleId);
@@ -1158,7 +1158,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "changeRolePosition": {
         const { guildId, roleId, position } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const role = guild.roles.cache.get(roleId);
@@ -1171,7 +1171,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "kickMember": {
         const { guildId, memberId, reason } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -1183,7 +1183,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "banMember": {
         const { guildId, memberId, reason } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -1195,7 +1195,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "unbanMember": {
         const { guildId, userId, reason } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         try {
@@ -1208,7 +1208,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "muteMember": {
         const { guildId, memberId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -1222,7 +1222,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "unmuteMember": {
         const { guildId, memberId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const member = await guild.members.fetch(memberId);
@@ -1236,7 +1236,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "sendMessage": {
         const { channelId, content } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1249,7 +1249,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "sendEmbed": {
         const { channelId, title, description, color, fields, buttons } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1302,7 +1302,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "deleteMessagesFromUser": {
         const { channelId, userId, limit = 100 } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1324,7 +1324,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "deleteMessagesInChannel": {
         const { channelId, limit = 100 } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1345,7 +1345,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "sendDm": {
         const { userId, content } = args;
-        const user = await botDiscord.users.fetch(userId);
+        const user = await discord.client.users.fetch(userId);
         if (!user) return { error: "User not found" };
         
         await user.send(content);
@@ -1354,7 +1354,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "sendDmEmbed": {
         const { userId, title, description, color, fields, buttons } = args;
-        const user = await botDiscord.users.fetch(userId);
+        const user = await discord.client.users.fetch(userId);
         if (!user) return { error: "User not found" };
         
         const components: any[] = [];
@@ -1404,7 +1404,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
       case "joinVoiceChannel": {
         const { channelId, guildId } = args;
         try {
-          joinVoice(channelId, guildId);
+          join(channelId, guildId);
           return "Bot joined voice channel";
         } catch (error) {
           return { error: `Error joining voice channel: ${error instanceof Error ? error.message : String(error)}` };
@@ -1412,13 +1412,13 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
       }
 
       case "leaveVoiceChannel": {
-        leaveVoice();
+        leave();
         return "Bot left voice channel";
       }
 
       case "renameGuild": {
         const { guildId, newName } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         const oldName = guild.name;
@@ -1428,7 +1428,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "createInvite": {
         const { channelId, maxAge = 0, maxUses = 0 } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel) return { error: "Channel not found" };
         
         if (!('createInvite' in channel)) {
@@ -1450,7 +1450,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "createPoll": {
         const { channelId, question, answers, duration = 24, allowMultiselect = false } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1481,7 +1481,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "getWebhooks": {
         const { channelId } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1501,7 +1501,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "createWebhook": {
         const { channelId, name, avatarUrl } = args;
-        const channel = botDiscord.channels.cache.get(channelId);
+        const channel = discord.client.channels.cache.get(channelId);
         if (!channel || !channel.isTextBased()) {
           return { error: "Channel not found or not a text channel" };
         }
@@ -1569,7 +1569,7 @@ export async function executeToolCall(toolName: string, args: any, requesterId?:
 
       case "getUserAvatar": {
         const { guildId, userId } = args;
-        const guild = botDiscord.guilds.cache.get(guildId);
+        const guild = discord.client.guilds.cache.get(guildId);
         if (!guild) return { error: "Guild not found" };
         
         try {

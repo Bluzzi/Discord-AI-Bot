@@ -1,6 +1,6 @@
 import { env } from "../utils/env";
 import { logger } from "../utils/logger";
-import { botDiscord } from "../utils/discord";
+import { discord } from "#/discord";
 
 const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
 
@@ -23,7 +23,7 @@ interface SteamAchievement {
 
 async function getSteamIdFromDiscordUser(guildId: string, username: string): Promise<string | null> {
   try {
-    const guild = botDiscord.guilds.cache.get(guildId);
+    const guild = discord.client.guilds.cache.get(guildId);
     if (!guild) return null;
 
     const members = await guild.members.fetch({ query: username, limit: 10 });

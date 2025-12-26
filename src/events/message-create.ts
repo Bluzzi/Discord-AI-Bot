@@ -1,5 +1,5 @@
+import { discord } from "#/discord";
 import { replyToMessage } from "#/features/reply-to-message";
-import { botDiscord } from "#/utils/discord";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import OpenAI from "openai";
@@ -9,9 +9,9 @@ const mistral = new OpenAI({
   baseURL: env.MISTRAL_BASE_URL,
 });
 
-botDiscord.on("messageCreate", async (message) => {
+discord.client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  if (!botDiscord.user) return;
+  if (!discord.client.user) return;
   if (!message.channel.isTextBased()) return;
 
   if (!message.guildId) {
@@ -20,7 +20,7 @@ botDiscord.on("messageCreate", async (message) => {
     return;
   }
 
-  if (message.mentions.has(botDiscord.user.id)) {
+  if (message.mentions.has(discord.client.user.id)) {
     logger.info(`Reply to ${message.author.displayName} based on mention (100%)`);
     await replyToMessage(message);
     return;
@@ -29,16 +29,15 @@ botDiscord.on("messageCreate", async (message) => {
   try {
     const lastMessages = await message.channel.messages.fetch({ limit: 10 });
     const messagesArray = Array.from(lastMessages.values()).reverse();
-    
-    const botMember = await message.guild?.members.fetch(botDiscord.user.id);
+
+    const botMember = await message.guild?.members.fetch(discord.client.user.id);
     const botNames = [
-      botDiscord.user.username,
+      discord.client.user.username,
       botMember?.displayName,
       botMember?.nickname,
     ].filter(Boolean).join(", ");
 
-    const conversationContext = messagesArray.map((msg) => 
-      `${msg.author.username}: ${msg.content}`
+    const conversationContext = messagesArray.map((msg) => `${msg.author.username}: ${msg.content}`,
     ).join("\n");
 
     const decision = await mistral.chat.completions.create({
@@ -96,12 +95,12 @@ botDiscord.on("messageCreate", async (message) => {
 🎯 PRINCIPE DIRECTEUR:
 Le bot doit être un participant actif quand sollicité, mais JAMAIS un intrus. En cas de doute, ne pas répondre.
 
-Réponds UNIQUEMENT par "OUI" ou "NON".`
+Réponds UNIQUEMENT par "OUI" ou "NON".`,
         },
         {
           role: "user",
-          content: `Conversation récente:\n${conversationContext}\n\nDernier message de ${message.author.username}: "${message.content}"\n\nLe bot doit-il répondre ?`
-        }
+          content: `Conversation récente:\n${conversationContext}\n\nDernier message de ${message.author.username}: "${message.content}"\n\nLe bot doit-il répondre ?`,
+        },
       ],
       temperature: 0.15,
       max_tokens: 10,
@@ -112,10 +111,12 @@ Réponds UNIQUEMENT par "OUI" ou "NON".`
     if (shouldReply) {
       logger.info(`Reply to ${message.author.displayName} based on AI decision`);
       await replyToMessage(message);
-    } else {
+    }
+    else {
       logger.info(`Skipping message from ${message.author.displayName} - AI decided not to reply`);
     }
-  } catch (error) {
+  }
+  catch (error) {
     logger.error(`Error in AI decision: ${error instanceof Error ? error.message : String(error)}`);
   }
 });

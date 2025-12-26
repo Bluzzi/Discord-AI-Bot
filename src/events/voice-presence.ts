@@ -1,7 +1,7 @@
 import type { VoiceState } from "discord.js";
-import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice";
-import { botDiscord } from "../utils/discord";
 import { logger } from "../utils/logger";
+import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice";
+import { discord } from "#/discord";
 
 let aloneTimeout: NodeJS.Timeout | null = null;
 
@@ -13,7 +13,7 @@ function clearAloneTimeout() {
 }
 
 function getMostPopulatedVoiceChannel(guildId: string) {
-  const guild = botDiscord.guilds.cache.get(guildId);
+  const guild = discord.client.guilds.cache.get(guildId);
   if (!guild) return null;
 
   let maxMembers = 0;
@@ -21,7 +21,7 @@ function getMostPopulatedVoiceChannel(guildId: string) {
 
   for (const channel of guild.channels.cache.values()) {
     if (channel.isVoiceBased() && channel.members) {
-      const humanMembers = channel.members.filter(member => !member.user.bot);
+      const humanMembers = channel.members.filter((member) => !member.user.bot);
       if (humanMembers.size > maxMembers) {
         maxMembers = humanMembers.size;
         targetChannel = channel;
@@ -36,13 +36,13 @@ function checkIfBotShouldLeave(guildId: string) {
   const connection = getVoiceConnection(guildId);
   if (!connection) return;
 
-  const guild = botDiscord.guilds.cache.get(guildId);
+  const guild = discord.client.guilds.cache.get(guildId);
   if (!guild) return;
 
   const botVoiceState = guild.members.me?.voice;
   if (!botVoiceState?.channel) return;
 
-  const humanMembers = botVoiceState.channel.members.filter(member => !member.user.bot);
+  const humanMembers = botVoiceState.channel.members.filter((member) => !member.user.bot);
 
   if (humanMembers.size < 2) {
     clearAloneTimeout();
@@ -51,52 +51,52 @@ function checkIfBotShouldLeave(guildId: string) {
       connection.destroy();
       aloneTimeout = null;
     }, 5000);
-  } else {
+  }
+  else {
     clearAloneTimeout();
   }
 }
 
-export function setupVoicePresenceHandler() {
-  botDiscord.on("voiceStateUpdate", async (oldState: VoiceState, newState: VoiceState) => {
-    try {
-      if (newState.member?.user.bot) return;
+discord.client.on("voiceStateUpdate", async (oldState: VoiceState, newState: VoiceState) => {
+  try {
+    if (newState.member?.user.bot) return;
 
-      const guildId = newState.guild.id;
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) return;
+    const guildId = newState.guild.id;
+    const guild = discord.client.guilds.cache.get(guildId);
+    if (!guild) return;
 
-      const botMember = guild.members.me;
-      if (!botMember) return;
+    const botMember = guild.members.me;
+    if (!botMember) return;
 
-      const mostPopulatedChannel = getMostPopulatedVoiceChannel(guildId);
+    const mostPopulatedChannel = getMostPopulatedVoiceChannel(guildId);
 
-      if (mostPopulatedChannel) {
-        const currentBotChannel = botMember.voice.channel;
+    if (mostPopulatedChannel) {
+      const currentBotChannel = botMember.voice.channel;
 
-        if (!currentBotChannel || currentBotChannel.id !== mostPopulatedChannel.id) {
-          logger.info(`Joining most populated voice channel: ${mostPopulatedChannel.name}`);
-          
-          joinVoiceChannel({
-            channelId: mostPopulatedChannel.id,
-            guildId: guildId,
-            adapterCreator: guild.voiceAdapterCreator,
-          });
+      if (!currentBotChannel || currentBotChannel.id !== mostPopulatedChannel.id) {
+        logger.info(`Joining most populated voice channel: ${mostPopulatedChannel.name}`);
 
-          clearAloneTimeout();
-        }
-      } else {
-        const connection = getVoiceConnection(guildId);
-        if (connection) {
-          logger.info("Less than 2 users in voice channels, leaving...");
-          connection.destroy();
-          clearAloneTimeout();
-        }
+        joinVoiceChannel({
+          channelId: mostPopulatedChannel.id,
+          guildId: guildId,
+          adapterCreator: guild.voiceAdapterCreator,
+        });
+
+        clearAloneTimeout();
       }
-
-      checkIfBotShouldLeave(guildId);
-
-    } catch (error) {
-      logger.error("Error in voice presence handler:", error instanceof Error ? error.stack : String(error));
     }
-  });
-}
+    else {
+      const connection = getVoiceConnection(guildId);
+      if (connection) {
+        logger.info("Less than 2 users in voice channels, leaving...");
+        connection.destroy();
+        clearAloneTimeout();
+      }
+    }
+
+    checkIfBotShouldLeave(guildId);
+  }
+  catch (error) {
+    logger.error("Error in voice presence handler:", error instanceof Error ? error.stack : String(error));
+  }
+});
