@@ -4,15 +4,52 @@ import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { generateText } from "ai";
 import { createMistral } from "@ai-sdk/mistral";
+import { websearchTools } from "#/tools/websearch";
 
 const mistral = createMistral({
   apiKey: env.MISTRAL_API_KEY,
   baseURL: env.MISTRAL_BASE_URL,
 });
 
+const fetchLatestNews = async (): Promise<string> => {
+  try {
+    const queries = [
+      "actualité France politique aujourd'hui",
+      "actualité tech crypto aujourd'hui",
+      "actualité monde guerre conflit aujourd'hui"
+    ];
+
+    const newsResults = await Promise.all(
+      queries.map(async (query) => {
+        const tool = websearchTools.searchInternet;
+        if (!tool) throw new Error("Search tool not available");
+        return await tool.execute({ query, maxResults: 3 });
+      })
+    );
+
+    const allNews = newsResults.flatMap((result) => result.results);
+    
+    if (allNews.length === 0) {
+      return "Aucune actualité récupérée.";
+    }
+
+    const newsText = allNews
+      .slice(0, 10)
+      .map((news) => `- ${news.title}: ${news.snippet}`)
+      .join("\n");
+
+    return `Actualités du jour:\n${newsText}`;
+  }
+  catch (error) {
+    logger.warn(`MOTD: Failed to fetch news - ${error instanceof Error ? error.message : String(error)}`);
+    return "Actualités non disponibles.";
+  }
+};
+
 const generateMotdStatus = async (): Promise<{ text: string; emoji: string }> => {
   try {
     const currentDate = day().format("dddd D MMMM YYYY");
+    const news = await fetchLatestNews();
 
     const prompt = `Tu es Jean Pascal, un bot Discord drôle et décontracté.
 
@@ -34,6 +71,8 @@ Génère un status Discord court et drôle en prenant en compte:
 
 2. SINON ACTUALITÉ: Si aucune fête proche, génère un status en rapport avec l'actualité du moment en dédramatisant avec humour.
     - PRIORTIE DES ACTUALITE : France ( Politique, Elections, etc ), Tech ( Grosse chute d'un actif d'une societe), Crypto ( Grosse hausse / chute d'une crypto), Actu Monde / guerre / conflit internationaux
+
+${news}
 
 Exemples de style:
 - Fête (jour J): "Je fête Noël avec la mif", "Bonne année à tous", "Vive la France"
