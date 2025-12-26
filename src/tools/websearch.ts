@@ -1,20 +1,6 @@
-export const websearchToolDefinitions = [
-  {
-    type: "function" as const,
-    function: {
-      name: "searchInternet",
-      description: "Search the internet for information using DuckDuckGo",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query" },
-          maxResults: { type: "number", description: "Maximum number of results to return (default: 5)" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-];
+import type { ToolSet } from "ai";
+import { tool } from "ai";
+import { z } from "zod";
 
 async function searchWithDuckDuckGoInstant(query: string, maxResults: number): Promise<any[]> {
   const searchUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
@@ -101,28 +87,25 @@ async function searchWithHTML(query: string, maxResults: number): Promise<any[]>
   return results;
 }
 
-export async function executeWebsearchToolCall(toolName: string, args: any): Promise<any> {
-  switch (toolName) {
-    case "searchInternet": {
-      const { query, maxResults = 5 } = args;
-      try {
-        let results = await searchWithDuckDuckGoInstant(query, maxResults);
-        
-        if (results.length === 0) {
-          results = await searchWithHTML(query, maxResults);
-        }
-
-        if (results.length === 0) {
-          return { error: `No results found for: ${query}` };
-        }
-
-        return results.slice(0, maxResults);
-      } catch (error) {
-        return { error: `Error searching: ${error instanceof Error ? error.message : String(error)}` };
+export const websearchTools: ToolSet = {
+  searchInternet: tool({
+    description: "Search the internet for information using DuckDuckGo",
+    inputSchema: z.object({
+      query: z.string(),
+      maxResults: z.number().optional(),
+    }),
+    execute: async ({ query, maxResults = 5 }) => {
+      let results = await searchWithDuckDuckGoInstant(query, maxResults);
+      
+      if (results.length === 0) {
+        results = await searchWithHTML(query, maxResults);
       }
-    }
 
-    default:
-      return { error: `Unknown websearch tool: ${toolName}` };
-  }
-}
+      if (results.length === 0) {
+        throw new Error(`No results found for: ${query}`);
+      }
+
+      return results.slice(0, maxResults);
+    },
+  }),
+};

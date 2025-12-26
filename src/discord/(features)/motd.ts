@@ -2,9 +2,10 @@ import { discordClient } from "../client";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import OpenAI from "openai";
+import { generateText } from "ai";
+import { createMistral } from "@ai-sdk/mistral";
 
-const mistral = new OpenAI({
+const mistral = createMistral({
   apiKey: env.MISTRAL_API_KEY,
   baseURL: env.MISTRAL_BASE_URL,
 });
@@ -53,23 +54,14 @@ Réponds au format JSON:
 
 Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
 
-    const completion = await mistral.chat.completions.create({
-      model: "mistral-small-latest",
-      messages: [
-        {
-          role: "system",
-          content: "Tu es un générateur de status Discord drôles et courts. Tu détectes automatiquement les fêtes françaises et adaptes le status en conséquence. Réponds uniquement avec un JSON contenant text et emoji.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+    const completion = await generateText({
+      model: mistral("mistral-small-latest"),
+      system: "Tu es un générateur de status Discord drôles et courts. Tu détectes automatiquement les fêtes françaises et adaptes le status en conséquence. Réponds uniquement avec un JSON contenant text et emoji.",
+      prompt: prompt,
       temperature: 0.9,
-      max_tokens: 100,
     });
 
-    const response = completion.choices[0]?.message?.content?.trim() || "{\"text\":\"Je chill tranquille\",\"emoji\":\"😎\"}";
+    const response = completion.text?.trim() || "{\"text\":\"Je chill tranquille\",\"emoji\":\"😎\"}";
 
     try {
       let jsonStr = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();

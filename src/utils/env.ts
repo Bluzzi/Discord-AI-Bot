@@ -8,6 +8,7 @@ const schema = z.object({
 
   MISTRAL_API_KEY: z.string(),
   MISTRAL_BASE_URL: z.string().default("https://api.mistral.ai/v1"),
+  MISTRAL_MODEL: z.string().default("mistral-large-latest"),
 
   IGDB_CLIENT_ID: z.string().optional(),
   IGDB_CLIENT_SECRET: z.string().optional(),

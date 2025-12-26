@@ -1,5 +1,5 @@
 import type { Interaction } from "discord.js";
-import { executeToolCall } from "../tools/discord";
+import { discordTools } from "../tools/discord";
 import { logger } from "../utils/logger";
 import { discord } from "#/discord";
 
@@ -67,15 +67,26 @@ discord.client.on("interactionCreate", async (interaction: Interaction) => {
       let hasError = false;
 
       for (const action of confirmation.actions) {
-        const result = await executeToolCall(
-          action.toolName,
-          { ...action.args, guildId: confirmation.args.guildId },
-          confirmation.requesterId,
-        );
-
-        if (result?.error) {
+        try {
+          const tool = (discordTools as any)[action.toolName];
+          if (!tool) {
+            hasError = true;
+            results.push(`${action.toolName}: Tool not found`);
+            continue;
+          }
+          
+          const result = await tool.execute({ 
+            ...action.args, 
+            guildId: confirmation.args.guildId 
+          });
+          
+          if (result?.error) {
+            hasError = true;
+            results.push(`${action.toolName}: ${String(result.error)}`);
+          }
+        } catch (error) {
           hasError = true;
-          results.push(`${action.toolName}: ${String(result.error)}`);
+          results.push(`${action.toolName}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
 

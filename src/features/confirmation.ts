@@ -2,9 +2,10 @@ import { createConfirmationId, addPendingConfirmation } from "../events/interact
 import { env } from "../utils/env";
 import { discord } from "#/discord";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Message } from "discord.js";
-import OpenAI from "openai";
+import { generateText } from "ai";
+import { createMistral } from "@ai-sdk/mistral";
 
-const mistral = new OpenAI({
+const mistral = createMistral({
   apiKey: env.MISTRAL_API_KEY,
   baseURL: env.MISTRAL_BASE_URL,
 });
@@ -37,17 +38,12 @@ export const sendConfirmationRequest = async (
     return `${toolName}(${details})`;
   }).join("\n");
 
-  const aiSummary = await mistral.chat.completions.create({
-    model: "mistral-small-latest",
-    messages: [
-      {
-        role: "user",
-        content: `Résume ces actions Discord en une phrase claire et concise en français (max 100 caractères):\n${actionsDescription}`,
-      },
-    ],
+  const aiSummary = await generateText({
+    model: mistral("mistral-small-latest"),
+    prompt: `Résume ces actions Discord en une phrase claire et concise en français (max 100 caractères):\n${actionsDescription}`,
   });
 
-  const summary = aiSummary.choices?.[0]?.message?.content || "Actions destructives";
+  const summary = aiSummary.text || "Actions destructives";
 
   const actionsList = actions.map(({ toolName, args }) => {
     let detail = "";

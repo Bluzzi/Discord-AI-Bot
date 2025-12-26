@@ -1,3 +1,6 @@
+import type { ToolSet } from "ai";
+import { tool } from "ai";
+import { z } from "zod";
 import { env } from "../utils/env";
 import { logger } from "../utils/logger";
 
@@ -58,116 +61,27 @@ async function igdbRequest(endpoint: string, body: string): Promise<any> {
   return await response.json();
 }
 
-export const igdbToolDefinitions = [
-  {
-    type: "function" as const,
-    function: {
-      name: "searchGame",
-      description: "Search for a game on IGDB by name",
-      parameters: {
-        type: "object",
-        properties: {
-          gameName: {
-            type: "string",
-            description: "The name of the game to search for",
-          },
-          limit: {
-            type: "number",
-            description: "Maximum number of results to return (default: 5)",
-          },
-        },
-        required: ["gameName"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "getGameDetails",
-      description: "Get detailed information about a specific game by its IGDB ID",
-      parameters: {
-        type: "object",
-        properties: {
-          gameId: {
-            type: "number",
-            description: "The IGDB ID of the game",
-          },
-        },
-        required: ["gameId"],
-      },
-    },
-  },
-];
+export const igdbTools: ToolSet = {
+  searchGame: tool({
+    description: "Search for a game on IGDB by name",
+    inputSchema: z.object({
+      gameName: z.string(),
+      limit: z.number().optional(),
+    }),
+    execute: async ({ gameName, limit = 5 }) => {
+      const query = `
+        search "${gameName}";
+        fields name, first_release_date, summary, rating, rating_count, cover.url, platforms.name, genres.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher;
+        limit ${limit};
+      `;
 
-export async function executeIgdbToolCall(toolName: string, args: any): Promise<any> {
-  try {
-    switch (toolName) {
-      case "searchGame": {
-        const { gameName, limit = 5 } = args;
-        
-        const query = `
-          search "${gameName}";
-          fields name, first_release_date, summary, rating, rating_count, cover.url, platforms.name, genres.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher;
-          limit ${limit};
-        `;
+      const results = await igdbRequest('games', query);
 
-        const results = await igdbRequest('games', query);
-
-        if (!results || results.length === 0) {
-          return { error: "No games found with that name" };
-        }
-
-        return results.map((game: any) => {
-          const releaseDate = game.first_release_date 
-            ? new Date(game.first_release_date * 1000).toLocaleDateString('fr-FR', { 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })
-            : "Date inconnue";
-
-          const developers = game.involved_companies
-            ?.filter((ic: any) => ic.developer)
-            .map((ic: any) => ic.company.name)
-            .join(", ") || "Inconnu";
-
-          const publishers = game.involved_companies
-            ?.filter((ic: any) => ic.publisher)
-            .map((ic: any) => ic.company.name)
-            .join(", ") || "Inconnu";
-
-          return {
-            id: game.id,
-            name: game.name,
-            releaseDate: releaseDate,
-            summary: game.summary || "Pas de description disponible",
-            rating: game.rating ? Math.round(game.rating) : null,
-            ratingCount: game.rating_count || 0,
-            coverUrl: game.cover?.url ? `https:${game.cover.url.replace('t_thumb', 't_cover_big')}` : null,
-            platforms: game.platforms?.map((p: any) => p.name).join(", ") || "Inconnu",
-            genres: game.genres?.map((g: any) => g.name).join(", ") || "Inconnu",
-            developers: developers,
-            publishers: publishers,
-          };
-        });
+      if (!results || results.length === 0) {
+        throw new Error("No games found with that name");
       }
 
-      case "getGameDetails": {
-        const { gameId } = args;
-
-        const query = `
-          fields name, first_release_date, summary, storyline, rating, rating_count, aggregated_rating, aggregated_rating_count, cover.url, screenshots.url, platforms.name, genres.name, themes.name, game_modes.name, player_perspectives.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, websites.url, websites.category, videos.video_id;
-          where id = ${gameId};
-        `;
-
-        const results = await igdbRequest('games', query);
-
-        if (!results || results.length === 0) {
-          return { error: "Game not found" };
-        }
-
-        const game = results[0];
-
+      return results.map((game: any) => {
         const releaseDate = game.first_release_date 
           ? new Date(game.first_release_date * 1000).toLocaleDateString('fr-FR', { 
               year: 'numeric', 
@@ -186,40 +100,87 @@ export async function executeIgdbToolCall(toolName: string, args: any): Promise<
           .map((ic: any) => ic.company.name)
           .join(", ") || "Inconnu";
 
-        const officialWebsite = game.websites?.find((w: any) => w.category === 1);
-        const youtubeVideo = game.videos?.[0]?.video_id 
-          ? `https://www.youtube.com/watch?v=${game.videos[0].video_id}`
-          : null;
-
         return {
           id: game.id,
           name: game.name,
           releaseDate: releaseDate,
           summary: game.summary || "Pas de description disponible",
-          storyline: game.storyline || null,
           rating: game.rating ? Math.round(game.rating) : null,
           ratingCount: game.rating_count || 0,
-          aggregatedRating: game.aggregated_rating ? Math.round(game.aggregated_rating) : null,
-          aggregatedRatingCount: game.aggregated_rating_count || 0,
           coverUrl: game.cover?.url ? `https:${game.cover.url.replace('t_thumb', 't_cover_big')}` : null,
-          screenshots: game.screenshots?.map((s: any) => `https:${s.url.replace('t_thumb', 't_screenshot_big')}`).slice(0, 3) || [],
           platforms: game.platforms?.map((p: any) => p.name).join(", ") || "Inconnu",
           genres: game.genres?.map((g: any) => g.name).join(", ") || "Inconnu",
-          themes: game.themes?.map((t: any) => t.name).join(", ") || null,
-          gameModes: game.game_modes?.map((gm: any) => gm.name).join(", ") || null,
-          perspectives: game.player_perspectives?.map((pp: any) => pp.name).join(", ") || null,
           developers: developers,
           publishers: publishers,
-          officialWebsite: officialWebsite?.url || null,
-          youtubeVideo: youtubeVideo,
         };
+      });
+    },
+  }),
+
+  getGameDetails: tool({
+    description: "Get detailed information about a specific game by its IGDB ID",
+    inputSchema: z.object({
+      gameId: z.number(),
+    }),
+    execute: async ({ gameId }) => {
+      const query = `
+        fields name, first_release_date, summary, storyline, rating, rating_count, aggregated_rating, aggregated_rating_count, cover.url, screenshots.url, platforms.name, genres.name, themes.name, game_modes.name, player_perspectives.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, websites.url, websites.category, videos.video_id;
+        where id = ${gameId};
+      `;
+
+      const results = await igdbRequest('games', query);
+
+      if (!results || results.length === 0) {
+        throw new Error("Game not found");
       }
 
-      default:
-        return { error: `Unknown IGDB tool: ${toolName}` };
-    }
-  } catch (error) {
-    logger.error(`IGDB tool error (${toolName}):`, error instanceof Error ? error.message : String(error));
-    return { error: `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
+      const game = results[0];
+
+      const releaseDate = game.first_release_date 
+        ? new Date(game.first_release_date * 1000).toLocaleDateString('fr-FR', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          })
+        : "Date inconnue";
+
+      const developers = game.involved_companies
+        ?.filter((ic: any) => ic.developer)
+        .map((ic: any) => ic.company.name)
+        .join(", ") || "Inconnu";
+
+      const publishers = game.involved_companies
+        ?.filter((ic: any) => ic.publisher)
+        .map((ic: any) => ic.company.name)
+        .join(", ") || "Inconnu";
+
+      const officialWebsite = game.websites?.find((w: any) => w.category === 1);
+      const youtubeVideo = game.videos?.[0]?.video_id 
+        ? `https://www.youtube.com/watch?v=${game.videos[0].video_id}`
+        : null;
+
+      return {
+        id: game.id,
+        name: game.name,
+        releaseDate: releaseDate,
+        summary: game.summary || "Pas de description disponible",
+        storyline: game.storyline || null,
+        rating: game.rating ? Math.round(game.rating) : null,
+        ratingCount: game.rating_count || 0,
+        aggregatedRating: game.aggregated_rating ? Math.round(game.aggregated_rating) : null,
+        aggregatedRatingCount: game.aggregated_rating_count || 0,
+        coverUrl: game.cover?.url ? `https:${game.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+        screenshots: game.screenshots?.map((s: any) => `https:${s.url.replace('t_thumb', 't_screenshot_big')}`).slice(0, 3) || [],
+        platforms: game.platforms?.map((p: any) => p.name).join(", ") || "Inconnu",
+        genres: game.genres?.map((g: any) => g.name).join(", ") || "Inconnu",
+        themes: game.themes?.map((t: any) => t.name).join(", ") || null,
+        gameModes: game.game_modes?.map((gm: any) => gm.name).join(", ") || null,
+        perspectives: game.player_perspectives?.map((pp: any) => pp.name).join(", ") || null,
+        developers: developers,
+        publishers: publishers,
+        officialWebsite: officialWebsite?.url || null,
+        youtubeVideo: youtubeVideo,
+      };
+    },
+  }),
+};

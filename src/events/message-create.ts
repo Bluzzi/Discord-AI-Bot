@@ -2,9 +2,10 @@ import { discord } from "#/discord";
 import { replyToMessage } from "#/features/reply-to-message";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import OpenAI from "openai";
+import { generateText } from "ai";
+import { createMistral } from "@ai-sdk/mistral";
 
-const mistral = new OpenAI({
+const mistral = createMistral({
   apiKey: env.MISTRAL_API_KEY,
   baseURL: env.MISTRAL_BASE_URL,
 });
@@ -40,12 +41,9 @@ discord.client.on("messageCreate", async (message) => {
     const conversationContext = messagesArray.map((msg) => `${msg.author.username}: ${msg.content}`,
     ).join("\n");
 
-    const decision = await mistral.chat.completions.create({
-      model: "mistral-small-latest",
-      messages: [
-        {
-          role: "system",
-          content: `Tu es un assistant qui détermine si le bot Discord nommé "${botNames}" (aussi appelé "jp" ou "jean pascal") doit répondre à un message.
+    const decision = await generateText({
+      model: mistral("mistral-small-latest"),
+      system: `Tu es un assistant qui détermine si le bot Discord nommé "${botNames}" (aussi appelé "jp" ou "jean pascal") doit répondre à un message.
 
 📋 ANALYSE REQUISE:
 1. Identifier qui parle dans les derniers messages
@@ -96,17 +94,11 @@ discord.client.on("messageCreate", async (message) => {
 Le bot doit être un participant actif quand sollicité, mais JAMAIS un intrus. En cas de doute, ne pas répondre.
 
 Réponds UNIQUEMENT par "OUI" ou "NON".`,
-        },
-        {
-          role: "user",
-          content: `Conversation récente:\n${conversationContext}\n\nDernier message de ${message.author.username}: "${message.content}"\n\nLe bot doit-il répondre ?`,
-        },
-      ],
+      prompt: `Conversation récente:\n${conversationContext}\n\nDernier message de ${message.author.username}: "${message.content}"\n\nLe bot doit-il répondre ?`,
       temperature: 0.15,
-      max_tokens: 10,
     });
 
-    const shouldReply = decision.choices[0]?.message?.content?.trim().toUpperCase() === "OUI";
+    const shouldReply = decision.text?.trim().toUpperCase() === "OUI";
 
     if (shouldReply) {
       logger.info(`Reply to ${message.author.displayName} based on AI decision`);
