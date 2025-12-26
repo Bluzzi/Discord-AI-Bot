@@ -971,10 +971,10 @@ export const discordTools: ToolSet = {
   }),
 
   joinVoiceChannel: tool({
-    description: "Join a voice channel",
+    description: "Join a voice channel. IMPORTANT: To join the user's voice channel, first use getMembers to find the user, then use their voiceChannelId from the response.",
     inputSchema: z.object({
-      channelId: z.string(),
-      guildId: z.string(),
+      channelId: z.string().describe("The voice channel ID to join. Get this from getMembers response (voiceChannelId field)."),
+      guildId: z.string().describe("The guild/server ID"),
     }),
     execute: async ({ channelId, guildId }) => {
       try {

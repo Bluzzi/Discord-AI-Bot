@@ -10,13 +10,8 @@ import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { day } from "#/utils/day";
-import { streamText } from "ai";
-import { createMistral } from "@ai-sdk/mistral";
-
-const mistral = createMistral({
-  apiKey: env.MISTRAL_API_KEY,
-  baseURL: env.MISTRAL_BASE_URL,
-});
+import { streamText, stepCountIs } from "ai";
+import { aiModels } from "#/utils/ai-model";
 
 export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
   let typingInterval: NodeJS.Timeout | undefined;
@@ -275,8 +270,6 @@ GESTION DES ERREURS:
 - Rate limit: "trop de requêtes, attends un peu"
 - Autre erreur: explique en 1 phrase max`;
 
-    logger.info(`Sending to Mistral (${env.MISTRAL_MODEL})...`);
-    
     const allTools = {
       ...discordTools,
       ...igdbTools,
@@ -284,43 +277,28 @@ GESTION DES ERREURS:
       ...websearchTools,
     };
 
-    logger.info(`Tools available: ${Object.keys(allTools).join(", ")}`);
-    
-    const streamResult = streamText({
-      model: mistral(env.MISTRAL_MODEL),
+    const result = streamText({
+      model: aiModels.mistralLarge,
       system: systemPrompt,
       prompt: message.content,
       tools: allTools,
       temperature: 0.1,
+      stopWhen: stepCountIs(10),
+      onStepFinish: ({ text, toolCalls, toolResults }) => {
+        if (toolCalls && toolCalls.length > 0) {
+          toolCalls.forEach(call => {
+            logger.info(`Tool executed: ${call.toolName}`);
+          });
+        }
+      },
     });
 
-    let finalContent = "";
-    let searchResults: any[] | null = null;
+    const searchResults: any[] = [];
     
-    for await (const chunk of streamResult.fullStream) {
-      logger.info(`Chunk type: ${chunk.type}`);
-      
-      if (chunk.type === 'text-delta') {
-        finalContent += chunk.text;
-      } else if (chunk.type === 'tool-call') {
-        logger.info(`Tool call chunk: ${JSON.stringify(chunk)}`);
-        const args = (chunk as any).args || (chunk as any).input;
-        logger.info(`Tool call: ${chunk.toolName} with args: ${JSON.stringify(args)}`);
-      } else if (chunk.type === 'tool-result') {
-        const result = (chunk as any).result || (chunk as any).output;
-        logger.info(`Tool result for ${chunk.toolName}: ${JSON.stringify(result).substring(0, 200)}`);
-        if (chunk.toolName === 'searchInternet' && Array.isArray(result)) {
-          searchResults = result;
-        }
-      } else if (chunk.type === 'tool-error') {
-        logger.error(`Tool error chunk: ${JSON.stringify(chunk)}`);
-      } else if (chunk.type === 'finish') {
-        logger.info(`Finish chunk: ${JSON.stringify(chunk)}`);
-      }
-    }
+    const finalResult = await result;
+    const finalContent = await finalResult.text;
 
     clearInterval(typingInterval);
-    logger.info(`Generation completed`);
     
     if (!finalContent || finalContent.trim() === "") {
       logger.info(`Action completed (no response needed)`);
