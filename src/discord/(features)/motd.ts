@@ -1,7 +1,7 @@
-import { botDiscord } from "../utils/discord";
-import { env } from "../utils/env";
-import { logger } from "../utils/logger";
-import { day } from "../utils/day";
+import { discordClient } from "../client";
+import { day } from "#/utils/day";
+import { env } from "#/utils/env";
+import { logger } from "#/utils/logger";
 import OpenAI from "openai";
 
 const mistral = new OpenAI({
@@ -9,7 +9,7 @@ const mistral = new OpenAI({
   baseURL: env.MISTRAL_BASE_URL,
 });
 
-async function generateMotdStatus(): Promise<{ text: string; emoji: string }> {
+const generateMotdStatus = async (): Promise<{ text: string; emoji: string }> => {
   try {
     const currentDate = day().format("dddd D MMMM YYYY");
 
@@ -58,66 +58,68 @@ Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
       messages: [
         {
           role: "system",
-          content: "Tu es un générateur de status Discord drôles et courts. Tu détectes automatiquement les fêtes françaises et adaptes le status en conséquence. Réponds uniquement avec un JSON contenant text et emoji."
+          content: "Tu es un générateur de status Discord drôles et courts. Tu détectes automatiquement les fêtes françaises et adaptes le status en conséquence. Réponds uniquement avec un JSON contenant text et emoji.",
         },
         {
           role: "user",
-          content: prompt
-        }
+          content: prompt,
+        },
       ],
       temperature: 0.9,
       max_tokens: 100,
     });
 
-    const response = completion.choices[0]?.message?.content?.trim() || '{"text":"Je chill tranquille","emoji":"😎"}';
-    
+    const response = completion.choices[0]?.message?.content?.trim() || "{\"text\":\"Je chill tranquille\",\"emoji\":\"😎\"}";
+
     try {
-      let jsonStr = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-      
-      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      let jsonStr = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+      const jsonMatch = (/\{[\s\S]*\}/).exec(jsonStr);
       if (jsonMatch) {
         jsonStr = jsonMatch[0];
       }
-      
+
       const parsed = JSON.parse(jsonStr);
       logger.info(`MOTD: Generated status - ${parsed.emoji} ${parsed.text}`);
       return { text: parsed.text, emoji: parsed.emoji };
-    } catch (error) {
+    }
+    catch (error) {
       logger.warn(`MOTD: Failed to parse JSON response - ${error instanceof Error ? error.message : String(error)}`);
       logger.warn(`MOTD: Raw response was: ${response}`);
       return { text: "Je chill tranquille", emoji: "😎" };
     }
-
-  } catch (error) {
+  }
+  catch (error) {
     logger.error("Error generating MOTD status:", error instanceof Error ? error.stack : String(error));
     return { text: "Je chill tranquille", emoji: "😎" };
   }
-}
+};
 
-async function updateBotStatus() {
+const updateBotStatus = async () => {
   try {
     const { text, emoji } = await generateMotdStatus();
-    
-    await botDiscord.user?.setPresence({
+
+    await discordClient.user?.setPresence({
       activities: [{
         type: 4,
         state: `${emoji} ${text}`,
-        name: "custom"
+        name: "custom",
       }],
-      status: "online"
+      status: "online",
     });
 
     logger.info(`MOTD: Bot status updated to "${emoji} ${text}"`);
-  } catch (error) {
+  }
+  catch (error) {
     logger.error("Error updating bot status:", error instanceof Error ? error.stack : String(error));
   }
-}
+};
 
-function scheduleMotdUpdate() {
+const scheduleMotdUpdate = () => {
   let next3AM = day().hour(3).minute(0).second(0).millisecond(0);
-  
+
   if (next3AM.isBefore(day())) {
-    next3AM = next3AM.add(1, 'day');
+    next3AM = next3AM.add(1, "day");
   }
 
   const msUntil3AM = next3AM.diff(day());
@@ -129,13 +131,15 @@ function scheduleMotdUpdate() {
       await updateBotStatus();
     }, 24 * 60 * 60 * 1000);
   }, msUntil3AM);
-}
+};
 
-export async function setupMotd() {
+export const setup = async () => {
   logger.info("MOTD: Initializing...");
-  
+
   await updateBotStatus();
   scheduleMotdUpdate();
-  
+
   logger.info("MOTD: Setup complete");
-}
+};
+
+export const discordMOTD = { setup };
