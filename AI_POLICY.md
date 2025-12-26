@@ -1,27 +1,37 @@
 # AI Editing Policy
 
-Ce fichier doit impérativement être lu par les IA avant toutes modification et création de code dans le projet. Il contient des restrictions et guidelines qui devront être respecté.
+This file MUST be read by any AI before performing any code creation or modification in this project.  
+It defines mandatory restrictions and guidelines that MUST be strictly respected.
 
-## La stack du projet
+## Project Stack
 
-NodeJS v24.11.0 (LTS) est utilisé comme runtime, les API spécifiques à NodeJS peuvent donc être utilisé. 
+- **Node.js v24.11.0 (LTS)** is used as the runtime.
+  Node.js-specific APIs are therefore allowed and expected.
 
-PNPM est utilisé comme package manager, les autres packages managers ne doivent pas être utilisé. 
+- **PNPM** is the only package manager used in this project.  
+  Other package managers MUST NOT be used.
 
-TypeScript et ESLint sont utilisés pour assurer la qualité du code, après chaque modification du code, il faut donc exécuté les commandes suivantes et corriger les erreurs affichés dans le terminal s'il y en a :
+- **TypeScript** and **ESLint** are used to enforce code quality.  
+  After any code modification, the following commands MUST be executed and all reported errors MUST be fixed:
+  - `pnpm run ts:check` — checks for TypeScript errors.
+  - `pnpm run lint:fix` — automatically fixes ESLint errors when possible and reports remaining ones.
 
-- `pnpm run ts:check` - permet de voir les erreurs de TypeScript.
-- `pnpm run lint:fix`- corrige les erreurs ESLint qui peuvent être corrigé, affiche les erreurs qui ne peuvent pas l'être.
+## Global Guidelines
 
-## Guidelines globales
+- **No `try` / `catch` blocks are allowed in high-level functions.**  
+  Error handling is intentionally centralized in a small number of low-level functions written by human developers.  
+  In high-level functions, errors MUST be propagated using:
+  ```ts
+  throw new Error("Details");
+  ```
 
-- Aucun `try`/`catch` ne doit être utilisé au niveau des functions haut-niveau, seuls quelques `try`/`catch` mis en place par des développeurs humains sur des functions bas-niveau permettant une gestion d'erreur global sont utilisés. Il est donc impératif de simplement `throw new Error("Details")` dans les functions haut-niveau.
+- **Naming conventions**
+  - Folder and file names MUST use `kebab-case`
+  - Variable names MUST use `camelCase`
 
-- Les noms des dossiers et fichiers sont écrites en `kebab-case`. Les noms des variables sont écrits en `camelCase`.
+## Protected Areas (Read-Only)
 
-## Zones protégées
-
-Les fichiers suivants sont STRICTEMENT en lecture seule :
+The following files and directories are **STRICTLY read-only** and MUST NOT be modified:
 
 - `.github/**`
 - `.gitignore`
@@ -31,25 +41,32 @@ Les fichiers suivants sont STRICTEMENT en lecture seule :
 - `pnpm-lock.yaml`
 - `tsconfig.json`
 
-## Règles d’action par zone
+## Action Rules by Area
 
 ### `src/discord/**`
 
-Probablement pas de modification autorisé pour les IA ici, ou alors, il faudra documenter les règles d'actions pour cette zone.
+No modifications are currently allowed for AI in this area.  
+If modifications become allowed in the future, explicit action rules MUST be documented here.
 
 ### `src/events/**`
 
-Probablement pas de modification autorisé pour les IA ici, ou alors, il faudra documenter les règles d'actions pour cette zone.
+No modifications are currently allowed for AI in this area.  
+If modifications become allowed in the future, explicit action rules MUST be documented here.
 
 ### `src/features/**`
 
-Probablement pas de modification autorisé pour les IA ici, ou alors, il faudra documenter les règles d'actions pour cette zone.
+No modifications are currently allowed for AI in this area.  
+If modifications become allowed in the future, explicit action rules MUST be documented here.
 
 ### `src/tools/**`
 
-Contient des outils pour différents services/systèmes qui seront utilisé par des IA, chaque fichier contient un objet qui export la liste complète des outils pour le service concerné, aucun autre code ou function ne doit être présent en dehors de l'objet.
+This directory contains tools for various services/systems intended to be used by AIs.
 
-Voici à quoi doit ressembler l'objet :
+Each file MUST:
+- Export a single object containing the complete list of tools for the related service
+- Contain **no additional code or functions outside of this object**
+
+Expected structure:
 
 ```ts
 export const discordTools: ToolSet = {
@@ -76,18 +93,29 @@ export const discordTools: ToolSet = {
       await member.setNickname(nickname);
 
       return {
-        oldNickname: oldNickname,
+        oldNickname,
         newNickname: nickname,
         memberId: member.id,
       };
     },
   }),
-  // ... others tools for this service
-}
+  // ... other tools for this service
+};
 ```
 
-Dans le cas ou `outputSchema` n'a aucune information pertinente à renvoyer, il doit être un objet vide `z.object({})`, par soucis d'harmonie dans les valeurs de retours.
+If `outputSchema` has no meaningful data to return, it MUST be defined as an empty object:
+
+```ts
+z.object({})
+```
+
+This rule exists to keep return values consistent across all tools.
 
 ### `src/utils/**`
 
-Contient les utilitaires généraux et non liés aux autres dossiers principaux. Chaque utilitaire doit rester simple et générique.
+This directory contains general-purpose utilities that are not tied to other main directories.
+
+Rules:
+- Utilities MUST remain simple
+- Utilities MUST be generic
+- No domain-specific or feature-specific logic is allowed here
