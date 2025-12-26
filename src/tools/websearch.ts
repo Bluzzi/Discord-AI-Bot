@@ -2,12 +2,12 @@ import type { ToolSet } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 
-async function searchWithDuckDuckGoInstant(query: string, maxResults: number): Promise<any[]> {
+async function searchWithDuckDuckGoInstant(query: string, maxResults: number): Promise<Array<{title: string; url: string; snippet: string}>> {
   const searchUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
   const response = await fetch(searchUrl);
   const data: any = await response.json();
 
-  const results = [];
+  const results: Array<{title: string; url: string; snippet: string}> = [];
 
   if (data.AbstractText && data.AbstractURL) {
     results.push({
@@ -45,7 +45,7 @@ async function searchWithDuckDuckGoInstant(query: string, maxResults: number): P
   return results;
 }
 
-async function searchWithHTML(query: string, maxResults: number): Promise<any[]> {
+async function searchWithHTML(query: string, maxResults: number): Promise<Array<{title: string; url: string; snippet: string}>> {
   const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await fetch(searchUrl, {
     headers: {
@@ -91,8 +91,17 @@ export const websearchTools: ToolSet = {
   searchInternet: tool({
     description: "Search the internet for information using DuckDuckGo",
     inputSchema: z.object({
-      query: z.string(),
-      maxResults: z.number().optional(),
+      query: z.string().describe("The search query to look up on the internet"),
+      maxResults: z.number().optional().describe("Optional maximum number of results to return (default: 5)"),
+    }),
+    outputSchema: z.object({
+      results: z.array(z.object({
+        title: z.string().describe("Title of the search result"),
+        url: z.string().describe("URL of the search result"),
+        snippet: z.string().describe("Description/snippet of the search result"),
+      })).describe("Array of search results"),
+      query: z.string().describe("The search query that was used"),
+      count: z.number().describe("Number of results found"),
     }),
     execute: async ({ query, maxResults = 5 }) => {
       let results = await searchWithDuckDuckGoInstant(query, maxResults);
@@ -105,7 +114,13 @@ export const websearchTools: ToolSet = {
         throw new Error(`No results found for: ${query}`);
       }
 
-      return results.slice(0, maxResults);
+      const finalResults = results.slice(0, maxResults);
+
+      return {
+        results: finalResults,
+        query: query,
+        count: finalResults.length,
+      };
     },
   }),
 };
