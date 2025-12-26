@@ -1,8 +1,8 @@
 {
   "type": "module",
   "scripts": {
-    "start": "tsx ./src/main.ts",
-    "dev": "tsx watch ./src/main.ts",
+    "start": "node --import @swc-node/register/esm-register ./src/main.ts",
+    "dev": "node --watch --import @swc-node/register/esm-register ./src/main.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "ts:check": "tsc --noEmit"
@@ -27,7 +27,6 @@
     "@swc-node/register": "^1.11.1",
     "@types/node": "^25.0.3",
     "eslint": "^9.39.2",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "pnpm": {
