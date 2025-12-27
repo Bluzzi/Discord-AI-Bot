@@ -3,22 +3,9 @@ import { tool } from "ai";
 import { z } from "zod";
 import { env } from "#/utils/env";
 
-export async function createPaste(content: string, title: string = "Search Results"): Promise<string> {
+export async function createPaste(content: string, title: string = "Paste"): Promise<string> {
   if (!env.PASTEBIN_API_KEY) {
-    const response = await fetch('https://paste.rs/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain',
-      },
-      body: content,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to create paste: ${response.status}`);
-    }
-
-    const pasteUrl = await response.text();
-    return pasteUrl.trim();
+    throw new Error("PASTEBIN_API_KEY is not configured");
   }
 
   const formData = new URLSearchParams();
@@ -65,17 +52,20 @@ export function formatSearchResultsForPaste(results: any[]): string {
   return content;
 }
 
+export function formatTextForPaste(text: string, title: string = "Text Content"): string {
+  return `=== ${title.toUpperCase()} ===\n\n${text}`;
+}
+
 export const pastebinTools: ToolSet = {
   createPastebin: tool({
-    description: "Create a pastebin to share text content. Returns a URL to the created paste. Useful for sharing long text, code, logs, or search results.",
+    description: "Create a Pastebin link to share large text content. Use this tool when someone asks for a very large text (Bible passages, long code, extensive lists, etc.) or explicitly requests a pastebin. The paste will expire after 1 week and be unlisted (private link).",
     inputSchema: z.object({
-      content: z.string().describe("The text content to paste"),
-      title: z.string().optional().describe("Optional title for the paste (default: 'Paste')"),
+      content: z.string().describe("The text content to paste (can be very large)"),
+      title: z.string().optional().describe("Title for the paste (e.g., 'Bible - Genesis 1', 'Code Example', etc.)"),
     }),
     outputSchema: z.object({
-      url: z.string().describe("URL of the created paste"),
+      url: z.string().describe("Pastebin URL of the created paste"),
       title: z.string().describe("Title of the paste"),
-      service: z.string().describe("Service used (pastebin or paste.rs)"),
     }),
     execute: async ({ content, title = "Paste" }) => {
       const url = await createPaste(content, title);
@@ -83,7 +73,6 @@ export const pastebinTools: ToolSet = {
       return {
         url: url,
         title: title,
-        service: env.PASTEBIN_API_KEY ? "pastebin" : "paste.rs",
       };
     },
   }),

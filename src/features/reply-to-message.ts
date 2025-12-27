@@ -3,7 +3,7 @@ import type { OmitPartialGroupDMChannel } from "discord.js";
 import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
 import { discordTools } from "#/tools/discord";
 import { igdbTools } from "#/tools/igdb";
-import { createPaste, formatSearchResultsForPaste } from "#/tools/pastebin";
+import { createPaste, formatSearchResultsForPaste, pastebinTools } from "#/tools/pastebin";
 import { steamTools } from "#/tools/steam";
 import { websearchTools } from "#/tools/websearch";
 import { aiModels } from "#/utils/ai-model";
@@ -208,6 +208,20 @@ Tu as accès à l'API Steam pour obtenir des infos sur les profils Steam:
 Utilise ces outils quand on te demande des infos sur un jeu ou un profil Steam.
 Présente les résultats de manière claire et concise avec les infos les plus pertinentes.
 
+📋 PASTEBIN POUR TEXTES LONGS:
+Tu as accès à l'outil createPastebin pour partager de très gros textes:
+- Utilise-le quand quelqu'un demande un TRÈS GROS TEXTE (passages de la Bible, longs extraits, code volumineux, listes extensives, etc.)
+- Utilise-le quand quelqu'un demande EXPLICITEMENT un pastebin
+- Le paste expire après 1 semaine et est privé (lien non-listé)
+
+⚠️ RÈGLES ABSOLUES PASTEBIN:
+- Si le texte demandé dépasse 2000 caractères ou si c'est explicitement demandé, utilise createPastebin au lieu de répondre directement
+- CRITIQUE: Quand tu partages un lien pastebin, tu DOIS envoyer UNIQUEMENT l'URL BRUTE sans AUCUN formatage
+- Format INTERDIT: [texte](https://pastebin.com/xxxxx) ❌
+- Format OBLIGATOIRE: https://pastebin.com/xxxxx ✅
+- Exemple de réponse correcte: "Voilà ton pastebin : https://pastebin.com/xxxxx 😎"
+- NE JAMAIS utiliser la syntaxe markdown [lien](url) pour les liens pastebin
+
 RÈGLES DE RÉPONSE - TRÈS IMPORTANT:
 4. ⚠️ TYPES DE RÉPONSES SELON LES ACTIONS:
 
@@ -276,6 +290,7 @@ GESTION DES ERREURS:
       ...igdbTools,
       ...steamTools,
       ...websearchTools,
+      ...pastebinTools,
     };
 
     const result = streamText({

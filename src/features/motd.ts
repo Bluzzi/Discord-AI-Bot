@@ -5,6 +5,7 @@ import { generateText, Output } from "ai";
 import { Cron } from "croner";
 import dedent from "dedent";
 import { ActivityType } from "discord.js";
+import Parser from "rss-parser";
 import z from "zod";
 
 type RssSourceKey = "france" | "monde" | "crypto" | "tech";
@@ -15,91 +16,29 @@ type HolidayContext =
   | { mode: "important-holiday-today"; holidayName: string }
   | { mode: "rss" };
 
-const decodeXmlEntities = (input: string) => {
-  const withoutCdata = input.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+const parser = new Parser({
+  headers: {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  },
+});
 
-  return withoutCdata
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#([0-9]+);/g, (_, num: string) => String.fromCodePoint(Number.parseInt(num, 10)))
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-const parseAtomTitles = (xml: string, limit: number) => {
-  const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/g) ?? [];
-  const titles: string[] = [];
-
-  for (const entry of entries) {
-    const titleMatch = entry.match(/<title[^>]*>([\s\S]*?)<\/title>/);
-    const rawTitle = titleMatch?.[1];
-    if (!rawTitle) continue;
-
-    const title = decodeXmlEntities(rawTitle);
-    if (!title) continue;
-
-    titles.push(title);
-    if (titles.length >= limit) break;
+const fetchFeedTitles = async (url: string, limit: number): Promise<string[]> => {
+  try {
+    const feed = await parser.parseURL(url);
+    return feed.items.slice(0, limit).map((item: { title?: string }) => item.title ?? "").filter(Boolean);
+  } catch (error) {
+    throw new Error(`Failed to fetch RSS feed: ${url}`, { cause: error });
   }
-
-  return titles;
 };
 
-const parseRssTitles = (xml: string, limit: number) => {
-  const items = xml.match(/<item\b[\s\S]*?<\/item>/g) ?? [];
-  const titles: string[] = [];
-
-  for (const item of items) {
-    const titleMatch = item.match(/<title[^>]*>([\s\S]*?)<\/title>/);
-    const rawTitle = titleMatch?.[1];
-    if (!rawTitle) continue;
-
-    const title = decodeXmlEntities(rawTitle);
-    if (!title) continue;
-
-    titles.push(title);
-    if (titles.length >= limit) break;
-  }
-
-  return titles;
+const getNextFixedDate = (today: Day, month: number, dayOfMonth: number): Day => {
+  const candidate = day().tz().year(today.year()).month(month - 1).date(dayOfMonth).startOf("day");
+  return candidate.isBefore(today, "day") ? candidate.add(1, "year") : candidate;
 };
 
-const fetchFeedTitles = async (url: string, limit: number) => {
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
-      "user-agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-  });
+//Algorithme pour calculer le dimanche de Pâques ( Methode de Gauss)
 
-  if (!response.ok) throw new Error(`Failed to fetch RSS feed: ${url} (${response.status})`);
-
-  const xml = await response.text();
-
-  const isAtom = xml.includes("<feed") && xml.includes("http://www.w3.org/2005/Atom");
-  const titles = isAtom ? parseAtomTitles(xml, limit) : parseRssTitles(xml, limit);
-
-  return titles;
-};
-
-const getNextFixedDate = (today: Day, month: number, dayOfMonth: number) => {
-  const candidate = day()
-    .tz()
-    .year(today.year())
-    .month(month - 1)
-    .date(dayOfMonth)
-    .startOf("day");
-
-  if (candidate.isBefore(today, "day")) return candidate.add(1, "year");
-  return candidate;
-};
-
-const getEasterSunday = (year: number) => {
+const getEasterSunday = (year: number): Day => {
   const a = year % 19;
   const b = Math.floor(year / 100);
   const c = year % 100;
@@ -112,38 +51,38 @@ const getEasterSunday = (year: number) => {
   const k = c % 4;
   const l = (32 + 2 * e + 2 * i - h - k) % 7;
   const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3=March, 4=April
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
   const dayOfMonth = ((h + l - 7 * m + 114) % 31) + 1;
 
   return day().tz().year(year).month(month - 1).date(dayOfMonth).startOf("day");
 };
 
-const getNextEasterSunday = (today: Day) => {
+const getNextEasterSunday = (today: Day): Day => {
   const easterThisYear = getEasterSunday(today.year());
-  if (!easterThisYear.isBefore(today, "day")) return easterThisYear;
-  return getEasterSunday(today.year() + 1);
+  return !easterThisYear.isBefore(today, "day") ? easterThisYear : getEasterSunday(today.year() + 1);
 };
 
-const daysUntil = (today: Day, target: Day) => target.startOf("day").diff(today.startOf("day"), "day");
+const daysUntil = (today: Day, target: Day): number => target.startOf("day").diff(today.startOf("day"), "day");
 
-const getPrepStage = (daysRemaining: number, prepDays: number) => {
-  if (prepDays === 3) {
-    if (daysRemaining === 3) return "préparatifs";
-    if (daysRemaining === 2) return "derniers détails";
-    return "dernière ligne droite";
-  }
+const PREP_STAGES: Record<number, Record<number, string>> = {
+  3: {
+    3: "préparatifs",
+    2: "derniers détails",
+    1: "dernière ligne droite",
+  },
+  7: {
+    7: "compte à rebours",
+    6: "ça se rapproche",
+    5: "préparation tranquille",
+    4: "achats",
+    3: "préparatifs",
+    2: "derniers détails",
+    1: "dernière ligne droite",
+  },
+};
 
-  if (prepDays === 7) {
-    if (daysRemaining === 7) return "compte à rebours";
-    if (daysRemaining === 6) return "ça se rapproche";
-    if (daysRemaining === 5) return "préparation tranquille";
-    if (daysRemaining === 4) return "achats";
-    if (daysRemaining === 3) return "préparatifs";
-    if (daysRemaining === 2) return "derniers détails";
-    return "dernière ligne droite";
-  }
-
-  return "préparatifs";
+const getPrepStage = (daysRemaining: number, prepDays: number): string => {
+  return PREP_STAGES[prepDays]?.[daysRemaining] ?? "préparatifs";
 };
 
 const getHolidayContext = (today: Day): HolidayContext => {
@@ -155,7 +94,7 @@ const getHolidayContext = (today: Day): HolidayContext => {
     },
     {
       name: "Jour de l'an",
-      prepDays: 7,
+      prepDays: 5,
       date: getNextFixedDate(today, 1, 1),
     },
     {
@@ -210,16 +149,16 @@ const getHolidayContext = (today: Day): HolidayContext => {
   return { mode: "rss" };
 };
 
-const buildPrompt = (today: Day, holidayContext: HolidayContext, titlesBySource: Record<RssSourceKey, string[]>) => {
+const buildPrompt = (today: Day, holidayContext: HolidayContext, titlesBySource: Record<RssSourceKey, string[]>): string => {
   const base = dedent`
-    Tu es le générateur de status Discord de Jean Pascal, un bot Discord drôle et décontracté.
+    Tu es le générateur de status Discord de Jean Pascal, un bot Discord drôle et décontracté et legerement problematique.
     Tu réponds uniquement avec un JSON strict: {"text": string, "emoji": string}
 
     Date actuelle: ${today.format("DD/MM/YYYY")}
 
     Contraintes:
     - Français
-    - text: 50 caractères maximum (sans emoji)
+    - text: 35 caractères maximum (sans emoji)
     - emoji: un seul emoji unicode pertinent
     - NE PAS inclure d'emoji dans text
   `;
@@ -262,7 +201,7 @@ const buildPrompt = (today: Day, holidayContext: HolidayContext, titlesBySource:
     ${base}
 
     Ce n'est pas un jour de fête important.
-    Objectif: parmi les titres ci-dessous, choisis l'info la plus croustillante pour vanner (humour léger, dédramatiser).
+    Objectif: parmi les titres ci-dessous, choisis l'info la plus croustillante pour vanner (humour, dédramatiser, problematique).
 
     Règles:
     - Utilise uniquement les titres (pas de contenu)
@@ -282,45 +221,28 @@ const buildPrompt = (today: Day, holidayContext: HolidayContext, titlesBySource:
   `;
 };
 
-const job = new Cron("0 0 * * *", async () => {
-  if (!discordClient.user) throw new Error("Discord bot user is not available");
+const FEED_URLS: Record<RssSourceKey, string> = {
+  france: "https://theconversation.com/fr/articles.atom",
+  monde: "https://theconversation.com/global/home-page.atom",
+  crypto: "https://coinacademy.fr/actu/gn",
+  tech: "https://feeds.feedburner.com/ign/all",
+};
 
-  // Get today news:
-  const today = day().tz().startOf("day");
-  const holidayContext = getHolidayContext(today);
+const FEED_LIMIT = 10;
 
-  const titlesBySource: Record<RssSourceKey, string[]> = {
-    france: [],
-    monde: [],
-    crypto: [],
-    tech: [],
-  };
+const fetchAllFeeds = async (): Promise<Record<RssSourceKey, string[]>> => {
+  const [france, monde, crypto, tech] = await Promise.all([
+    fetchFeedTitles(FEED_URLS.france, FEED_LIMIT),
+    fetchFeedTitles(FEED_URLS.monde, FEED_LIMIT),
+    fetchFeedTitles(FEED_URLS.crypto, FEED_LIMIT),
+    fetchFeedTitles(FEED_URLS.tech, FEED_LIMIT),
+  ]);
 
-  if (holidayContext.mode === "rss") {
-    const feedUrls: Record<RssSourceKey, string> = {
-      france: "https://theconversation.com/fr/articles.atom",
-      monde: "https://theconversation.com/global/home-page.atom",
-      crypto: "https://coinacademy.fr/actu/gn",
-      tech: "https://feeds.feedburner.com/ign/all",
-    };
+  return { france, monde, crypto, tech };
+};
 
-    const limit = 10;
-
-    const [france, monde, crypto, tech] = await Promise.all([
-      fetchFeedTitles(feedUrls.france, limit),
-      fetchFeedTitles(feedUrls.monde, limit),
-      fetchFeedTitles(feedUrls.crypto, limit),
-      fetchFeedTitles(feedUrls.tech, limit),
-    ]);
-
-    titlesBySource.france = france;
-    titlesBySource.monde = monde;
-    titlesBySource.crypto = crypto;
-    titlesBySource.tech = tech;
-  }
-
-  // Ask AI for MOTD from news:
-  const motd = await generateText({
+const generateMotd = async (today: Day, holidayContext: HolidayContext, titlesBySource: Record<RssSourceKey, string[]>) => {
+  const result = await generateText({
     model: aiModels.mistralLarge,
     output: Output.object({
       schema: z.object({
@@ -331,15 +253,32 @@ const job = new Cron("0 0 * * *", async () => {
     prompt: buildPrompt(today, holidayContext, titlesBySource),
   });
 
-  // Set Discord activity:
+  return result.output;
+};
+
+const updateDiscordPresence = (emoji: string, text: string) => {
+  if (!discordClient.user) throw new Error("Discord bot user is not available");
+
   discordClient.user.setPresence({
     activities: [{
       name: "Custom",
       type: ActivityType.Custom,
-      state: `${motd.output.emoji} ${motd.output.text}`,
+      state: `${emoji} ${text}`,
     }],
     status: "online",
   });
+};
+
+const job = new Cron("0 0 * * *", async () => {
+  const today = day().tz().startOf("day");
+  const holidayContext = getHolidayContext(today);
+
+  const titlesBySource = holidayContext.mode === "rss" 
+    ? await fetchAllFeeds()
+    : { france: [], monde: [], crypto: [], tech: [] };
+
+  const motd = await generateMotd(today, holidayContext, titlesBySource);
+  updateDiscordPresence(motd.emoji, motd.text);
 });
 
 await job.trigger();
