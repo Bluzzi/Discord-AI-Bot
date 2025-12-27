@@ -1,4 +1,4 @@
-import { discord } from "#/discord";
+import { discordClient } from "#/discord";
 import { aiModels } from "#/utils/ai-model";
 import { day } from "#/utils/day";
 import { webSearch } from "#/utils/web-search";
@@ -9,7 +9,7 @@ import { ActivityType } from "discord.js";
 import z from "zod";
 
 const job = new Cron("0 0 * * *", async () => {
-  if (!discord.client.user) throw Error("Discord bot user if not available");
+  if (!discordClient.user) throw Error("Discord bot user if not available");
 
   // Get today news:
   const queries: string[] = [
@@ -74,7 +74,7 @@ const job = new Cron("0 0 * * *", async () => {
   });
 
   // Set Discord activity:
-  discord.client.user.setPresence({
+  discordClient.user.setPresence({
     activities: [{
       name: "Custom",
       type: ActivityType.Custom,

@@ -1,7 +1,7 @@
 import type { Interaction } from "discord.js";
 import { discordTools } from "../tools/discord";
 import { logger } from "../utils/logger";
-import { discord } from "#/discord";
+import { discordClient } from "#/discord";
 
 const pendingConfirmations = new Map<string, {
   actions: { toolName: string; args: any }[];
@@ -10,7 +10,7 @@ const pendingConfirmations = new Map<string, {
   expiresAt: number;
 }>();
 
-discord.client.on("interactionCreate", async (interaction: Interaction) => {
+discordClient.on("interactionCreate", async (interaction: Interaction) => {
   try {
     if (!interaction.isButton()) return;
 

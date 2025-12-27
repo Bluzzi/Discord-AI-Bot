@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { discord } from "#/discord";
+import { discordClient } from "#/discord";
 import { tool } from "ai";
 import { ChannelType } from "discord.js";
 import { z } from "zod";
@@ -31,7 +31,7 @@ async function checkPermissions(toolName: string, args: any, requesterId?: strin
   
   if (requesterId && args.guildId && toolName !== "listBotGuilds" && toolName !== "checkUserInGuild" && toolName !== "getGuilds") {
     const guildId = args.guildId;
-    const guild = discord.client.guilds.cache.get(guildId);
+    const guild = discordClient.guilds.cache.get(guildId);
     
     if (!guild) {
       return { 
@@ -107,7 +107,7 @@ export const discordTools: ToolSet = {
       iconURL: z.string().nullable().describe("Guild icon URL"),
     })).describe("List of guilds where the bot is present"),
     execute: async () => {
-      const guilds = discord.client.guilds.cache.map((guild) => ({
+      const guilds = discordClient.guilds.cache.map((guild) => ({
         id: guild.id,
         name: guild.name,
         memberCount: guild.memberCount,
@@ -143,7 +143,7 @@ export const discordTools: ToolSet = {
       canMoveMembers: z.boolean().optional().describe("Can move members"),
     }),
     execute: async ({ userId, guildId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       
       if (!guild) {
         return { 
@@ -216,7 +216,7 @@ export const discordTools: ToolSet = {
       canMoveMembers: z.boolean().describe("Can move members"),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -251,7 +251,7 @@ export const discordTools: ToolSet = {
       memberCount: z.number().describe("Number of members in the guild"),
     })).describe("List of all guilds"),
     execute: async () => {
-      const guilds = discord.client.guilds.cache.map((guild) => ({
+      const guilds = discordClient.guilds.cache.map((guild) => ({
         id: guild.id,
         name: guild.name,
         memberCount: guild.memberCount,
@@ -272,7 +272,7 @@ export const discordTools: ToolSet = {
       type: z.string().describe("Channel type"),
     })).describe("List of channels in the guild"),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -302,7 +302,7 @@ export const discordTools: ToolSet = {
       nameFilter: z.string().optional().describe("Optional filter to search members by username or display name"),
     }),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -370,7 +370,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, channelId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -412,7 +412,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -450,7 +450,7 @@ export const discordTools: ToolSet = {
       memberId: z.string().describe("Member ID"),
     }),
     execute: async ({ guildId, memberId, nickname }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -479,7 +479,7 @@ export const discordTools: ToolSet = {
       nameFilter: z.string().optional().describe("Optional filter to search roles by name"),
     }),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -517,7 +517,7 @@ export const discordTools: ToolSet = {
       color: z.string().describe("Color of the role in hex format"),
     }),
     execute: async ({ guildId, name, color }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const role = await guild.roles.create({
@@ -546,7 +546,7 @@ export const discordTools: ToolSet = {
       roleId: z.string().describe("ID of the deleted role"),
     }),
     execute: async ({ guildId, roleId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const role = guild.roles.cache.get(roleId);
@@ -576,7 +576,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -609,7 +609,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -635,7 +635,7 @@ export const discordTools: ToolSet = {
       nameFilter: z.string().optional().describe("Optional filter to search categories by name"),
     }),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       let categories = guild.channels.cache
@@ -671,7 +671,7 @@ export const discordTools: ToolSet = {
       channelType: z.string().describe("Type of the created channel"),
     }),
     execute: async ({ guildId, name, type, categoryId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const channelType = type === "text" ? ChannelType.GuildText : 
@@ -703,7 +703,7 @@ export const discordTools: ToolSet = {
       channelId: z.string().describe("ID of the deleted channel"),
     }),
     execute: async ({ channelId }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel) throw new Error("Channel not found");
       
       const channelName = 'name' in channel ? channel.name : 'Unknown';
@@ -729,7 +729,7 @@ export const discordTools: ToolSet = {
       channelId: z.string().describe("Channel ID"),
     }),
     execute: async ({ channelId, newName }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel) throw new Error("Channel not found");
       
       const oldName = 'name' in channel ? channel.name : 'Unknown';
@@ -759,7 +759,7 @@ export const discordTools: ToolSet = {
       permissions: z.array(z.string()).describe("Updated permissions"),
     }),
     execute: async ({ guildId, roleId, permissions }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const role = guild.roles.cache.get(roleId);
@@ -789,7 +789,7 @@ export const discordTools: ToolSet = {
       newPosition: z.number().describe("New position"),
     }),
     execute: async ({ guildId, roleId, position }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const role = guild.roles.cache.get(roleId);
@@ -821,7 +821,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, reason }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -853,7 +853,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, reason }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -884,7 +884,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, userId, reason }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       await guild.members.unban(userId, reason);
@@ -910,7 +910,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -941,7 +941,7 @@ export const discordTools: ToolSet = {
       action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(memberId);
@@ -971,7 +971,7 @@ export const discordTools: ToolSet = {
       contentLength: z.number().describe("Length of the message sent"),
     }),
     execute: async ({ channelId, content }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1006,7 +1006,7 @@ export const discordTools: ToolSet = {
       })).optional().describe("Optional array of buttons to add to the embed"),
     }),
     execute: async ({ channelId, title, description, color, fields, buttons }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1070,7 +1070,7 @@ export const discordTools: ToolSet = {
       limit: z.number().optional().describe("Optional maximum number of messages to check (default: 100, max: 100)"),
     }),
     execute: async ({ channelId, userId, limit = 100 }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1103,7 +1103,7 @@ export const discordTools: ToolSet = {
       limit: z.number().optional().describe("Optional maximum number of messages to delete (default: 100, max: 100)"),
     }),
     execute: async ({ channelId, limit = 100 }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1139,7 +1139,7 @@ export const discordTools: ToolSet = {
       userId: z.string().describe("ID of the recipient"),
     }),
     execute: async ({ userId, content }) => {
-      const user = await discord.client.users.fetch(userId);
+      const user = await discordClient.users.fetch(userId);
       if (!user) throw new Error("User not found");
       
       await user.send(content);
@@ -1170,7 +1170,7 @@ export const discordTools: ToolSet = {
       })).optional().describe("Optional array of buttons to add to the embed"),
     }),
     execute: async ({ userId, title, description, color, fields, buttons }) => {
-      const user = await discord.client.users.fetch(userId);
+      const user = await discordClient.users.fetch(userId);
       if (!user) throw new Error("User not found");
       
       const components: any[] = [];
@@ -1233,7 +1233,7 @@ export const discordTools: ToolSet = {
       guildId: z.string().describe("ID of the guild"),
     }),
     execute: async ({ channelID, guildId }) => {
-      const channel = discord.client.channels.cache.get(channelID);
+      const channel = discordClient.channels.cache.get(channelID);
       if (!channel?.isVoiceBased()) {
         throw new Error("Channel not found or not a voice channel");
       }
@@ -1283,7 +1283,7 @@ export const discordTools: ToolSet = {
       guildId: z.string().describe("Guild ID"),
     }),
     execute: async ({ guildId, newName }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const oldName = guild.name;
@@ -1311,7 +1311,7 @@ export const discordTools: ToolSet = {
       maxUses: z.union([z.number(), z.string()]).describe("Maximum uses or 'Unlimited'"),
     }),
     execute: async ({ channelId, maxAge = 0, maxUses = 0 }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel) throw new Error("Channel not found");
       
       if (!('createInvite' in channel)) {
@@ -1342,7 +1342,7 @@ export const discordTools: ToolSet = {
       allowMultiselect: z.boolean().optional().describe("Optional whether to allow multiple selections (default: false)"),
     }),
     execute: async ({ channelId, question, answers, duration = 24, allowMultiselect = false }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1389,7 +1389,7 @@ export const discordTools: ToolSet = {
       avatarUrl: z.string().nullable().describe("Webhook avatar URL"),
     })).describe("List of webhooks in the channel"),
     execute: async ({ channelId }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1421,7 +1421,7 @@ export const discordTools: ToolSet = {
       name: z.string().describe("Webhook name"),
     }),
     execute: async ({ channelId, name, avatarUrl }) => {
-      const channel = discord.client.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -1507,7 +1507,7 @@ export const discordTools: ToolSet = {
       avatarUrl: z.string().describe("Avatar URL"),
     }),
     execute: async ({ guildId, userId }) => {
-      const guild = discord.client.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
       
       const member = await guild.members.fetch(userId);

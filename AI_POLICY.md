@@ -83,7 +83,7 @@ export const discordTools: ToolSet = {
       memberID: z.string().describe("Member ID"),
     }),
     execute: async ({ guildID, userID, nickname }) => {
-      const guild = discord.client.guilds.get(guildID);
+      const guild = discordClient.guilds.get(guildID);
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberID);

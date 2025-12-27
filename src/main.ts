@@ -2,11 +2,11 @@
 import { env } from "#/utils/env";
 
 // Imports:
-import { discord } from "#/discord";
+import { discordClient } from "#/discord";
 import { logger } from "#/utils/logger";
 
 // Start bot:
-await discord.client.login(env.DISCORD_BOT_TOKEN);
+await discordClient.login(env.DISCORD_BOT_TOKEN);
 logger.info("Bot started!");
 
 // Load events:

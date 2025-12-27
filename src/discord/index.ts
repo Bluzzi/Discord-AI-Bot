@@ -1,7 +1,2 @@
-import { discordClient } from "./client";
-
-export const discord = {
-  client: discordClient,
-};
-
+export * from "./client";
 export * from "./const";

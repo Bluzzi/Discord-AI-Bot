@@ -1,13 +1,13 @@
-import { discord } from "#/discord";
+import { discordClient } from "#/discord";
 import { replyToMessage } from "#/features/reply-to-message";
 import { aiModels } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { generateText, Output } from "ai";
 import dedent from "dedent";
 
-discord.client.on("messageCreate", async (message) => {
+discordClient.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  if (!discord.client.user) return;
+  if (!discordClient.user) return;
   if (!message.channel.isTextBased()) return;
 
   // Always reply in DM:
@@ -18,7 +18,7 @@ discord.client.on("messageCreate", async (message) => {
   }
 
   // Always reply on mention:
-  if (message.mentions.has(discord.client.user.id)) {
+  if (message.mentions.has(discordClient.user.id)) {
     logger.info(`Reply to ${message.author.displayName} based on mention (100%)`);
     await replyToMessage(message);
     return;
@@ -30,8 +30,8 @@ discord.client.on("messageCreate", async (message) => {
 
   const conversation = lastMessages.map((msg) => `${msg.author.username}: ${msg.content}`).join("\n");
 
-  const botMember = await message.guild?.members.fetch(discord.client.user.id);
-  const botNames = [discord.client.user.username, botMember?.displayName, botMember?.nickname].filter(Boolean).join(", ");
+  const botMember = await message.guild?.members.fetch(discordClient.user.id);
+  const botNames = [discordClient.user.username, botMember?.displayName, botMember?.nickname].filter(Boolean).join(", ");
 
   const decision = await generateText({
     model: aiModels.mistralFast,

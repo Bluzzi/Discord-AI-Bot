@@ -1,6 +1,6 @@
 import { createConfirmationId, addPendingConfirmation } from "../events/interaction-create";
 import { env } from "../utils/env";
-import { discord } from "#/discord";
+import { discordClient } from "#/discord";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Message } from "discord.js";
 import { generateText } from "ai";
 import { createMistral } from "@ai-sdk/mistral";
@@ -48,7 +48,7 @@ export const sendConfirmationRequest = async (
   const actionsList = actions.map(({ toolName, args }) => {
     let detail = "";
     if (args.channelId) {
-      const channel = discord.client.channels.cache.get(args.channelId);
+      const channel = discordClient.channels.cache.get(args.channelId);
       detail = channel && "name" in channel ? ` (${channel.name})` : "";
     }
     else if (args.memberId) {
