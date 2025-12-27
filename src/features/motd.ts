@@ -1,11 +1,11 @@
 import { discordClient } from "#/discord";
 import { aiModels } from "#/utils/ai-model";
 import { day, type Day } from "#/utils/day";
+import { rss } from "#/utils/rss-parser";
 import { generateText, Output } from "ai";
 import { Cron } from "croner";
 import dedent from "dedent";
 import { ActivityType } from "discord.js";
-import Parser from "rss-parser";
 import z from "zod";
 
 type RssSourceKey = "france" | "monde" | "crypto" | "tech";
@@ -16,17 +16,12 @@ type HolidayContext =
   | { mode: "important-holiday-today"; holidayName: string }
   | { mode: "rss" };
 
-const parser = new Parser({
-  headers: {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  },
-});
-
 const fetchFeedTitles = async (url: string, limit: number): Promise<string[]> => {
   try {
-    const feed = await parser.parseURL(url);
+    const feed = await rss.parseURL(url);
     return feed.items.slice(0, limit).map((item: { title?: string }) => item.title ?? "").filter(Boolean);
-  } catch (error) {
+  }
+  catch (error) {
     throw new Error(`Failed to fetch RSS feed: ${url}`, { cause: error });
   }
 };
@@ -35,8 +30,6 @@ const getNextFixedDate = (today: Day, month: number, dayOfMonth: number): Day =>
   const candidate = day().tz().year(today.year()).month(month - 1).date(dayOfMonth).startOf("day");
   return candidate.isBefore(today, "day") ? candidate.add(1, "year") : candidate;
 };
-
-//Algorithme pour calculer le dimanche de Pâques ( Methode de Gauss)
 
 const getEasterSunday = (year: number): Day => {
   const a = year % 19;
@@ -241,44 +234,42 @@ const fetchAllFeeds = async (): Promise<Record<RssSourceKey, string[]>> => {
   return { france, monde, crypto, tech };
 };
 
-const generateMotd = async (today: Day, holidayContext: HolidayContext, titlesBySource: Record<RssSourceKey, string[]>) => {
-  const result = await generateText({
+const job = new Cron("0 0 * * *", async () => {
+  if (!discordClient.user) throw new Error("Discord bot user is not available");
+
+  const today = day().tz().startOf("day");
+  const holidayContext = getHolidayContext(today);
+
+  const titlesBySource = holidayContext.mode === "rss" ? (
+    await fetchAllFeeds()
+  ) : ({
+    france: [],
+    monde: [],
+    crypto: [],
+    tech: [],
+  });
+
+  // Generate MOTD:
+  const motd = await generateText({
     model: aiModels.mistralLarge,
     output: Output.object({
       schema: z.object({
-        text: z.string().max(50),
-        emoji: z.string().min(1),
+        emoji: z.string().describe("Un seul emoji unicode pertinent"),
+        text: z.string().describe("Le texte du status sans emoji (33 caractères maximum)"),
       }),
     }),
     prompt: buildPrompt(today, holidayContext, titlesBySource),
   });
 
-  return result.output;
-};
-
-const updateDiscordPresence = (emoji: string, text: string) => {
-  if (!discordClient.user) throw new Error("Discord bot user is not available");
-
+  // Update Discord presence:
   discordClient.user.setPresence({
+    status: "online",
     activities: [{
       name: "Custom",
       type: ActivityType.Custom,
-      state: `${emoji} ${text}`,
+      state: `${motd.output.emoji} ${motd.output.text}`,
     }],
-    status: "online",
   });
-};
-
-const job = new Cron("0 0 * * *", async () => {
-  const today = day().tz().startOf("day");
-  const holidayContext = getHolidayContext(today);
-
-  const titlesBySource = holidayContext.mode === "rss" 
-    ? await fetchAllFeeds()
-    : { france: [], monde: [], crypto: [], tech: [] };
-
-  const motd = await generateMotd(today, holidayContext, titlesBySource);
-  updateDiscordPresence(motd.emoji, motd.text);
 });
 
 await job.trigger();
