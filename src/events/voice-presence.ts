@@ -33,12 +33,14 @@ discord.client.on("voiceStateUpdate", (_oldState: VoiceState, newState: VoiceSta
     return;
   }
 
-  // Join the most famous channel:
-  logger.info(`Joining voice channel: ${channelToJoin.channel.name} (${String(channelToJoin.membersCount)} members connected)`);
+  // Join the most famous channel if the bot is not in:
+  if (voiceConnection?.joinConfig.channelId !== channelToJoin.channel.id) {
+    logger.info(`Joining voice channel: ${channelToJoin.channel.name} (${String(channelToJoin.membersCount)} members connected)`);
 
-  joinVoiceChannel({
-    channelId: channelToJoin.channel.id,
-    guildId: newState.guild.id,
-    adapterCreator: newState.guild.voiceAdapterCreator,
-  });
+    joinVoiceChannel({
+      channelId: channelToJoin.channel.id,
+      guildId: newState.guild.id,
+      adapterCreator: newState.guild.voiceAdapterCreator,
+    });
+  }
 });

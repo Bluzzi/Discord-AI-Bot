@@ -1,24 +1,24 @@
 import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
+import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
 import { discordTools } from "#/tools/discord";
 import { igdbTools } from "#/tools/igdb";
+import { createPaste, formatSearchResultsForPaste } from "#/tools/pastebin";
 import { steamTools } from "#/tools/steam";
 import { websearchTools } from "#/tools/websearch";
-import { createPaste, formatSearchResultsForPaste } from "#/tools/pastebin";
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
+import { aiModels } from "#/utils/ai-model";
+import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { day } from "#/utils/day";
 import { streamText, stepCountIs } from "ai";
-import { aiModels } from "#/utils/ai-model";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 
 export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
   let typingInterval: NodeJS.Timeout | undefined;
-  
+
   try {
     const isDM = !message.guild;
-    
+
     const botMember = isDM ? null : await message.guild?.members.fetch(env.DISCORD_BOT_ID);
     if (!isDM && !botMember) throw Error("Unable to get the bot member instance");
 
@@ -33,7 +33,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     const authorDisplayName = message.member?.displayName || message.author.username;
     const authorId = message.author.id;
 
-    const currentDateTime = day().format("dddd D MMMM YYYY à HH:mm");
+    const currentDateTime = day().tz().format("dddd D MMMM YYYY à HH:mm");
 
     let conversationContext = "";
     try {
@@ -43,7 +43,8 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
         .map((msg) => `${msg.author.username}: ${msg.content}`)
         .join("\n");
       logger.info(`Context: ${messagesArray.length} messages retrieved`);
-    } catch (error) {
+    }
+    catch (error) {
       logger.warn("Unable to retrieve message context");
     }
 
@@ -286,7 +287,7 @@ GESTION DES ERREURS:
       stopWhen: stepCountIs(10),
       onStepFinish: ({ text, toolCalls, toolResults }) => {
         if (toolCalls && toolCalls.length > 0) {
-          toolCalls.forEach(call => {
+          toolCalls.forEach((call) => {
             logger.info(`Tool executed: ${call.toolName}`);
           });
         }
@@ -294,92 +295,96 @@ GESTION DES ERREURS:
     });
 
     const searchResults: any[] = [];
-    
+
     const finalResult = await result;
     const finalContent = await finalResult.text;
 
     clearInterval(typingInterval);
-    
+
     if (!finalContent || finalContent.trim() === "") {
       logger.info(`Action completed (no response needed)`);
       return;
     }
 
     logger.info(`Final response: ${finalContent}`);
-    
+
     const chunks = [];
     if (finalContent.length <= DISCORD_MAX_MESSAGE_LENGTH) {
       chunks.push(finalContent);
-    } else {
+    }
+    else {
       let remainingText = finalContent;
       while (remainingText.length > 0) {
         if (remainingText.length <= DISCORD_MAX_MESSAGE_LENGTH) {
           chunks.push(remainingText);
           break;
         }
-        
+
         let cutPosition = DISCORD_MAX_MESSAGE_LENGTH;
         const searchStart = Math.max(0, DISCORD_MAX_MESSAGE_LENGTH - 200);
         const segment = remainingText.substring(searchStart, DISCORD_MAX_MESSAGE_LENGTH + 1);
-        
-        const lastNewline = segment.lastIndexOf('\n');
+
+        const lastNewline = segment.lastIndexOf("\n");
         if (lastNewline !== -1) {
           cutPosition = searchStart + lastNewline + 1;
-        } else {
-          const lastSpace = segment.lastIndexOf(' ');
+        }
+        else {
+          const lastSpace = segment.lastIndexOf(" ");
           if (lastSpace !== -1) {
             cutPosition = searchStart + lastSpace + 1;
           }
         }
-        
+
         chunks.push(remainingText.substring(0, cutPosition).trim());
         remainingText = remainingText.substring(cutPosition).trim();
       }
     }
-    
+
     if (chunks.length > 0 && chunks[0]) {
       await message.reply(chunks[0]);
-      
+
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i];
         if (chunk) {
           if (i === chunks.length - 1 && searchResults && searchResults.length > 0) {
             const pasteContent = formatSearchResultsForPaste(searchResults);
             const pasteUrl = await createPaste(pasteContent, "Search Results");
-            
+
             if (pasteUrl) {
               const row = new ActionRowBuilder<ButtonBuilder>()
                 .addComponents(
                   new ButtonBuilder()
-                    .setLabel('📋 Sources')
+                    .setLabel("📋 Sources")
                     .setStyle(ButtonStyle.Link)
-                    .setURL(pasteUrl)
+                    .setURL(pasteUrl),
                 );
-              
+
               await message.channel.send({ content: chunk, components: [row] });
-            } else {
+            }
+            else {
               await message.channel.send(chunk);
             }
-          } else {
+          }
+          else {
             await message.channel.send(chunk);
           }
         }
       }
-      
+
       if (chunks.length === 1 && searchResults && searchResults.length > 0) {
         const pasteContent = formatSearchResultsForPaste(searchResults);
         const pasteUrl = await createPaste(pasteContent, "Search Results");
-        
+
         if (pasteUrl) {
           const row = new ActionRowBuilder<ButtonBuilder>()
             .addComponents(
               new ButtonBuilder()
-                .setLabel('📋 Sources')
+                .setLabel("📋 Sources")
                 .setStyle(ButtonStyle.Link)
-                .setURL(pasteUrl)
+                .setURL(pasteUrl),
             );
-          
-          await message.channel.send({ content: '⬆️', components: [row] });
+
+          await message.channel.send({ content: "⬆️", components: [row] });
         }
       }
     }
@@ -389,7 +394,8 @@ GESTION DES ERREURS:
     logger.error("Error in replyToMessage:", error instanceof Error ? error.message : String(error));
     try {
       await message.reply("Désolé, une erreur s'est produite lors de la génération de ma réponse.");
-    } catch (replyError) {
+    }
+    catch (replyError) {
       logger.error("Failed to send error message:", replyError instanceof Error ? replyError.message : String(replyError));
     }
   }

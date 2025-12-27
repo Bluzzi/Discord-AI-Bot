@@ -26,10 +26,10 @@ const job = new Cron("0 0 * * *", async () => {
 
   // Ask AI for MOTD from news:
   const motd = await generateText({
-    model: aiModels.mistralFast,
+    model: aiModels.mistralLarge,
     output: Output.object({
       schema: z.object({
-        text: z.string("Le texte du status sans emoji"),
+        text: z.string("Le texte du status sans emoji (33 caractères maximum"),
         emoji: z.string("Un seul emoji unicode pertinent"),
       }),
     }),
@@ -38,7 +38,7 @@ const job = new Cron("0 0 * * *", async () => {
 
       Ton rôle est de générer un status Discord drôles et courts. Tu détectes automatiquement les fêtes françaises et adaptes le status en conséquence. Tu réponds uniquement avec un JSON contenant text et emoji du status.
 
-      Date actuelle: ${day().format("dddd D MMMM YYYY")}
+      Date actuelle: ${day().tz().format("DD/MM/YYYY")}
 
       IMPORTANT: Analyse bien la date actuelle et détecte automatiquement si c'est une fête française ou si on approche d'une fête.
 
@@ -55,7 +55,7 @@ const job = new Cron("0 0 * * *", async () => {
           * Jour J: message de célébration de la fête
 
       2. SINON ACTUALITÉ: Si aucune fête proche, génère un status en rapport avec l'actualité du moment en dédramatisant avec humour.
-          - PRIORTIE DES ACTUALITE : France ( Politique, Elections, etc ), Tech ( Grosse chute d'un actif d'une societe), Crypto ( Grosse hausse / chute d'une crypto), Actu Monde / guerre / conflit internationaux
+          - PRIORTIE DES ACTUALITE : France (Politique, Elections, etc), Tech (Grosse chute d'un actif d'une societe), Crypto (Grosse hausse / chute d'une crypto), Actu Monde / guerre / conflit internationaux
 
       Voic les actualités du jour :
       ${searchResults.map((element) => `- ${element}\n`)}
@@ -70,14 +70,6 @@ const job = new Cron("0 0 * * *", async () => {
       - Être court et percutant (max 50 caractères)
       - Être drôle et décontracté
       - NE PAS INCLURE D'EMOJI DANS LE TEXTE
-
-      Réponds au format JSON:
-      {
-        "text": "",
-        "emoji": "un seul emoji unicode pertinent"
-      }
-
-      Réponds UNIQUEMENT avec le JSON, rien d'autre.
     `,
   });
 
