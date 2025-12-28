@@ -196,21 +196,35 @@ export const steamTools: ToolSet = {
     description: "Get the inventory items for a Steam user. By default shows CS:GO inventory (appId 730).",
     inputSchema: z.object({
       steamId: z.string().describe("The Steam ID 64-bit of the user"),
-      appId: z.number().optional().describe("Optional Steam app ID for the inventory (default: 730 for CS:GO)"),
+      appId: z.number().describe("Steam app ID for the inventory (use 730 for CS:GO)"),
     }),
-    execute: async ({ steamId, appId = 730 }) => {
+    execute: async ({ steamId, appId }) => {
       const response = await fetch(
         `https://steamcommunity.com/inventory/${steamId}/${appId}/2?l=french&count=100`,
       );
 
       if (!response.ok) {
-        throw new Error(`Steam API error: ${response.statusText}`);
+        if (response.status === 403) {
+          throw new Error("Inventory is private. The user needs to set their inventory to public in Steam privacy settings.");
+        }
+        if (response.status === 429) {
+          throw new Error("Steam API rate limit reached. Please try again in a few minutes.");
+        }
+        throw new Error(`Steam API error: ${response.status} ${response.statusText}`);
       }
 
       const data: any = await response.json();
 
-      if (!data.assets || !data.descriptions) {
-        throw new Error("No inventory found or profile is private");
+      if (data.success === false) {
+        throw new Error("Inventory is private or doesn't exist for this game.");
+      }
+
+      if (!data.assets || data.assets.length === 0) {
+        throw new Error("No items found in inventory for this game. The inventory might be empty or private.");
+      }
+
+      if (!data.descriptions) {
+        throw new Error("No inventory data available.");
       }
 
       const itemCounts = new Map<string, { count: number; description: any }>();

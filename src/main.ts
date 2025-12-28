@@ -11,7 +11,6 @@ logger.info("Bot started!");
 
 // Load events:
 await import("#/events/message-create");
-await import("#/events/voice-state-update");
 
 // Load features:
 await import("#/features/motd");

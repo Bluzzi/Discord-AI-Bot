@@ -907,6 +907,9 @@ export const discordTools: ToolSet = {
       title: z.string().optional().describe("Optional title for the embed"),
       description: z.string().optional().describe("Optional description for the embed"),
       color: z.string().optional().describe("Optional hex color code for the embed (e.g., #FF5733)"),
+      thumbnail: z.object({
+        url: z.string().describe("URL of the thumbnail image"),
+      }).optional().describe("Optional thumbnail image for the embed"),
       fields: z.array(z.object({
         name: z.string().describe("Field name"),
         value: z.string().describe("Field value"),
@@ -918,7 +921,7 @@ export const discordTools: ToolSet = {
         style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional().describe("Optional button style"),
       })).optional().describe("Optional array of buttons to add to the embed"),
     }),
-    execute: async ({ channelId, title, description, color, fields, buttons }) => {
+    execute: async ({ channelId, title, description, color, thumbnail, fields, buttons }) => {
       const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
@@ -963,6 +966,7 @@ export const discordTools: ToolSet = {
             title,
             description,
             color: color ? parseInt(color.replace("#", ""), 16) : undefined,
+            thumbnail,
             fields,
           }],
           components: components.length > 0 ? components : undefined,
