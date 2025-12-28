@@ -1,25 +1,25 @@
 import type { ToolSet } from "ai";
+import { env } from "#/utils/env";
 import { tool } from "ai";
 import { z } from "zod";
-import { env } from "#/utils/env";
 
-export async function createPaste(content: string, title: string = "Paste"): Promise<string> {
+export async function createPaste(content: string, title = "Paste"): Promise<string> {
   if (!env.PASTEBIN_API_KEY) {
     throw new Error("PASTEBIN_API_KEY is not configured");
   }
 
   const formData = new URLSearchParams();
-  formData.append('api_dev_key', env.PASTEBIN_API_KEY);
-  formData.append('api_option', 'paste');
-  formData.append('api_paste_code', content);
-  formData.append('api_paste_name', title);
-  formData.append('api_paste_private', '1');
-  formData.append('api_paste_expire_date', '1W');
+  formData.append("api_dev_key", env.PASTEBIN_API_KEY);
+  formData.append("api_option", "paste");
+  formData.append("api_paste_code", content);
+  formData.append("api_paste_name", title);
+  formData.append("api_paste_private", "1");
+  formData.append("api_paste_expire_date", "1W");
 
-  const response = await fetch('https://pastebin.com/api/api_post.php', {
-    method: 'POST',
+  const response = await fetch("https://pastebin.com/api/api_post.php", {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      "Content-Type": "application/x-www-form-urlencoded",
     },
     body: formData.toString(),
   });
@@ -29,8 +29,8 @@ export async function createPaste(content: string, title: string = "Paste"): Pro
   }
 
   const pasteUrl = await response.text();
-  
-  if (pasteUrl.startsWith('Bad API request')) {
+
+  if (pasteUrl.startsWith("Bad API request")) {
     throw new Error(`Pastebin API error: ${pasteUrl}`);
   }
 
@@ -38,21 +38,21 @@ export async function createPaste(content: string, title: string = "Paste"): Pro
 }
 
 export function formatSearchResultsForPaste(results: any[]): string {
-  let content = '=== SEARCH RESULTS ===\n\n';
-  
+  let content = "=== SEARCH RESULTS ===\n\n";
+
   results.forEach((result, index) => {
     content += `${index + 1}. ${result.title}\n`;
     content += `   URL: ${result.url}\n`;
     if (result.snippet) {
       content += `   Description: ${result.snippet}\n`;
     }
-    content += '\n';
+    content += "\n";
   });
-  
+
   return content;
 }
 
-export function formatTextForPaste(text: string, title: string = "Text Content"): string {
+export function formatTextForPaste(text: string, title = "Text Content"): string {
   return `=== ${title.toUpperCase()} ===\n\n${text}`;
 }
 
@@ -69,7 +69,7 @@ export const pastebinTools: ToolSet = {
     }),
     execute: async ({ content, title = "Paste" }) => {
       const url = await createPaste(content, title);
-      
+
       return {
         url: url,
         title: title,

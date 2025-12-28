@@ -1,11 +1,10 @@
 import type { ToolSet } from "ai";
+import { env } from "../utils/env";
 import { tool } from "ai";
 import { z } from "zod";
-import { env } from "../utils/env";
-import { logger } from "../utils/logger";
 
 let cachedAccessToken: string | null = null;
-let tokenExpiresAt: number = 0;
+let tokenExpiresAt = 0;
 
 async function getAccessToken(): Promise<string> {
   if (env.IGDB_ACCESS_TOKEN) {
@@ -17,12 +16,12 @@ async function getAccessToken(): Promise<string> {
   }
 
   if (!env.IGDB_CLIENT_ID || !env.IGDB_CLIENT_SECRET) {
-    throw new Error('IGDB_CLIENT_ID and IGDB_CLIENT_SECRET are required when IGDB_ACCESS_TOKEN is not provided');
+    throw new Error("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET are required when IGDB_ACCESS_TOKEN is not provided");
   }
 
   const response = await fetch(
     `https://id.twitch.tv/oauth2/token?client_id=${env.IGDB_CLIENT_ID}&client_secret=${env.IGDB_CLIENT_SECRET}&grant_type=client_credentials`,
-    { method: 'POST' }
+    { method: "POST" },
   );
 
   if (!response.ok) {
@@ -33,18 +32,18 @@ async function getAccessToken(): Promise<string> {
   cachedAccessToken = data.access_token;
   tokenExpiresAt = Date.now() + (data.expires_in * 1000) - 60000;
 
-  return cachedAccessToken as string;
+  return cachedAccessToken;
 }
 
 async function igdbRequest(endpoint: string, body: string): Promise<any> {
   const accessToken = await getAccessToken();
 
   const response = await fetch(`https://api.igdb.com/v4/${endpoint}`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Client-ID': env.IGDB_CLIENT_ID,
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'text/plain',
+      "Client-ID": env.IGDB_CLIENT_ID,
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "text/plain",
     },
     body: body,
   });
@@ -53,7 +52,7 @@ async function igdbRequest(endpoint: string, body: string): Promise<any> {
     throw new Error(`IGDB API error: ${response.status} ${response.statusText}`);
   }
 
-  return await response.json();
+  return response.json();
 }
 
 export const igdbTools: ToolSet = {
@@ -86,18 +85,18 @@ export const igdbTools: ToolSet = {
         limit ${limit};
       `;
 
-      const results = await igdbRequest('games', query);
+      const results = await igdbRequest("games", query);
 
       if (!results || results.length === 0) {
         throw new Error("No games found with that name");
       }
 
       const games = results.map((game: any) => {
-        const releaseDate = game.first_release_date 
-          ? new Date(game.first_release_date * 1000).toLocaleDateString('fr-FR', { 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
+        const releaseDate = game.first_release_date
+          ? new Date(game.first_release_date * 1000).toLocaleDateString("fr-FR", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
             })
           : "Date inconnue";
 
@@ -118,7 +117,7 @@ export const igdbTools: ToolSet = {
           summary: game.summary || "Pas de description disponible",
           rating: game.rating ? Math.round(game.rating) : null,
           ratingCount: game.rating_count || 0,
-          coverUrl: game.cover?.url ? `https:${game.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+          coverUrl: game.cover?.url ? `https:${game.cover.url.replace("t_thumb", "t_cover_big")}` : null,
           platforms: game.platforms?.map((p: any) => p.name).join(", ") || "Inconnu",
           genres: game.genres?.map((g: any) => g.name).join(", ") || "Inconnu",
           developers: developers,
@@ -166,7 +165,7 @@ export const igdbTools: ToolSet = {
         where id = ${gameId};
       `;
 
-      const results = await igdbRequest('games', query);
+      const results = await igdbRequest("games", query);
 
       if (!results || results.length === 0) {
         throw new Error("Game not found");
@@ -174,11 +173,11 @@ export const igdbTools: ToolSet = {
 
       const game = results[0];
 
-      const releaseDate = game.first_release_date 
-        ? new Date(game.first_release_date * 1000).toLocaleDateString('fr-FR', { 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
+      const releaseDate = game.first_release_date
+        ? new Date(game.first_release_date * 1000).toLocaleDateString("fr-FR", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
           })
         : "Date inconnue";
 
@@ -193,7 +192,7 @@ export const igdbTools: ToolSet = {
         .join(", ") || "Inconnu";
 
       const officialWebsite = game.websites?.find((w: any) => w.category === 1);
-      const youtubeVideo = game.videos?.[0]?.video_id 
+      const youtubeVideo = game.videos?.[0]?.video_id
         ? `https://www.youtube.com/watch?v=${game.videos[0].video_id}`
         : null;
 
@@ -207,8 +206,8 @@ export const igdbTools: ToolSet = {
         ratingCount: game.rating_count || 0,
         aggregatedRating: game.aggregated_rating ? Math.round(game.aggregated_rating) : null,
         aggregatedRatingCount: game.aggregated_rating_count || 0,
-        coverUrl: game.cover?.url ? `https:${game.cover.url.replace('t_thumb', 't_cover_big')}` : null,
-        screenshots: game.screenshots?.map((s: any) => `https:${s.url.replace('t_thumb', 't_screenshot_big')}`).slice(0, 3) || [],
+        coverUrl: game.cover?.url ? `https:${game.cover.url.replace("t_thumb", "t_cover_big")}` : null,
+        screenshots: game.screenshots?.map((s: any) => `https:${s.url.replace("t_thumb", "t_screenshot_big")}`).slice(0, 3) || [],
         platforms: game.platforms?.map((p: any) => p.name).join(", ") || "Inconnu",
         genres: game.genres?.map((g: any) => g.name).join(", ") || "Inconnu",
         themes: game.themes?.map((t: any) => t.name).join(", ") || null,

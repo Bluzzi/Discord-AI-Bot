@@ -1,7 +1,6 @@
 import type { ToolSet } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
-import { env } from "../utils/env";
 
 const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
 
@@ -21,7 +20,7 @@ export const steamTools: ToolSet = {
       }
 
       const response = await fetch(
-        `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${STEAM_API_KEY}&vanityurl=${username}`
+        `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${STEAM_API_KEY}&vanityurl=${username}`,
       );
 
       if (!response.ok) {
@@ -30,7 +29,7 @@ export const steamTools: ToolSet = {
 
       const data: any = await response.json();
 
-      if (!data.response || data.response.success !== 1) {
+      if (data.response?.success !== 1) {
         throw new Error("Username not found");
       }
 
@@ -61,7 +60,7 @@ export const steamTools: ToolSet = {
       }
 
       const response = await fetch(
-        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`
+        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`,
       );
 
       if (!response.ok) {
@@ -70,7 +69,7 @@ export const steamTools: ToolSet = {
 
       const data: any = await response.json();
 
-      if (!data.response || !data.response.games) {
+      if (!data.response?.games) {
         throw new Error("No games found or profile is private");
       }
 
@@ -78,7 +77,7 @@ export const steamTools: ToolSet = {
         appid: game.appid,
         name: game.name,
         playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
-        playtime2WeeksHours: game.playtime_2weeks ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0
+        playtime2WeeksHours: game.playtime_2weeks ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
       }));
 
       return {
@@ -106,7 +105,7 @@ export const steamTools: ToolSet = {
       }
 
       const response = await fetch(
-        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&format=json`
+        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&format=json`,
       );
 
       if (!response.ok) {
@@ -115,7 +114,7 @@ export const steamTools: ToolSet = {
 
       const data: any = await response.json();
 
-      if (!data.response || !data.response.games) {
+      if (!data.response?.games) {
         throw new Error("No games found or profile is private");
       }
 
@@ -129,7 +128,7 @@ export const steamTools: ToolSet = {
         appid: game.appid,
         name: game.name,
         playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
-        playtime2WeeksHours: game.playtime_2weeks ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0
+        playtime2WeeksHours: game.playtime_2weeks ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
       };
     },
   }),
@@ -157,7 +156,7 @@ export const steamTools: ToolSet = {
       }
 
       const response = await fetch(
-        `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&appid=${appId}&l=french`
+        `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&appid=${appId}&l=french`,
       );
 
       if (!response.ok) {
@@ -166,7 +165,7 @@ export const steamTools: ToolSet = {
 
       const data: any = await response.json();
 
-      if (!data.playerstats || !data.playerstats.achievements) {
+      if (!data.playerstats?.achievements) {
         throw new Error("No achievements found or profile is private");
       }
 
@@ -187,8 +186,8 @@ export const steamTools: ToolSet = {
           .map((a: any) => ({
             name: a.name || a.apiname,
             description: a.description,
-            unlockedAt: new Date(a.unlocktime * 1000).toISOString()
-          }))
+            unlockedAt: new Date(a.unlocktime * 1000).toISOString(),
+          })),
       };
     },
   }),
@@ -201,7 +200,7 @@ export const steamTools: ToolSet = {
     }),
     execute: async ({ steamId, appId = 730 }) => {
       const response = await fetch(
-        `https://steamcommunity.com/inventory/${steamId}/${appId}/2?l=french&count=100`
+        `https://steamcommunity.com/inventory/${steamId}/${appId}/2?l=french&count=100`,
       );
 
       if (!response.ok) {
@@ -218,14 +217,15 @@ export const steamTools: ToolSet = {
 
       data.assets.forEach((asset: any) => {
         const description = data.descriptions.find(
-          (d: any) => d.classid === asset.classid && d.instanceid === asset.instanceid
+          (d: any) => d.classid === asset.classid && d.instanceid === asset.instanceid,
         );
 
         if (description) {
           const key = description.market_hash_name || description.name;
           if (itemCounts.has(key)) {
             itemCounts.get(key)!.count++;
-          } else {
+          }
+          else {
             itemCounts.set(key, { count: 1, description });
           }
         }
@@ -237,30 +237,30 @@ export const steamTools: ToolSet = {
         count: data.count,
         tradable: data.description.tradable === 1,
         marketable: data.description.marketable === 1,
-        rarity: data.description.tags?.find((t: any) => t.category === 'Rarity')?.localized_tag_name,
-        weapon: data.description.tags?.find((t: any) => t.category === 'Weapon')?.localized_tag_name,
+        rarity: data.description.tags?.find((t: any) => t.category === "Rarity")?.localized_tag_name,
+        weapon: data.description.tags?.find((t: any) => t.category === "Weapon")?.localized_tag_name,
       }));
 
-      const rarityOrder: { [key: string]: number } = {
-        'Extraordinaire': 1,
-        'Exotique': 2,
-        'Classifiée': 3,
-        'Restreinte': 4,
-        'De qualité militaire': 5,
-        'De qualité industrielle': 6,
-        'De qualité grand public': 7
+      const rarityOrder: Record<string, number> = {
+        "Extraordinaire": 1,
+        "Exotique": 2,
+        "Classifiée": 3,
+        "Restreinte": 4,
+        "De qualité militaire": 5,
+        "De qualité industrielle": 6,
+        "De qualité grand public": 7,
       };
 
       items.sort((a, b) => {
-        const rarityA = rarityOrder[a.rarity || ''] || 999;
-        const rarityB = rarityOrder[b.rarity || ''] || 999;
+        const rarityA = rarityOrder[a.rarity || ""] || 999;
+        const rarityB = rarityOrder[b.rarity || ""] || 999;
         return rarityA - rarityB;
       });
 
       return {
         totalItems: data.assets.length,
         uniqueItems: items.length,
-        items: items.slice(0, 15)
+        items: items.slice(0, 15),
       };
     },
   }),
@@ -281,7 +281,7 @@ export const steamTools: ToolSet = {
       }
 
       const response = await fetch(
-        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`
+        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`,
       );
 
       if (!response.ok) {
@@ -290,7 +290,7 @@ export const steamTools: ToolSet = {
 
       const data: any = await response.json();
 
-      if (!data.response || !data.response.games) {
+      if (!data.response?.games) {
         throw new Error("No games found or profile is private");
       }
 
@@ -304,14 +304,13 @@ export const steamTools: ToolSet = {
         throw new Error("No games found");
       }
 
-      const mostPlayed = games.reduce((max: any, game: any) => 
-        game.playtimeHours > max.playtimeHours ? game : max
+      const mostPlayed = games.reduce((max: any, game: any) => game.playtimeHours > max.playtimeHours ? game : max,
       );
 
       return {
         name: mostPlayed.name,
         appid: mostPlayed.appid,
-        playtimeHours: mostPlayed.playtimeHours
+        playtimeHours: mostPlayed.playtimeHours,
       };
     },
   }),

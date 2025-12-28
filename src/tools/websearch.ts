@@ -1,7 +1,7 @@
 import type { ToolSet } from "ai";
+import { webSearch } from "#/utils/web-search";
 import { tool } from "ai";
 import { z } from "zod";
-import { webSearch } from "#/utils/web-search";
 
 export const websearchTools: ToolSet = {
   searchInternet: tool({
