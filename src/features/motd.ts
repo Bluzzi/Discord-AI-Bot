@@ -17,13 +17,8 @@ type HolidayContext =
   | { mode: "rss" };
 
 const fetchFeedTitles = async (url: string, limit: number): Promise<string[]> => {
-  try {
-    const feed = await rss.parseURL(url);
-    return feed.items.slice(0, limit).map((item: { title?: string }) => item.title ?? "").filter(Boolean);
-  }
-  catch (error) {
-    throw new Error(`Failed to fetch RSS feed: ${url}`, { cause: error });
-  }
+  const feed = await rss.parseURL(url);
+  return feed.items.slice(0, limit).map((item: { title?: string }) => item.title ?? "").filter(Boolean);
 };
 
 const getNextFixedDate = (today: Day, month: number, dayOfMonth: number): Day => {
