@@ -302,11 +302,35 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     },
   });
 
-  // Send the bot reply and stop typing:
+  // Check if silent actions were executed:
+  const silentActions = [
+    "joinVoiceChannel",
+    "leaveVoiceChannel",
+    "moveMember",
+    "disconnectMember",
+    "muteMember",
+    "unmuteMember",
+    "sendWebhookMessage",
+  ];
+
+  const executedTools = result.steps.flatMap((step) => 
+    step.toolCalls?.map((toolCall) => toolCall.toolName) || []
+  );
+
+  const hasSilentAction = executedTools.some((toolName) => 
+    silentActions.includes(toolName)
+  );
+
+  logger.info(`Executed tools: ${executedTools.join(", ")}`);
+  logger.info(`Has silent action: ${hasSilentAction}`);
   logger.info(`Message from JP in ${channel.id}: ${result.text}`);
-  for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
-    const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
-    await message.reply(chunk);
+  
+  if (!hasSilentAction && result.text && result.text.trim().length > 0) {
+    for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
+      const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
+      await message.reply(chunk);
+    }
   }
+  
   stopTyping();
 };
