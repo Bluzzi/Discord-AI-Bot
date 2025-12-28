@@ -2,7 +2,9 @@ import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
 import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
 import { discordTools } from "#/tools/discord";
+import { giphyTools } from "#/tools/giphy";
 import { igdbTools } from "#/tools/igdb";
+import { newsTools } from "#/tools/news";
 import { pastebinTools } from "#/tools/pastebin";
 import { steamTools } from "#/tools/steam";
 import { websearchTools } from "#/tools/websearch";
@@ -215,6 +217,41 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       Utilise ces outils quand on te demande des infos sur un jeu ou un profil Steam.
       Présente les résultats de manière claire et concise avec les infos les plus pertinentes.
 
+      📰 ACTUALITÉS (NEWS):
+      Tu as accès à des flux RSS pour récupérer les dernières actualités:
+      - getLatestNews: Récupère les dernières actualités d'une catégorie (france, monde, crypto, tech)
+      - searchNewsInFeed: Recherche des actualités spécifiques par mots-clés dans une catégorie
+
+      Catégories disponibles:
+      - "france": Actualités françaises (The Conversation France)
+      - "monde": Actualités mondiales (The Conversation Global)
+      - "crypto": Actualités crypto-monnaies (Coin Academy)
+      - "tech": Actualités technologie (IGN)
+
+      ⚠️ RÈGLES ABSOLUES NEWS:
+      - Utilise searchNewsInFeed quand on cherche des news sur un sujet précis (ex: "actualités sur Bitcoin", "news IA")
+      - Utilise getLatestNews pour avoir un aperçu général des dernières actualités d'une catégorie
+      - Présente les résultats de manière concise avec titre + lien
+      - NE récupère PAS tout le flux, utilise la limite appropriée (5-10 articles max sauf demande spécifique)
+
+      🎬 GIFS (GIPHY):
+      Tu as accès à Giphy pour partager des GIFs:
+      - searchGif: Recherche un GIF par mot-clé (ex: "happy", "confused", "celebration")
+      - getTrendingGifs: Récupère les GIFs tendances du moment
+
+      ⚠️ RÈGLES ABSOLUES GIPHY - MODÉRATION STRICTE:
+      - Utilise les GIFs avec MODÉRATION - uniquement quand ils apportent vraiment de la valeur
+      - Situations appropriées: réactions humoristiques, célébrations, émotions fortes
+      - N'ABUSE PAS: maximum 1 GIF par conversation, sauf si explicitement demandé
+      - Les GIFs doivent être pertinents et appropriés au contexte
+      
+      ⚠️ COMMENT ENVOYER UN GIF:
+      1. Appelle searchGif avec le mot-clé (ex: "cat" pour un chat)
+      2. Récupère l'URL du premier GIF dans le résultat (gifs[0].url)
+      3. Réponds UNIQUEMENT avec cette URL, RIEN D'AUTRE
+      4. Format de réponse: juste l'URL brute (ex: https://giphy.com/gifs/xxxxx)
+      5. PAS de texte avant, PAS de texte après, JUSTE L'URL
+
       RÈGLES DE RÉPONSE - TRÈS IMPORTANT:
       4. ⚠️ TYPES DE RÉPONSES SELON LES ACTIONS:
 
@@ -295,7 +332,9 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     prompt: message.content,
     tools: {
       ...discordTools,
+      ...giphyTools,
       ...igdbTools,
+      ...newsTools,
       ...pastebinTools,
       ...steamTools,
       ...websearchTools,
@@ -313,24 +352,22 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     "sendWebhookMessage",
   ];
 
-  const executedTools = result.steps.flatMap((step) => 
-    step.toolCalls?.map((toolCall) => toolCall.toolName) || []
+  const executedTools = result.steps.flatMap((step) => step.toolCalls.map((toolCall) => toolCall.toolName),
   );
 
-  const hasSilentAction = executedTools.some((toolName) => 
-    silentActions.includes(toolName)
+  const hasSilentAction = executedTools.some((toolName) => silentActions.includes(toolName),
   );
 
   logger.info(`Executed tools: ${executedTools.join(", ")}`);
-  logger.info(`Has silent action: ${hasSilentAction}`);
+  logger.info(`Has silent action: ${String(hasSilentAction)}`);
   logger.info(`Message from JP in ${channel.id}: ${result.text}`);
-  
+
   if (!hasSilentAction && result.text && result.text.trim().length > 0) {
     for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
       const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
       await message.reply(chunk);
     }
   }
-  
+
   stopTyping();
 };

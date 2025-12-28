@@ -15,6 +15,7 @@ const schema = z.object({
   IGDB_ACCESS_TOKEN: z.string().optional(),
 
   PASTEBIN_API_KEY: z.string().optional(),
+  GIPHY_API_KEY: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);
