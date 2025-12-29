@@ -13,7 +13,7 @@
     "@discordjs/voice": "^0.19.0",
     "@giphy/js-fetch-api": "^5.7.0",
     "@snazzah/davey": "^0.1.9",
-    "ai": "^6.0.1",
+    "ai": "^6.0.3",
     "croner": "^9.1.0",
     "dayjs": "^1.11.19",
     "dedent": "^1.7.1",
