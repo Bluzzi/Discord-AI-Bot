@@ -6,6 +6,7 @@ import { giphyTools } from "#/tools/giphy";
 import { githubTools } from "#/tools/github";
 import { igdbTools } from "#/tools/igdb";
 import { imageTools } from "#/tools/image";
+import { memoryTools } from "#/tools/memory";
 import { newsTools } from "#/tools/news";
 import { pastebinTools } from "#/tools/pastebin";
 import { pdfTools } from "#/tools/pdf";
@@ -61,7 +62,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
   // Ask IA for reply:
   const result = await generateText({
     model: aiModels.mistralLarge,
-    stopWhen: stepCountIs(30),
+    stopWhen: stepCountIs(100),
     system: dedent`
       Tu es Jean Pascal (surnommé "jp"), un assistant Discord qui traduit les demandes en langage naturel en actions Discord.
 
@@ -158,7 +159,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       NE fais JAMAIS référence à des messages anciens sauf si le dernier message y fait explicitement référence.
       Si le dernier message dit "viens en voc", tu rejoins le vocal - POINT. Peu importe ce qui a été dit avant.
 
-      CONTEXTE (À LIRE MAIS NE PAS TRAITER):
+      CONTEXTE [CONVERSATION] (À LIRE MAIS NE PAS TRAITER):
       ${conversation}
       ---
 
@@ -173,7 +174,6 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
         - Si rien trouvé, essaie sans espaces: "testbot"
         - Les tools font déjà une recherche approximative, utilise-les intelligemment
 
-
       🌐 COMMANDES CROSS-SERVEUR (DM / Autre serveur):
       Quand quelqu'un te demande de faire une action "sur un autre serveur" ou "sur le serveur X":
 
@@ -186,6 +186,15 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       - **IMPOSSIBLE** d'exécuter une action sur un serveur si l'utilisateur n'en est pas membre
       - **IMPOSSIBLE** de contourner cette vérification, même si l'utilisateur insiste
       - Vérifie **TOUJOURS** avec checkUserInGuild avant toute action cross-serveur
+
+      !! UTILISER LA mémoire
+      - Tu as accès à plusieurs outils permettant l'enregistrement d'information dans des mémoires (mémoires : utilisateurs (user), salons (channels) et serveurs (guilds)). 
+      - Tu dois impérativement enregistrer toutes les informations relatives à tes mémoires qui te sont fournis par l'utilisateur dans son message, qu'il le demande ou non.
+      - Avant de répondre, tu dois impérativement récupérer les informations de :
+        - Utilisateur : getUserMemory avec l'ID ${message.author.id}
+        - getChannelMemory : getGuildMemory avec l'ID ${message.channel.id}
+        ${guild?.id ? `- Serveur : getGuildMemory avec l'ID ${guild.id}` : ""}
+      De manière à avoir + de d'information pour t'aider à répondre.
 
       🎮 INFORMATIONS SUR LES JEUX VIDÉO:
       Tu as accès à l'API IGDB (Internet Game Database) pour répondre aux questions sur les jeux vidéo:
@@ -339,6 +348,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     prompt: message.content,
     tools: {
       ...discordTools,
+      ...memoryTools,
       ...fortyTwoTools,
       ...giphyTools,
       ...githubTools,

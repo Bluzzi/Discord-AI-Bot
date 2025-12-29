@@ -1,9 +1,10 @@
 import { replyToMessage } from "#/features/reply-to-message";
 import { discordClient } from "#/services/discord";
+import { memoryTools } from "#/tools/memory";
 import { aiModels } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
-import { generateText, Output } from "ai";
+import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
 
 trigger.discordEvent("messageCreate", async (message) => {
@@ -36,6 +37,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   const decision = await generateText({
     model: aiModels.mistralFast,
+    stopWhen: stepCountIs(10),
     output: Output.choice({
       options: ["OUI", "NON"],
     }),
@@ -46,6 +48,14 @@ trigger.discordEvent("messageCreate", async (message) => {
       1. Identifier qui parle dans les derniers messages
       2. Repérer si le bot a participé récemment (3 derniers messages)
       3. Déterminer si le nouveau message s'adresse au bot ou continue une conversation avec lui
+
+      !! UTILISER LA mémoire
+      - Tu as accès à plusieurs outils permettant la récupération d'information dans des mémoires (mémoires : utilisateurs (user), salons (channels) et serveurs (guilds)). 
+      - Avant de répondre, tu dois impérativement récupérer les informations de :
+        - Utilisateur : getUserMemory avec l'ID ${message.author.id}
+        - getChannelMemory : getGuildMemory avec l'ID ${message.channel.id}
+        ${message.guild?.id ? `- Serveur : getGuildMemory avec l'ID ${message.guild.id}` : ""}
+      Certaines informations en mémoire peuvent affecter les cas ou tu dois répondre ou non.
 
       ✅ Réponds "OUI" si :
       - Le bot est EXPLICITEMENT mentionné par son nom (Jean pascal, JP, jp, Jean pascalou, Jean, yo jean, yo jean pascal, yo jp)
@@ -101,6 +111,9 @@ trigger.discordEvent("messageCreate", async (message) => {
       
       Le bot doit-il répondre ?
     `,
+    tools: {
+      ...memoryTools,
+    },
   });
 
   if (decision.output === "OUI") {
