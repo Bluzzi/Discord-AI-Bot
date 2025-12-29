@@ -1,6 +1,6 @@
 import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
-import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
+import { DISCORD_MAX_MESSAGE_LENGTH } from "#/services/discord";
 import { fortyTwoTools } from "#/tools/42";
 import { discordTools } from "#/tools/discord";
 import { giphyTools } from "#/tools/giphy";

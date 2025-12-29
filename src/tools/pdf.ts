@@ -3,7 +3,7 @@ import { tool } from "ai";
 import puppeteer from "puppeteer";
 import { z } from "zod";
 import { AttachmentBuilder } from "discord.js";
-import { discordClient } from "#/discord/client";
+import { discordClient } from "#/services/discord";
 
 
 export const pdfTools: ToolSet = {

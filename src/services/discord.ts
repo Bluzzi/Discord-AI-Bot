@@ -1,4 +1,8 @@
+import { env } from "#/utils/env";
+import { logger } from "#/utils/logger";
 import { Client, GatewayIntentBits, Partials } from "discord.js";
+
+export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
 export const discordClient = new Client({
   intents: [
@@ -14,3 +18,6 @@ export const discordClient = new Client({
     Partials.Message,
   ],
 });
+
+await discordClient.login(env.DISCORD_BOT_TOKEN);
+logger.info("Discord bot successfully started!");

@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
 import { getVoiceConnection, joinVoiceChannel } from "@discordjs/voice";
-import { discordClient } from "#/discord";
+import { discordClient } from "#/services/discord";
 import { tool } from "ai";
 import { ChannelType } from "discord.js";
 import { z } from "zod";

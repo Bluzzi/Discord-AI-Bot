@@ -1,4 +1,4 @@
-import { discordClient } from "#/discord";
+import { discordClient } from "#/services/discord";
 import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
 import { aiModels } from "#/utils/ai-model";

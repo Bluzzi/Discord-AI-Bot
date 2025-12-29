@@ -1,20 +1,14 @@
-// Env loading:
-import { env } from "#/utils/env";
-
-// Imports:
-import { discordClient } from "#/discord";
-import { logger } from "#/utils/logger";
-import { uncaughtExceptionHandler } from "#/utils/process";
+import { logger } from "./utils/logger";
 
 // Uncaught exception handler:
-uncaughtExceptionHandler();
+process.on("uncaughtException", (error, origin) => {
+  logger.error(`Process Exception: ${origin}`, error.stack);
+  process.exit(1);
+});
 
-// Start bot:
-await discordClient.login(env.DISCORD_BOT_TOKEN);
-logger.info("Bot started!");
-
-// Start server:
-await import("#/utils/server");
+// Start services:
+await import("#/services/discord");
+await import("#/services/server");
 
 // Load triggers:
 await import("#/triggers/message-create.djs-event");

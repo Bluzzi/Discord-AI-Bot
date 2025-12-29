@@ -1,8 +1,8 @@
 import type { ClientEvents } from "discord.js";
 import type { Context } from "hono";
-import { discordClient } from "#/discord";
+import { discordClient } from "#/services/discord";
+import { server } from "#/services/server";
 import { logger } from "#/utils/logger";
-import { server } from "#/utils/server";
 import { Cron } from "croner";
 
 const discordEvent = <K extends keyof ClientEvents>(

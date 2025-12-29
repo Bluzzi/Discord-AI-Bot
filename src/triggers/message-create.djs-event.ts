@@ -1,4 +1,4 @@
-import { discordClient } from "#/discord";
+import { discordClient } from "#/services/discord";
 import { replyToMessage } from "#/features/reply-to-message";
 import { aiModels } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
