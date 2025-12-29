@@ -20,7 +20,7 @@ An AI bot for Discord designed to act freely using various tools.
   Other package managers MUST NOT be used.
 
 - **TypeScript** and **ESLint** are used to enforce code quality.  
-  After any code modification, the following commands MUST be executed and all reported errors MUST be fixed:
+  After any codebase update, the following commands MUST be executed and all reported errors MUST be fixed:
   - `pnpm run ts:check` — checks for TypeScript errors.
   - `pnpm run lint:fix` — automatically fixes ESLint errors when possible and reports remaining ones.
 
