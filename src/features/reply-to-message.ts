@@ -528,8 +528,8 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     },
   });
 
-  // Check if silent actions were executed:
-  const silentActions = [
+  // Tools listing:
+  const silentTools = [
     "joinVoiceChannel",
     "leaveVoiceChannel",
     "moveMember",
@@ -539,20 +539,18 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     "sendWebhookMessage",
   ];
 
-  const executedTools = result.steps.flatMap((step) => step.toolCalls.map((toolCall) => toolCall.toolName),
-  );
-
-  const hasSilentAction = executedTools.some((toolName) => silentActions.includes(toolName),
-  );
+  const executedTools = result.steps.flatMap((step) => step.toolCalls.map((toolCall) => toolCall.toolName));
+  const hasSilentTools = executedTools.some((toolName) => silentTools.includes(toolName));
 
   logger.info(`Executed tools: ${executedTools.join(", ")}`);
-  logger.info(`Has silent action: ${String(hasSilentAction)}`);
+  logger.info(`Has silent action: ${String(hasSilentTools)}`);
   logger.info(`Message from JP in ${channel.id}: ${result.text}`);
 
-  if (!hasSilentAction && result.text && result.text.trim().length > 0) {
+  // Send reply if needed:
+  if (!hasSilentTools && result.text.trim().length > 0) {
     for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
       const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
-      await message.reply(chunk);
+      await message.reply(chunk).catch(async () => message.channel.send(chunk));
     }
   }
 
