@@ -1,25 +1,28 @@
 import type { ToolSet } from "ai";
 import { tool } from "ai";
+import dedent from "dedent";
 import { z } from "zod";
 
 export const imageTools: ToolSet = {
   searchImage: tool({
-    description: `Recherche des images en ligne via l'API Brave Search.
+    description: dedent`
+      Recherche des images en ligne via l'API Brave Search.
     
-Utilise l'API Brave Image Search pour trouver des images pertinentes selon une requête.
-Retourne une liste d'URLs d'images avec leurs métadonnées (titre, dimensions, source).
+      Utilise l'API Brave Image Search pour trouver des images pertinentes selon une requête.
+      Retourne une liste d'URLs d'images avec leurs métadonnées (titre, dimensions, source).
 
-Exemples d'utilisation:
-- "logo Nike" → Trouve le logo de Nike
-- "logo Basic-Fit" → Trouve le logo de Basic-Fit
-- "icône téléphone" → Trouve des icônes de téléphone
-- "illustration montagne" → Trouve des illustrations de montagnes
+      Exemples d'utilisation:
+      - "logo Nike" → Trouve le logo de Nike
+      - "logo Basic-Fit" → Trouve le logo de Basic-Fit
+      - "icône téléphone" → Trouve des icônes de téléphone
+      - "illustration montagne" → Trouve des illustrations de montagnes
 
-Ce tool est particulièrement utile pour:
-- Trouver des logos d'entreprises pour les PDFs
-- Chercher des icônes et illustrations
-- Récupérer des images de produits
-- Trouver des photos pour enrichir du contenu`,
+      Ce tool est particulièrement utile pour:
+      - Trouver des logos d'entreprises pour les PDFs
+      - Chercher des icônes et illustrations
+      - Récupérer des images de produits
+      - Trouver des photos pour enrichir du contenu
+    `,
     inputSchema: z.object({
       query: z.string().describe("La requête de recherche d'image (ex: 'logo Nike', 'icône téléphone', 'illustration montagne')"),
       count: z.number().optional().describe("Nombre de résultats à retourner (1-20, défaut: 5)"),
