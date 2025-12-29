@@ -36,7 +36,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@swc/core"
+      "@swc/core",
+      "puppeteer"
     ]
   }
 }
