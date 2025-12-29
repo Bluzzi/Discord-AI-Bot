@@ -1,11 +1,11 @@
-import { discordClient } from "#/discord";
+import { discordClient, discordEvent } from "#/discord";
 import { replyToMessage } from "#/features/reply-to-message";
 import { aiModels } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { generateText, Output } from "ai";
 import dedent from "dedent";
 
-discordClient.on("messageCreate", async (message) => {
+discordEvent("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!discordClient.user) return;
   if (!message.channel.isTextBased()) return;
