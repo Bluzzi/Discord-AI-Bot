@@ -8,7 +8,20 @@ const giphyFetch = new GiphyFetch(env.GIPHY_API_KEY || "");
 
 export const giphyTools: ToolSet = {
   searchGif: tool({
-    description: "Recherche un GIF sur Giphy selon un mot-clé ou une phrase. Utilise ce tool avec MODÉRATION - uniquement quand un GIF apporte vraiment de la valeur à la conversation (humour, réaction appropriée, etc.). N'abuse PAS de cet outil.",
+    description: `Recherche un GIF sur Giphy selon un mot-clé ou une phrase.
+
+⚠️ RÈGLES ABSOLUES - MODÉRATION STRICTE:
+- Utilise les GIFs avec MODÉRATION - uniquement quand ils apportent vraiment de la valeur
+- Situations appropriées: réactions humoristiques, célébrations, émotions fortes
+- N'ABUSE PAS: maximum 1 GIF par conversation, sauf si explicitement demandé
+- Les GIFs doivent être pertinents et appropriés au contexte
+
+⚠️ COMMENT ENVOYER UN GIF:
+1. Appelle searchGif avec le mot-clé (ex: "cat" pour un chat)
+2. Récupère l'URL du premier GIF dans le résultat (gifs[0].url)
+3. Réponds UNIQUEMENT avec cette URL, RIEN D'AUTRE
+4. Format de réponse: juste l'URL brute (ex: https://giphy.com/gifs/xxxxx)
+5. PAS de texte avant, PAS de texte après, JUSTE L'URL`,
     inputSchema: z.object({
       query: z.string().describe("Mot-clé ou phrase pour rechercher un GIF (ex: 'happy', 'celebration', 'confused')"),
       limit: z.number().min(1).max(10).default(1).describe("Nombre de GIFs à récupérer (entre 1 et 10, par défaut 1)"),

@@ -5,21 +5,32 @@ import { z } from "zod";
 export const imageTools: ToolSet = {
   searchImage: tool({
     description: `Recherche des images en ligne via l'API Brave Search.
-    
-Utilise l'API Brave Image Search pour trouver des images pertinentes selon une requête.
-Retourne une liste d'URLs d'images avec leurs métadonnées (titre, dimensions, source).
 
-Exemples d'utilisation:
+⚠️ RÈGLES ABSOLUES:
+- Utilise searchImage quand quelqu'un demande une image, un logo, une icône, une illustration
+- Pour les logos d'entreprises: cherche "logo [nom entreprise] PNG transparent"
+- Pour les icônes: cherche "icône [sujet] PNG transparent"
+- Le tool retourne une liste d'images avec leurs URLs
+
+⚠️ COMMENT ENVOYER UNE IMAGE - PROCESSUS COMPLET:
+1. Appelle searchImage avec la requête (ex: "logo Nike PNG transparent")
+2. ATTENDS que le tool s'exécute et retourne son résultat
+3. Le tool retourne un objet avec results[0].url contenant l'URL de l'image
+4. Réponds DIRECTEMENT avec l'URL de l'image récupérée, RIEN D'AUTRE
+5. Format de réponse: juste l'URL brute (ex: https://example.com/image.png)
+6. PAS de texte avant, PAS de texte après, JUSTE L'URL
+7. Discord affichera automatiquement l'image si l'URL est directe
+
+⚠️ INTERDIT:
+- N'affiche JAMAIS le JSON du tool call (ex: searchImage{...})
+- N'affiche JAMAIS les paramètres de recherche
+- ATTENDS toujours le résultat avant de répondre
+
+EXEMPLES D'UTILISATION:
 - "logo Nike" → Trouve le logo de Nike
-- "logo Basic-Fit" → Trouve le logo de Basic-Fit
-- "icône téléphone" → Trouve des icônes de téléphone
-- "illustration montagne" → Trouve des illustrations de montagnes
-
-Ce tool est particulièrement utile pour:
-- Trouver des logos d'entreprises pour les PDFs
-- Chercher des icônes et illustrations
-- Récupérer des images de produits
-- Trouver des photos pour enrichir du contenu`,
+- "logo Basic-Fit PNG transparent" → Trouve le logo de Basic-Fit sans fond
+- "icône téléphone PNG" → Trouve des icônes de téléphone
+- "illustration montagne" → Trouve des illustrations de montagnes`,
     inputSchema: z.object({
       query: z.string().describe("La requête de recherche d'image (ex: 'logo Nike', 'icône téléphone', 'illustration montagne')"),
       count: z.number().optional().describe("Nombre de résultats à retourner (1-20, défaut: 5)"),

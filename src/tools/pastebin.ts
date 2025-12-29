@@ -58,7 +58,22 @@ export function formatTextForPaste(text: string, title = "Text Content"): string
 
 export const pastebinTools: ToolSet = {
   createPastebin: tool({
-    description: "Create a Pastebin link to share large text content. Use this tool when someone asks for a very large text (Bible passages, long code, extensive lists, etc.) or explicitly requests a pastebin. The paste will expire after 1 week and be unlisted (private link).",
+    description: `Crée un lien Pastebin pour partager de très gros textes.
+
+⚠️ RÈGLES ABSOLUES:
+- Utilise-le quand quelqu'un demande un TRÈS GROS TEXTE (passages de la Bible, longs extraits, code volumineux, listes extensives, etc.)
+- Utilise-le quand quelqu'un demande EXPLICITEMENT un pastebin
+- Le paste expire après 1 semaine et est privé (lien non-listé)
+- Si le texte demandé dépasse 2000 caractères ou si c'est explicitement demandé, utilise createPastebin au lieu de répondre directement
+
+⚠️ IMPORTANT - FORMAT DE RÉPONSE:
+- CRITIQUE: Quand tu partages un lien pastebin, tu DOIS envoyer UNIQUEMENT l'URL BRUTE sans AUCUN formatage
+- Format INTERDIT: [texte](https://pastebin.com/xxxxx) ❌
+- Format OBLIGATOIRE: https://pastebin.com/xxxxx ✅
+- Exemple de réponse correcte: "Voilà ton pastebin : https://pastebin.com/xxxxx 😎"
+- NE JAMAIS utiliser la syntaxe markdown [lien](url) pour les liens pastebin
+
+⚠️ SI L'UTILISATEUR DEMANDE UN PDF, DONNE LUI UN PDF, PAS UN PASTEBIN`,
     inputSchema: z.object({
       content: z.string().describe("The text content to paste (can be very large)"),
       title: z.string().optional().describe("Title for the paste (e.g., 'Bible - Genesis 1', 'Code Example', etc.)"),

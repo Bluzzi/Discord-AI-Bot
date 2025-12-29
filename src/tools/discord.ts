@@ -1372,7 +1372,43 @@ export const discordTools: ToolSet = {
   }),
 
   sendWebhookMessage: tool({
-    description: "Send a message using a webhook (to impersonate someone)",
+    description: `Envoie un message en utilisant un webhook (pour se faire passer pour quelqu'un).
+
+⚠️⚠️⚠️ RÈGLE ABSOLUE - WEBHOOKS INTERDITS PAR DÉFAUT ⚠️⚠️⚠️
+
+QUAND CRÉER UN WEBHOOK - MET TOUJOURS LA PHOTO DE PROFIL DU USER À IMITER:
+Les webhooks sont des outils SPÉCIAUX que tu ne dois JAMAIS utiliser sauf si on te le demande EXPLICITEMENT avec des formulations comme:
+- "fais-toi passer pour X"
+- "réponds à la place de X"
+- "parle en tant que X"
+- "imite X"
+- "envoie un message en tant que X"
+
+❌ STRICTEMENT INTERDIT:
+- Utiliser les webhooks "pour mieux répondre"
+- Utiliser les webhooks sans qu'on te le demande EXPLICITEMENT ou sans que ce soit explicitement sous-entendu
+
+✅ RÈGLE D'OR: Si le message ne contient PAS les mots "fais-toi passer", "à la place de", "en tant que", ou "imite" → NE TOUCHE PAS AUX WEBHOOKS.
+
+FLUX SELON LE CAS:
+
+CAS 1 - La personne EST sur le serveur:
+1. Utilise getMembers pour récupérer l'ID et displayName du membre
+2. ⚠️ OBLIGATOIRE: Utilise getUserAvatar pour récupérer son avatarUrl (NE SAUTE JAMAIS CETTE ÉTAPE)
+3. Utilise getWebhooks sur le salon actuel pour voir si un webhook existe avec ce nom
+4. Si webhook existe → utilise-le, sinon → createWebhook avec le displayName et avatarUrl
+5. Utilise sendWebhookMessage avec le webhookUrl, displayName et avatarUrl
+
+CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
+1. N'utilise pas de webhook et réponds normalement, ne parle pas du fait que tu n'as pas réussi à créer une webhook
+
+⚠️ IMPORTANT:
+- TOUJOURS appeler getUserAvatar pour les membres du serveur avant de créer le webhook
+- Ne refuse JAMAIS de te faire passer pour quelqu'un sous prétexte qu'il n'est pas sur le serveur
+- Réutilise les webhooks existants avec le même nom
+- Utilise TOUJOURS le canal actuel
+- AUCUNE confirmation, AUCUN message de type "Message envoyé en mode X" ou similaire
+- Après avoir utilisé sendWebhookMessage, ne réponds RIEN. Le webhook parle pour toi.`,
     inputSchema: z.object({
       webhookUrl: z.string().describe("The webhook URL to send the message through"),
       content: z.string().describe("The message content to send"),
