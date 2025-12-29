@@ -1,41 +1,54 @@
-This directory contains all entry points used to trigger the bot: Discord events, webhooks, and scheduled jobs.
+This directory contains all entry points used to trigger the bot.
 
-Code in this directory must stay minimal. Its only responsibility is to trigger an AI call.
-Do not embed complex logic or constrain how the AI reacts.
+Il est important de différencier deux choses :
+- `TRIGGER`: Discord events, webhooks, and scheduled jobs. Ainsi que le code conditionnel permettant optionnellement de choisir si l'IA doit être appelé ou non.
+- `AI GENERATION`: L'appel direct de l'IA, c'est ici que la prompt ce situe, que les outils sont mis à disposition et que le contenu généré par l'IA est ensuite utilisé, ceci ce fait généralement en utilisant la function `generateText` du package `ai`.
+
+Le code doit être le plus proche possible d'un simple `TRIGGER` qui lance `AI GENERATION`, de manière à laisser libre arbitre à l'IA. Toute contrainte alogorythmique doit être limité au maximum.
+
+Si le code génératif de la réponse l'IA doit être réutiliser dans plusieurs `TRIGGER` ou qu'il devient long (plusieurs centaines de lignes), il est possible de déplacer ce code du `AI GENERATION` dans `/src/features`, en gardant la logique du `TRIGGER` dans `/src/triggers`. L'event `message-create.djs-event.ts` est un bonne exemple pour ce principe.
+
+Chaque `TRIGGER` possède une function spécifique pour être utilisé, d'écrit ci-dessous. Il est important de noter que ces functions permettent toutes de gérer les erreur de manière global, conformément au code présent dans `/src/utils/trigger.ts`.
+
+L'intégralité des fichiers triggers doivent être lancé au démarrage du projet dans `/src/main.ts` sous le commentaire approprié.
 
 ## Discord Events
 
-Discord event files must be named `<event-name>.djs-event.ts`, using kebab-case **in the filename only**.
+Création d'un listener sur un event Discord en particulier.
 
-Events are registered through `trigger.discordEvent`, which handles top-level error management.
+Nomminiation du fichier : `<event-name>.djs-event.ts`.
 
-Example:
-
+Example de code (`message-create.djs-event.ts`):
 ```ts
-// message-create.djs-event.ts
 import { trigger } from "#/utils/trigger";
 
 trigger.discordEvent("messageCreate", async (message) => {
-  // No try/catch needed here
+  // TRIGGER and AI GENERATION
 });
 ```
 
 ## Webhooks
 
-Webhook files must be named `<webhook-source>.webhook.ts`.
+Les webhooks permettent de s'abonner à des évènements de sources externes.
 
-There is currently no strict standard for webhook implementation. The agent is free to choose an appropriate structure, as long as the code remains simple and focused on triggering the AI.
+Nomminiation du fichier : `<webhook-source>.webhook.ts`.
+
+Example de code (`counter-strike-game-end.webhook.ts`):
+```ts
+import { trigger } from "#/utils/trigger";
+
+trigger.webhook("counter-strike-game-send", "/counter-strike/game-end", async () => {
+  // TRIGGER and AI GENERATION
+});
+```
 
 ## CRON Jobs
 
 CRON jobs are used for scheduled or recurring triggers. 
 
-File name must use kebab-case and clearly describe the job’s intent: <job-name.cron.ts>.
+Nomminiation du fichier : `<job-name>.cron.ts`.
 
-They must be registered using `trigger.cron`, which provides centralized error handling and optional immediate execution.
-
-Example:
-
+Example de code (`daily-summary.cron.ts`):
 ```ts
 // daily-summary.cron.ts
 trigger.cron(
@@ -45,7 +58,7 @@ trigger.cron(
     // Trigger AI logic here
   },
   { 
-    instantTrigger: false
+    triggerAtStartup: false
   },
 );
 ```

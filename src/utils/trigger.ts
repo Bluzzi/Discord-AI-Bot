@@ -20,7 +20,12 @@ const discordEvent = <K extends keyof ClientEvents>(
   });
 };
 
-const cron = async (cronName: string, cronPattern: string, fn: () => void, options: { instantTrigger: boolean }) => {
+const cron = async (
+  cronName: string,
+  cronPattern: string,
+  fn: () => void,
+  options: { triggerAtStartup: boolean },
+) => {
   const job = new Cron(cronPattern, fn, {
     catch: (error) => {
       logger.error(
@@ -30,7 +35,7 @@ const cron = async (cronName: string, cronPattern: string, fn: () => void, optio
     },
   });
 
-  if (options.instantTrigger) await job.trigger();
+  if (options.triggerAtStartup) await job.trigger();
 };
 
 export const trigger = { discordEvent, cron };

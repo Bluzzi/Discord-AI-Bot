@@ -74,6 +74,6 @@ await trigger.cron(
     });
   },
   {
-    instantTrigger: true,
+    triggerAtStartup: true,
   },
 );
