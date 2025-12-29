@@ -26,7 +26,18 @@ type RssFeedKey = keyof typeof RSS_FEEDS;
 
 export const newsTools: ToolSet = {
   getLatestNews: tool({
-    description: "Récupère les dernières actualités depuis différents flux RSS. Utilise ce tool quand quelqu'un demande les news, l'actualité, ou des infos récentes sur un sujet spécifique.",
+    description: `Récupère les dernières actualités depuis différents flux RSS.
+
+CATÉGORIES DISPONIBLES:
+- "france": Actualités françaises (The Conversation France)
+- "monde": Actualités mondiales (The Conversation Global)
+- "crypto": Actualités crypto-monnaies (Coin Academy)
+- "tech": Actualités technologie (IGN)
+
+⚠️ RÈGLES:
+- Utilise getLatestNews pour avoir un aperçu général des dernières actualités d'une catégorie
+- Présente les résultats de manière concise avec titre + lien
+- NE récupère PAS tout le flux, utilise la limite appropriée (5-10 articles max sauf demande spécifique)`,
     inputSchema: z.object({
       category: z.enum(["france", "monde", "crypto", "tech"]).describe("Catégorie d'actualités à récupérer: 'france' pour actualités françaises, 'monde' pour actualités mondiales, 'crypto' pour crypto-monnaies, 'tech' pour technologie"),
       limit: z.number().min(1).max(20).default(5).describe("Nombre d'articles à récupérer (entre 1 et 20, par défaut 5)"),
@@ -66,7 +77,11 @@ export const newsTools: ToolSet = {
   }),
 
   searchNewsInFeed: tool({
-    description: "Recherche des actualités spécifiques dans un flux RSS en filtrant par mots-clés. Utilise ce tool quand quelqu'un cherche des news sur un sujet précis.",
+    description: `Recherche des actualités spécifiques dans un flux RSS en filtrant par mots-clés.
+
+⚠️ RÈGLES:
+- Utilise searchNewsInFeed quand on cherche des news sur un sujet précis (ex: "actualités sur Bitcoin", "news IA")
+- Présente les résultats de manière concise avec titre + lien`,
     inputSchema: z.object({
       category: z.enum(["france", "monde", "crypto", "tech"]).describe("Catégorie d'actualités à rechercher"),
       keywords: z.string().describe("Mots-clés à rechercher dans les titres et contenus des articles (ex: 'bitcoin', 'IA', 'politique')"),

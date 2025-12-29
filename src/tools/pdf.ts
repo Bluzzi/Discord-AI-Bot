@@ -10,7 +10,23 @@ export const pdfTools: ToolSet = {
     generatePDF: tool({
         description: `GÉNÈRE UN PDF PROFESSIONNEL - CE TOOL FONCTIONNE PARFAITEMENT.
 
-Tu DOIS créer un HTML COMPLET avec cette structure:
+⚠️ RÈGLE ABSOLUE: SI quelqu'un demande un PDF (mise en demeure, CV, facture, rapport, proposition d'emploi, etc.):
+1. Si le PDF nécessite un logo/image: appelle searchImage EN INTERNE, attends le résultat, récupère l'URL
+2. Crée un HTML complet avec CSS (inclus l'URL de l'image si nécessaire)
+3. Appelle generatePDF avec cet HTML et le channelId
+4. Le tool va uploader le PDF directement sur Discord
+5. Réponds UNIQUEMENT: "Voici ton pdf tu peux le télécharger ci-dessous"
+
+⚠️ INTERDIT:
+- Dire "j'ai un souci technique"
+- Proposer des alternatives (message privé, pastebin, etc.)
+- Ignorer le résultat de generatePDF
+- Créer un pastebin à la place
+- Dire "Voilà ton PDF : [URL]" ou mentionner une URL
+- Afficher le JSON de searchImage ou generatePDF
+- S'arrêter après searchImage sans générer le PDF
+
+STRUCTURE HTML COMPLÈTE REQUISE:
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -25,21 +41,14 @@ Tu DOIS créer un HTML COMPLET avec cette structure:
 </body>
 </html>
 
-IMPORTANT POUR LES IMAGES (logos, icônes, illustrations):
-- Pour TOUTES les images (logos, icônes, illustrations): utilise OBLIGATOIREMENT le tool searchImage
-  Exemples:
-  * Logo d'entreprise: searchImage avec query="logo Basic-Fit"
-  * Icône: searchImage avec query="icône téléphone PNG"
-  * Illustration: searchImage avec query="illustration montagne"
+IMAGES (logos, icônes, illustrations):
+- Pour TOUTES les images: utilise OBLIGATOIREMENT le tool searchImage
+- Exemples: Logo d'entreprise: searchImage avec query="logo Basic-Fit PNG transparent"
 - Le tool searchImage retourne une liste d'URLs d'images avec leurs métadonnées
 - Utilise la première URL retournée (results[0].url) dans ton HTML
-- Toutes les URLs sont absolues et directement utilisables dans des balises <img>
 - Exemple: <img src="https://example.com/logo.png" alt="Logo Basic-Fit" style="width: 200px;">
-- Privilégie les images avec de bonnes dimensions (width/height) pour une meilleure qualité
 
-Le PDF sera uploadé directement sur Discord dans le channel spécifié.
-N'INVENTE PAS de problèmes techniques - ce tool fonctionne.
-NE LAISSE AUCUN PLACEHOLDER le but est que tu remplisse / imagine 100% du pdf`,
+Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techniques - ce tool fonctionne.`,
         inputSchema: z.object({
             channelId: z.string().describe("L'ID du channel Discord où uploader le PDF"),
             html: z.string().describe("Le contenu HTML complet du document. DOIT inclure <!DOCTYPE html>, <html>, <head> avec <style> pour le CSS, et <body>. Utilise du CSS moderne pour le style (flexbox, grid, etc.). Pour les images, utilise des URLs absolues ou data URIs."),
