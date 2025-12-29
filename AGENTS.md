@@ -37,6 +37,8 @@ An AI bot for Discord designed to act freely using various tools.
   - Folder and file names MUST use `kebab-case`
   - Variable names MUST use `camelCase`
 
+- Use of `dedent` for multi-line strings, allowing clean and consistent indentation to be preserved.
+
 ## Protected Areas (Read-Only)
 
 The following files and directories are **STRICTLY read-only** and MUST NOT be modified:
@@ -50,15 +52,3 @@ The following files and directories are **STRICTLY read-only** and MUST NOT be m
 - `tsconfig.json`
 
 Instead of editing these files, the AI can suggest changes to the developer and then let the developer apply them before proceeding with the update.
-
-## Action Rules by Area
-
-### `src/events/**`
-
-No modifications are currently allowed for AI in this area.  
-If modifications become allowed in the future, explicit action rules MUST be documented here.
-
-### `src/features/**`
-
-No modifications are currently allowed for AI in this area.  
-If modifications become allowed in the future, explicit action rules MUST be documented here.

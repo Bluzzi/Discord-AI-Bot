@@ -15,15 +15,13 @@ const schema = z.object({
   IGDB_ACCESS_TOKEN: z.string().optional(),
 
   PASTEBIN_API_KEY: z.string().optional(),
+
   GIPHY_API_KEY: z.string().optional(),
+
   FORTYTWO_CLIENT_ID: z.string().optional(),
   FORTYTWO_CLIENT_SECRET: z.string().optional(),
+
   GITHUB_TOKEN: z.string().optional(),
-  S3_ENDPOINT: z.string().optional(),
-  S3_ACCESS_KEY_ID: z.string().optional(),
-  S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_BUCKET_NAME: z.string().optional(),
-  S3_REGION: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);
