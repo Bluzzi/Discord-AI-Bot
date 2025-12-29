@@ -8,13 +8,22 @@
     "ts:check": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.0",
+    "@ai-sdk/mistral": "^3.0.1",
+    "@ai-sdk/openai": "^3.0.1",
+    "@discordjs/voice": "^0.19.0",
+    "@giphy/js-fetch-api": "^5.7.0",
+    "@snazzah/davey": "^0.1.9",
     "ai": "^6.0.1",
+    "croner": "^9.1.0",
     "dayjs": "^1.11.19",
     "dedent": "^1.7.1",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
-    "hono": "^4.11.1",
+    "libsodium-wrappers": "^0.7.15",
+    "puppeteer": "^24.34.0",
+    "rss-parser": "^3.13.0",
+    "sodium-native": "^5.0.10",
+    "ts-duckduckgo-search": "^0.3.1",
     "winston": "^3.19.0",
     "zod": "^4.2.1"
   },
@@ -27,7 +36,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@swc/core"
+      "@swc/core",
+      "puppeteer"
     ]
   }
 }

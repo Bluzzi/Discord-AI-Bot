@@ -1,68 +1,109 @@
+import { discordClient } from "#/discord";
 import { replyToMessage } from "#/features/reply-to-message";
-import { aiModel } from "#/utils/ai";
-import { botDiscord } from "#/utils/discord";
+import { aiModels } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { generateText, Output } from "ai";
 import dedent from "dedent";
-import { MessageType } from "discord.js";
-import z from "zod";
 
-/**
- * Check if the AI need to reply to the message or not.
- */
-botDiscord.on("messageCreate", async (message) => {
+discordClient.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  if (!message.guildId) return;
-  if (!botDiscord.user?.bot) return;
+  if (!discordClient.user) return;
   if (!message.channel.isTextBased()) return;
 
-  // Based on bot mention:
-  if (message.mentions.has(botDiscord.user.id)) {
-    logger.info(`Reply to ${message.author.displayName} based on mention`);
+  // Always reply in DM:
+  if (!message.guildId) {
+    logger.info(`Reply to ${message.author.username} in DM (100%)`);
     await replyToMessage(message);
     return;
   }
 
-  // Based on a reply to the bot:
-  if (message.type === MessageType.Reply && message.reference?.messageId) {
-    const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-
-    if (repliedMessage.author.id === botDiscord.user.id) {
-      logger.info(`Reply to ${message.author.displayName} based on a reply to the bot`);
-      await replyToMessage(message);
-    }
+  // Always reply on mention:
+  if (message.mentions.has(discordClient.user.id)) {
+    logger.info(`Reply to ${message.author.displayName} based on mention (100%)`);
+    await replyToMessage(message);
+    return;
   }
 
-  // Based on the last 5 channel messages:
-  const lastMessages = await message.channel.messages.fetch({ limit: 5 });
-  const botMember = await message.guild?.members.fetch(botDiscord.user.id);
+  // Check if the bot is good for the current subject:
+  const lastMessages = await message.channel.messages.fetch({ limit: 10 });
+  lastMessages.sort((a, b) => a.createdTimestamp > b.createdTimestamp ? 1 : -1);
 
-  const completion = await generateText({
-    model: aiModel,
-    prompt: dedent`
-      Voici les 5 derniers messages de la conversation, tu dois me renvoyer le pourcentage
-      pertinence que le bot (nommé "${botDiscord.user.username}", ou "${botMember?.displayName}") aurait à
-      répondre quelque chose à la suite de ces messages.
+  const conversation = lastMessages.map((msg) => `${msg.author.username}: ${msg.content}`).join("\n");
 
-      Le pourcentage augmente fortement si le bot est inclu dans la conversation, par exemple,
-      s'il a déjà parlé ou était mentionné et qu'il est logique qu'il réponde.
+  const botMember = await message.guild?.members.fetch(discordClient.user.id);
+  const botNames = [discordClient.user.username, botMember?.displayName, botMember?.nickname].filter(Boolean).join(", ");
 
-      Le pourcentage baisse fortement s'il s'agit d'une discussion ou le bot n'est pas du tout
-      inclu ou mentionné.
-
-      Voici la conversation :
-      ${lastMessages.map((element) => `${element.author.username}: ${element.content}`).join("\n")}
-    `,
-    output: Output.object({
-      schema: z.object({
-        needToReplyPercent: z.number().min(0).max(1).describe("Pourcentage allant de 0 à 1"),
-      }),
+  const decision = await generateText({
+    model: aiModels.mistralFast,
+    output: Output.choice({
+      options: ["OUI", "NON"],
     }),
+    system: dedent`
+      Tu es un assistant qui détermine si le bot Discord nommé "${botNames}" (aussi appelé "jp" ou "jean pascal") doit répondre à un message.
+
+      📋 ANALYSE REQUISE :
+      1. Identifier qui parle dans les derniers messages
+      2. Repérer si le bot a participé récemment (3 derniers messages)
+      3. Déterminer si le nouveau message s'adresse au bot ou continue une conversation avec lui
+
+      ✅ Réponds "OUI" si :
+      - Le bot est EXPLICITEMENT mentionné par son nom (Jean pascal, JP, jp, Jean pascalou, Jean, yo jean, yo jean pascal, yo jp)
+      - Le message contient "jp droit de réponse" ou "jean pascal droit de réponse"
+      - Le bot a parlé dans les 2 DERNIERS messages ET le nouveau message est une réponse directe (même sans mention explicite)
+      - Le bot vient de poser une question ET l'utilisateur y répond
+      - Une demande d'action Discord EXPLICITE et DIRECTE est faite ("rejoins le vocal", "déplace moi", "crée un salon", "kick X")
+
+      🔥 CAS SPÉCIAL - CONTINUITÉ DE CONVERSATION :
+      Si le DERNIER message est du bot ET qu'il pose une question ou engage la conversation (ex: "T'as besoin d'un truc ou t'es juste en mode small talk ?"), alors le message suivant de l'utilisateur est FORCÉMENT une réponse au bot → "OUI"
+
+      Exemples de continuité :
+      - Bot: "T'as besoin d'un truc ?" → User: "ouais en mode small talk" → OUI
+      - Bot: "Ça va ?" → User: "ouais tranquille" → OUI
+      - Bot: "Tu veux quoi ?" → User: "rien juste parler" → OUI
+
+      ❌ Réponds "NON" dans ces cas :
+
+      **Questions générales au groupe (NE PAS RÉPONDRE) :**
+      - "qui fait...", "quelqu'un pour...", "on fait quoi", "vous faites quoi"
+      - "qui veut...", "ça vous dit de...", "vous êtes où"
+      - Toute question posée au groupe sans mention du bot
+
+      **Conversations entre utilisateurs (NE PAS INTERROMPRE) :**
+      - 2+ utilisateurs qui discutent entre eux SANS que le bot ait participé récemment
+      - Échanges qui ne mentionnent pas le bot ET le bot n'a pas parlé dans les 3 derniers messages
+
+      **Messages ambigus SANS contexte (DOUTE = NON) :**
+      - Salutations générales ("salut", "yo", "ça va", "coucou") SAUF si le bot vient de parler
+      - Messages qui pourraient s'adresser à quelqu'un d'autre
+      - Contexte où le bot n'a clairement pas sa place
+
+      **Parler DU bot sans l'interpeller (NE PAS RÉPONDRE) :**
+      - Messages qui parlent du bot à la 3ème personne ("il", "le bot", "jean pascal fait...")
+      - Discussions ENTRE utilisateurs À PROPOS du bot
+      - Commentaires sur le comportement du bot sans demande directe
+
+      ⚙️ RÈGLES DE CONTEXTE :
+      - Si le DERNIER message est du bot → le message suivant est probablement pour lui → "OUI"
+      - Si le bot a parlé il y a 2 messages → vérifier si c'est une réponse naturelle → "OUI" si oui
+      - Si le bot a parlé il y a 3+ messages ET n'est pas mentionné → "NON"
+      - Si plusieurs personnes discutent et le bot n'a pas parlé récemment → "NON"
+      - Si le message commence par un nom d'utilisateur (ex: "@user") → "NON" (sauf si c'est le bot)
+
+      🎯 PRINCIPE DIRECTEUR :
+      Le bot doit maintenir les conversations qu'il a initiées ou auxquelles il participe activement. Si le bot vient de parler, il doit écouter la réponse.
+    `,
+    prompt: dedent`
+      Conversation récente :
+      ${conversation}
+      
+      Dernier message de ${message.author.username}: "${message.content}"
+      
+      Le bot doit-il répondre ?
+    `,
   });
 
-  logger.info(`Need to reply percent: ${String(completion.output.needToReplyPercent * 100)}%`);
-  if (completion.output.needToReplyPercent > 0.7) {
-    logger.info(`Reply to ${message.author.displayName} based on the last 5 messages`);
+  if (decision.output === "OUI") {
+    logger.info(`Reply to ${message.author.displayName} based on AI decision`);
     await replyToMessage(message);
   }
 });

@@ -2,12 +2,16 @@
 import { env } from "#/utils/env";
 
 // Imports:
-import { botDiscord } from "#/utils/discord";
+import { discordClient } from "#/discord";
 import { logger } from "#/utils/logger";
 
 // Start bot:
-await botDiscord.login(env.DISCORD_BOT_TOKEN);
+await discordClient.login(env.DISCORD_BOT_TOKEN);
 logger.info("Bot started!");
 
 // Load events:
 await import("#/events/message-create");
+await import("#/events/voice-state-update");
+
+// Load features:
+await import("#/features/motd");

@@ -1,15 +1,167 @@
 import type { ToolSet } from "ai";
-import { botDiscord } from "#/utils/discord";
+import { getVoiceConnection, joinVoiceChannel } from "@discordjs/voice";
+import { discordClient } from "#/discord";
 import { tool } from "ai";
 import { ChannelType } from "discord.js";
 import { z } from "zod";
 
 export const discordTools: ToolSet = {
+  listBotGuilds: tool({
+    description: "List all Discord servers where the bot is present. Use this when someone asks to do something 'on another server' or 'on X server'.",
+    inputSchema: z.object({}),
+    outputSchema: z.array(z.object({
+      id: z.string().describe("Guild ID"),
+      name: z.string().describe("Guild name"),
+      memberCount: z.number().describe("Number of members in the guild"),
+      iconURL: z.string().nullable().describe("Guild icon URL"),
+    })).describe("List of guilds where the bot is present"),
+    execute: async () => {
+      const guilds = discordClient.guilds.cache.map((guild) => ({
+        id: guild.id,
+        name: guild.name,
+        memberCount: guild.memberCount,
+        iconURL: guild.iconURL(),
+      }));
+      return guilds;
+    },
+  }),
+
+  checkUserInGuild: tool({
+    description: "Check if a user is a member of a specific guild and get their permissions. ALWAYS use this before executing actions on a different server.",
+    inputSchema: z.object({
+      userId: z.string().describe("The Discord user ID to check"),
+      guildId: z.string().describe("The Discord guild/server ID"),
+    }),
+    outputSchema: z.object({
+      isMember: z.boolean().describe("Whether the user is a member of the guild"),
+      canExecuteActions: z.boolean().describe("Whether the user can execute actions on this guild"),
+      error: z.string().optional().describe("Error message if any"),
+      userId: z.string().optional().describe("User ID"),
+      username: z.string().optional().describe("Username"),
+      displayName: z.string().optional().describe("Display name in the guild"),
+      guildId: z.string().optional().describe("Guild ID"),
+      guildName: z.string().optional().describe("Guild name"),
+      isAdmin: z.boolean().optional().describe("Whether the user is an administrator"),
+      permissions: z.array(z.string()).optional().describe("List of permissions"),
+      canKick: z.boolean().optional().describe("Can kick members"),
+      canBan: z.boolean().optional().describe("Can ban members"),
+      canManageRoles: z.boolean().optional().describe("Can manage roles"),
+      canManageChannels: z.boolean().optional().describe("Can manage channels"),
+      canManageGuild: z.boolean().optional().describe("Can manage guild"),
+      canMuteMembers: z.boolean().optional().describe("Can mute members"),
+      canMoveMembers: z.boolean().optional().describe("Can move members"),
+    }),
+    execute: async ({ userId, guildId }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+
+      if (!guild) {
+        return {
+          error: "Guild not found",
+          isMember: false,
+          canExecuteActions: false,
+        };
+      }
+
+      try {
+        const member = await guild.members.fetch(userId);
+
+        if (!member) {
+          return {
+            error: "User is not a member of this guild",
+            isMember: false,
+            canExecuteActions: false,
+          };
+        }
+
+        const permissions = member.permissions.toArray();
+        const isAdmin = member.permissions.has("Administrator");
+
+        return {
+          isMember: true,
+          canExecuteActions: true,
+          userId: userId,
+          username: member.user.username,
+          displayName: member.displayName,
+          guildId: guildId,
+          guildName: guild.name,
+          isAdmin: isAdmin,
+          permissions: permissions,
+          canKick: member.permissions.has("KickMembers"),
+          canBan: member.permissions.has("BanMembers"),
+          canManageRoles: member.permissions.has("ManageRoles"),
+          canManageChannels: member.permissions.has("ManageChannels"),
+          canManageGuild: member.permissions.has("ManageGuild"),
+          canMuteMembers: member.permissions.has("MuteMembers"),
+          canMoveMembers: member.permissions.has("MoveMembers"),
+        };
+      }
+      catch (error) {
+        return {
+          error: "User is not a member of this guild",
+          isMember: false,
+          canExecuteActions: false,
+        };
+      }
+    },
+  }),
+
+  checkPermissions: tool({
+    description: "Check what permissions a user has in the guild",
+    inputSchema: z.object({
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to check permissions for"),
+    }),
+    outputSchema: z.object({
+      userId: z.string().describe("User ID"),
+      username: z.string().describe("Username"),
+      displayName: z.string().describe("Display name in the guild"),
+      isAdmin: z.boolean().describe("Whether the user is an administrator"),
+      permissions: z.array(z.string()).describe("List of all permissions"),
+      canKick: z.boolean().describe("Can kick members"),
+      canBan: z.boolean().describe("Can ban members"),
+      canManageRoles: z.boolean().describe("Can manage roles"),
+      canManageChannels: z.boolean().describe("Can manage channels"),
+      canManageGuild: z.boolean().describe("Can manage guild"),
+      canMuteMembers: z.boolean().describe("Can mute members"),
+      canMoveMembers: z.boolean().describe("Can move members"),
+    }),
+    execute: async ({ guildId, memberId }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      const member = await guild.members.fetch(memberId);
+      if (!member) throw new Error("Member not found");
+
+      const permissions = member.permissions.toArray();
+      const isAdmin = member.permissions.has("Administrator");
+
+      return {
+        userId: memberId,
+        username: member.user.username,
+        displayName: member.displayName,
+        isAdmin: isAdmin,
+        permissions: permissions,
+        canKick: member.permissions.has("KickMembers"),
+        canBan: member.permissions.has("BanMembers"),
+        canManageRoles: member.permissions.has("ManageRoles"),
+        canManageChannels: member.permissions.has("ManageChannels"),
+        canManageGuild: member.permissions.has("ManageGuild"),
+        canMuteMembers: member.permissions.has("MuteMembers"),
+        canMoveMembers: member.permissions.has("MoveMembers"),
+      };
+    },
+  }),
+
   getGuilds: tool({
     description: "Get all Discord servers (guilds)",
     inputSchema: z.object({}),
+    outputSchema: z.array(z.object({
+      id: z.string().describe("Guild ID"),
+      name: z.string().describe("Guild name"),
+      memberCount: z.number().describe("Number of members in the guild"),
+    })).describe("List of all guilds"),
     execute: async () => {
-      const guilds = botDiscord.guilds.cache.map((guild) => ({
+      const guilds = discordClient.guilds.cache.map((guild) => ({
         id: guild.id,
         name: guild.name,
         memberCount: guild.memberCount,
@@ -21,11 +173,16 @@ export const discordTools: ToolSet = {
   getChannels: tool({
     description: "Get all channels in a guild, optionally filter by name",
     inputSchema: z.object({
-      guildId: z.string(),
-      nameFilter: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      nameFilter: z.string().optional().describe("Optional filter to search channels by name"),
     }),
+    outputSchema: z.array(z.object({
+      id: z.string().describe("Channel ID"),
+      name: z.string().describe("Channel name"),
+      type: z.string().describe("Channel type"),
+    })).describe("List of channels in the guild"),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -49,20 +206,47 @@ export const discordTools: ToolSet = {
   }),
 
   getMembers: tool({
-    description: "Get all members in a guild, optionally filter by username or display name",
+    description: "Get all members in a guild, optionally filter by username or display name. Returns voiceChannelId and voiceChannelName for members in voice channels.",
     inputSchema: z.object({
-      guildId: z.string(),
-      nameFilter: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      nameFilter: z.string().optional().describe("Optional filter to search members by username or display name"),
     }),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
 
-      await guild.members.fetch();
+      let members;
 
-      let members = guild.members.cache.map((member) => {
+      if (nameFilter) {
+        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+
+        if ((/^\d+$/).exec(filter)) {
+          const member = await guild.members.fetch(filter);
+          members = [member];
+        }
+        else {
+          const fetchedMembers = await guild.members.fetch({
+            query: nameFilter,
+            limit: 100,
+          });
+          members = Array.from(fetchedMembers.values());
+        }
+      }
+      else {
+        const voiceMembers = guild.members.cache.filter((m) => m.voice.channelId);
+
+        if (voiceMembers.size > 0) {
+          members = Array.from(voiceMembers.values());
+        }
+        else {
+          const fetchedMembers = await guild.members.fetch({ limit: 100 });
+          members = Array.from(fetchedMembers.values());
+        }
+      }
+
+      return members.map((member) => {
         const presence = member.presence;
         const activities = presence?.activities.map((activity) => ({
           name: activity.name,
@@ -82,32 +266,24 @@ export const discordTools: ToolSet = {
           voiceChannelName: member.voice.channel?.name,
         };
       });
-
-      if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
-        members = members.filter((m) => {
-          const username = m.username.toLowerCase().replace(/\s+/g, "");
-          const displayName = m.displayName.toLowerCase().replace(/\s+/g, "");
-          return username.includes(filter)
-            || displayName.includes(filter)
-            || filter.includes(username)
-            || filter.includes(displayName);
-        });
-      }
-
-      return members;
     },
   }),
 
   moveMember: tool({
     description: "Move a member to a voice channel",
     inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      channelId: z.string(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to move"),
+      channelId: z.string().describe("The voice channel ID to move the member to"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the member moved"),
+      channelName: z.string().describe("Name of the destination channel"),
+      action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, channelId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -128,18 +304,28 @@ export const discordTools: ToolSet = {
 
       await member.voice.setChannel(channel);
 
-      return `Moved ${member.displayName} to ${channel.name}`;
+      return {
+        success: true,
+        memberName: member.displayName,
+        channelName: channel.name,
+        action: "moved",
+      };
     },
   }),
 
   disconnectMember: tool({
     description: "Disconnect a member from their voice channel",
     inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to disconnect"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the member disconnected"),
+      action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -155,18 +341,58 @@ export const discordTools: ToolSet = {
 
       await member.voice.disconnect();
 
-      return `Disconnected ${member.displayName}`;
+      return {
+        success: true,
+        memberName: member.displayName,
+        action: "disconnected",
+      };
+    },
+  }),
+
+  renameMember: tool({
+    description: "Change the nickname of a member in the guild",
+    inputSchema: z.object({
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to rename"),
+      nickname: z.string().describe("The new nickname for the member"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      oldNickname: z.string().describe("Previous nickname"),
+      newNickname: z.string().describe("New nickname"),
+      memberId: z.string().describe("Member ID"),
+    }),
+    execute: async ({ guildId, memberId, nickname }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) {
+        throw new Error("Guild not found");
+      }
+
+      const member = await guild.members.fetch(memberId);
+      if (!member) {
+        throw new Error("Member not found");
+      }
+
+      const oldNickname = member.nickname || member.user.username;
+      await member.setNickname(nickname);
+
+      return {
+        success: true,
+        oldNickname: oldNickname,
+        newNickname: nickname,
+        memberId: member.id,
+      };
     },
   }),
 
   getRoles: tool({
     description: "Get all roles in a guild, optionally filter by name",
     inputSchema: z.object({
-      guildId: z.string(),
-      nameFilter: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      nameFilter: z.string().optional().describe("Optional filter to search roles by name"),
     }),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
       }
@@ -193,117 +419,137 @@ export const discordTools: ToolSet = {
   createRole: tool({
     description: "Create a new role in a guild",
     inputSchema: z.object({
-      guildId: z.string(),
-      name: z.string(),
-      color: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      name: z.string().describe("The name for the new role"),
+      color: z.string().optional().describe("Optional hex color code for the role (e.g., #FF5733)"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      roleId: z.string().describe("ID of the created role"),
+      roleName: z.string().describe("Name of the created role"),
+      color: z.string().describe("Color of the role in hex format"),
     }),
     execute: async ({ guildId, name, color }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const role = await guild.roles.create({
         name,
         color: color ? parseInt(color.replace("#", ""), 16) : undefined,
       });
 
-      return `Created role ${role.name} (ID: ${role.id})`;
+      return {
+        success: true,
+        roleId: role.id,
+        roleName: role.name,
+        color: role.hexColor,
+      };
     },
   }),
 
   deleteRole: tool({
     description: "Delete a role from a guild",
     inputSchema: z.object({
-      guildId: z.string(),
-      roleId: z.string(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      roleId: z.string().describe("The role ID to delete"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      roleName: z.string().describe("Name of the deleted role"),
+      roleId: z.string().describe("ID of the deleted role"),
     }),
     execute: async ({ guildId, roleId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const role = guild.roles.cache.get(roleId);
-      if (!role) {
-        throw new Error("Role not found");
-      }
+      if (!role) throw new Error("Role not found");
 
+      const roleName = role.name;
       await role.delete();
-
-      return `Deleted role ${role.name}`;
+      return {
+        success: true,
+        roleName: roleName,
+        roleId: roleId,
+      };
     },
   }),
 
   addRoleToMember: tool({
     description: "Add a role to a member",
     inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      roleId: z.string(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to add the role to"),
+      roleId: z.string().describe("The role ID to add"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the member"),
+      roleName: z.string().describe("Name of the role added"),
+      action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
+      if (!member) throw new Error("Member not found");
 
       const role = guild.roles.cache.get(roleId);
-      if (!role) {
-        throw new Error("Role not found");
-      }
+      if (!role) throw new Error("Role not found");
 
       await member.roles.add(role);
-
-      return `Added role ${role.name} to ${member.displayName}`;
+      return {
+        success: true,
+        memberName: member.displayName,
+        roleName: role.name,
+        action: "added",
+      };
     },
   }),
 
   removeRoleFromMember: tool({
     description: "Remove a role from a member",
     inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      roleId: z.string(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to remove the role from"),
+      roleId: z.string().describe("The role ID to remove"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the member"),
+      roleName: z.string().describe("Name of the role removed"),
+      action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
+      if (!member) throw new Error("Member not found");
 
       const role = guild.roles.cache.get(roleId);
-      if (!role) {
-        throw new Error("Role not found");
-      }
+      if (!role) throw new Error("Role not found");
 
       await member.roles.remove(role);
-
-      return `Removed role ${role.name} from ${member.displayName}`;
+      return {
+        success: true,
+        memberName: member.displayName,
+        roleName: role.name,
+        action: "removed",
+      };
     },
   }),
 
   getCategories: tool({
     description: "Get all categories in a guild, optionally filter by name",
     inputSchema: z.object({
-      guildId: z.string(),
-      nameFilter: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      nameFilter: z.string().optional().describe("Optional filter to search categories by name"),
     }),
     execute: async ({ guildId, nameFilter }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       let categories = guild.channels.cache
         .filter((channel) => channel.type === ChannelType.GuildCategory)
@@ -319,7 +565,6 @@ export const discordTools: ToolSet = {
           return categoryName.includes(filter) || filter.includes(categoryName);
         });
       }
-
       return categories;
     },
   }),
@@ -327,16 +572,20 @@ export const discordTools: ToolSet = {
   createChannel: tool({
     description: "Create a new channel in a guild",
     inputSchema: z.object({
-      guildId: z.string(),
-      name: z.string(),
-      type: z.enum(["text", "voice", "category"]),
-      categoryId: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      name: z.string().describe("The name for the new channel"),
+      type: z.enum(["text", "voice", "category"]).describe("The type of channel to create"),
+      categoryId: z.string().optional().describe("Optional category ID to place the channel under"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      channelId: z.string().describe("ID of the created channel"),
+      channelName: z.string().describe("Name of the created channel"),
+      channelType: z.string().describe("Type of the created channel"),
     }),
     execute: async ({ guildId, name, type, categoryId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const channelType = type === "text" ? ChannelType.GuildText
         : type === "voice" ? ChannelType.GuildVoice
@@ -347,181 +596,295 @@ export const discordTools: ToolSet = {
         type: channelType,
         parent: categoryId || undefined,
       });
-
-      return `Created ${type} channel ${channel.name} (ID: ${channel.id})`;
+      return {
+        success: true,
+        channelId: channel.id,
+        channelName: channel.name,
+        channelType: type,
+      };
     },
   }),
 
   deleteChannel: tool({
     description: "Delete a channel from a guild",
     inputSchema: z.object({
-      guildId: z.string(),
-      channelId: z.string(),
+      channelId: z.string().describe("The channel ID to delete"),
     }),
-    execute: async ({ guildId, channelId }) => {
-      const channel = botDiscord.channels.cache.get(channelId);
-      if (!channel) {
-        throw new Error("Channel not found");
-      }
+    outputSchema: z.object({
+      success: z.literal(true).describe("Whether the operation was successful"),
+      channelName: z.string().nullable().describe("Name of the deleted channel"),
+      channelId: z.string().describe("ID of the deleted channel"),
+    }),
+    execute: async ({ channelId }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel) throw new Error("Channel not found");
 
       const channelName = "name" in channel ? channel.name : "Unknown";
       await channel.delete();
-
-      return `Deleted channel ${channelName}`;
+      return {
+        success: true as const,
+        channelName: channelName,
+        channelId: channelId,
+      };
     },
   }),
 
   renameChannel: tool({
     description: "Rename a channel",
     inputSchema: z.object({
-      channelId: z.string(),
-      newName: z.string(),
+      channelId: z.string().describe("The channel ID to rename"),
+      newName: z.string().describe("The new name for the channel"),
+    }),
+    outputSchema: z.object({
+      success: z.literal(true).describe("Whether the operation was successful"),
+      oldName: z.string().nullable().describe("Previous channel name"),
+      newName: z.string().describe("New channel name"),
+      channelId: z.string().describe("Channel ID"),
     }),
     execute: async ({ channelId, newName }) => {
-      const channel = botDiscord.channels.cache.get(channelId);
-      if (!channel) {
-        throw new Error("Channel not found");
-      }
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel) throw new Error("Channel not found");
 
       const oldName = "name" in channel ? channel.name : "Unknown";
       if ("setName" in channel) {
         await channel.setName(newName);
       }
-
-      return `Renamed channel from ${oldName} to ${newName}`;
-    },
-  }),
-
-  renameMember: tool({
-    description: "Change the nickname of a member in the guild",
-    inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      nickname: z.string(),
-    }),
-    execute: async ({ guildId, memberId, nickname }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
-
-      const member = guild.members.cache.get(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
-
-      const oldNickname = member.nickname || member.user.username;
-      await member.setNickname(nickname);
-
-      return `Renamed member from ${oldNickname} to ${nickname}`;
+      return {
+        success: true as const,
+        oldName: oldName,
+        newName: newName,
+        channelId: channelId,
+      };
     },
   }),
 
   editRolePermissions: tool({
     description: "Edit permissions of a role",
     inputSchema: z.object({
-      guildId: z.string(),
-      roleId: z.string(),
-      permissions: z.array(z.string()),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      roleId: z.string().describe("The role ID to edit permissions for"),
+      permissions: z.array(z.string()).describe("Array of permission strings to set for the role"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      roleName: z.string().describe("Name of the role"),
+      roleId: z.string().describe("ID of the role"),
+      permissions: z.array(z.string()).describe("Updated permissions"),
     }),
     execute: async ({ guildId, roleId, permissions }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const role = guild.roles.cache.get(roleId);
-      if (!role) {
-        throw new Error("Role not found");
-      }
+      if (!role) throw new Error("Role not found");
 
       await role.setPermissions(permissions as any);
-
-      return `Updated permissions for role ${role.name}`;
+      return {
+        success: true,
+        roleName: role.name,
+        roleId: roleId,
+        permissions: permissions,
+      };
     },
   }),
 
   changeRolePosition: tool({
     description: "Change the position of a role in the hierarchy. Position 1 is the highest (just below @everyone at position 0). Lower numbers = higher in hierarchy.",
     inputSchema: z.object({
-      guildId: z.string(),
-      roleId: z.string(),
-      position: z.number(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      roleId: z.string().describe("The role ID to change position for"),
+      position: z.number().describe("The new position for the role (lower numbers = higher in hierarchy)"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      roleName: z.string().describe("Name of the role"),
+      oldPosition: z.number().describe("Previous position"),
+      newPosition: z.number().describe("New position"),
     }),
     execute: async ({ guildId, roleId, position }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const role = guild.roles.cache.get(roleId);
-      if (!role) {
-        throw new Error("Role not found");
-      }
+      if (!role) throw new Error("Role not found");
 
       const oldPosition = role.position;
       await role.setPosition(position);
-
-      return `Moved role ${role.name} from position ${oldPosition} to position ${position}`;
+      return {
+        success: true,
+        roleName: role.name,
+        oldPosition: oldPosition,
+        newPosition: position,
+      };
     },
   }),
 
   kickMember: tool({
     description: "Kick a member from the guild",
     inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      reason: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to kick"),
+      reason: z.string().optional().describe("Optional reason for kicking the member"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the kicked member"),
+      memberId: z.string().describe("ID of the kicked member"),
+      reason: z.string().nullable().describe("Reason for kicking"),
+      action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, reason }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
+      if (!member) throw new Error("Member not found");
 
       await member.kick(reason);
-
-      return `Kicked ${member.displayName}${reason ? ` for: ${reason}` : ""}`;
+      return {
+        success: true,
+        memberName: member.displayName,
+        memberId: memberId,
+        reason: reason || null,
+        action: "kicked",
+      };
     },
   }),
 
   banMember: tool({
     description: "Ban a member from the guild",
     inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      reason: z.string().optional(),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to ban"),
+      reason: z.string().optional().describe("Optional reason for banning the member"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the banned member"),
+      memberId: z.string().describe("ID of the banned member"),
+      reason: z.string().nullable().describe("Reason for banning"),
+      action: z.string().describe("Action performed"),
     }),
     execute: async ({ guildId, memberId, reason }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
+      if (!member) throw new Error("Member not found");
 
       await member.ban({ reason });
+      return {
+        success: true,
+        memberName: member.displayName,
+        memberId: memberId,
+        reason: reason || null,
+        action: "banned",
+      };
+    },
+  }),
 
-      return `Banned ${member.displayName}${reason ? ` for: ${reason}` : ""}`;
+  unbanMember: tool({
+    description: "Unban a member from the guild using their user ID",
+    inputSchema: z.object({
+      guildId: z.string().describe("The Discord guild/server ID"),
+      userId: z.string().describe("The Discord user ID to unban"),
+      reason: z.string().optional().describe("Optional reason for unbanning the user"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      userId: z.string().describe("ID of the unbanned user"),
+      reason: z.string().nullable().describe("Reason for unbanning"),
+      action: z.string().describe("Action performed"),
+    }),
+    execute: async ({ guildId, userId, reason }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      await guild.members.unban(userId, reason);
+      return {
+        success: true,
+        userId: userId,
+        reason: reason || null,
+        action: "unbanned",
+      };
+    },
+  }),
+
+  muteMember: tool({
+    description: "Mute a member in voice channel",
+    inputSchema: z.object({
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to mute"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the muted member"),
+      memberId: z.string().describe("ID of the muted member"),
+      action: z.string().describe("Action performed"),
+    }),
+    execute: async ({ guildId, memberId }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      const member = await guild.members.fetch(memberId);
+      if (!member) throw new Error("Member not found");
+
+      if (!member.voice.channelId) throw new Error("Member is not in a voice channel");
+
+      await member.voice.setMute(true);
+      return {
+        success: true,
+        memberName: member.displayName,
+        memberId: memberId,
+        action: "muted",
+      };
+    },
+  }),
+
+  unmuteMember: tool({
+    description: "Unmute a member in voice channel",
+    inputSchema: z.object({
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to unmute"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      memberName: z.string().describe("Name of the unmuted member"),
+      memberId: z.string().describe("ID of the unmuted member"),
+      action: z.string().describe("Action performed"),
+    }),
+    execute: async ({ guildId, memberId }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      const member = await guild.members.fetch(memberId);
+      if (!member) throw new Error("Member not found");
+
+      if (!member.voice.channelId) throw new Error("Member is not in a voice channel");
+
+      await member.voice.setMute(false);
+      return {
+        success: true,
+        memberName: member.displayName,
+        memberId: memberId,
+        action: "unmuted",
+      };
     },
   }),
 
   sendMessage: tool({
     description: "Send a message to a channel",
     inputSchema: z.object({
-      channelId: z.string(),
-      content: z.string(),
+      channelId: z.string().describe("The channel ID to send the message to"),
+      content: z.string().describe("The message content to send"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      channelId: z.string().describe("ID of the channel"),
+      contentLength: z.number().describe("Length of the message sent"),
     }),
     execute: async ({ channelId, content }) => {
-      const channel = botDiscord.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -529,31 +892,37 @@ export const discordTools: ToolSet = {
       if ("send" in channel) {
         await channel.send(content);
       }
-
-      return `Message sent to channel`;
+      return {
+        success: true,
+        channelId: channelId,
+        contentLength: content.length,
+      };
     },
   }),
 
   sendEmbed: tool({
     description: "Send an embed message to a channel",
     inputSchema: z.object({
-      channelId: z.string(),
-      title: z.string().optional(),
-      description: z.string().optional(),
-      color: z.string().optional(),
+      channelId: z.string().describe("The channel ID to send the embed to"),
+      title: z.string().optional().describe("Optional title for the embed"),
+      description: z.string().optional().describe("Optional description for the embed"),
+      color: z.string().optional().describe("Optional hex color code for the embed (e.g., #FF5733)"),
+      thumbnail: z.object({
+        url: z.string().describe("URL of the thumbnail image"),
+      }).optional().describe("Optional thumbnail image for the embed"),
       fields: z.array(z.object({
-        name: z.string(),
-        value: z.string(),
-        inline: z.boolean().optional(),
-      })).optional(),
+        name: z.string().describe("Field name"),
+        value: z.string().describe("Field value"),
+        inline: z.boolean().optional().describe("Whether the field should be displayed inline"),
+      })).optional().describe("Optional array of fields to add to the embed"),
       buttons: z.array(z.object({
-        label: z.string(),
-        url: z.string().optional(),
-        style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional(),
-      })).optional(),
+        label: z.string().describe("Button label text"),
+        url: z.string().optional().describe("Optional URL for link buttons"),
+        style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional().describe("Optional button style"),
+      })).optional().describe("Optional array of buttons to add to the embed"),
     }),
-    execute: async ({ channelId, title, description, color, fields, buttons }) => {
-      const channel = botDiscord.channels.cache.get(channelId);
+    execute: async ({ channelId, title, description, color, thumbnail, fields, buttons }) => {
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -597,120 +966,29 @@ export const discordTools: ToolSet = {
             title,
             description,
             color: color ? parseInt(color.replace("#", ""), 16) : undefined,
+            thumbnail,
             fields,
           }],
           components: components.length > 0 ? components : undefined,
         });
       }
-
-      return `Embed sent to channel`;
-    },
-  }),
-
-  muteMember: tool({
-    description: "Mute a member in voice channel",
-    inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-    }),
-    execute: async ({ guildId, memberId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
-
-      const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
-
-      if (!member.voice.channelId) {
-        throw new Error("Member is not in a voice channel");
-      }
-
-      await member.voice.setMute(true);
-
-      return `Muted ${member.displayName}`;
-    },
-  }),
-
-  unmuteMember: tool({
-    description: "Unmute a member in voice channel",
-    inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-    }),
-    execute: async ({ guildId, memberId }) => {
-      const guild = botDiscord.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
-
-      const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
-
-      if (!member.voice.channelId) {
-        throw new Error("Member is not in a voice channel");
-      }
-
-      await member.voice.setMute(false);
-
-      return `Unmuted ${member.displayName}`;
-    },
-  }),
-
-  searchInternet: tool({
-    description: "Search the internet for information using DuckDuckGo",
-    inputSchema: z.object({
-      query: z.string(),
-      maxResults: z.number().optional(),
-    }),
-    execute: async ({ query, maxResults = 5 }) => {
-      const searchUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-      const response = await fetch(searchUrl);
-      const data: any = await response.json();
-
-      let results = [];
-
-      if (data.AbstractText) {
-        results.push({
-          title: data.Heading || "Summary",
-          snippet: data.AbstractText,
-          url: data.AbstractURL,
-        });
-      }
-
-      if (data.RelatedTopics && data.RelatedTopics.length > 0) {
-        const topics = data.RelatedTopics
-          .filter((topic: any) => topic.Text && topic.FirstURL)
-          .slice(0, maxResults - results.length)
-          .map((topic: any) => ({
-            title: topic.Text.split(" - ")[0] || "Related",
-            snippet: topic.Text,
-            url: topic.FirstURL,
-          }));
-        results = results.concat(topics);
-      }
-
-      if (results.length === 0) {
-        throw new Error(`No results found for: ${query}`);
-      }
-
-      return results;
+      return {
+        success: true,
+        channelId: channelId,
+        hasButtons: (buttons?.length || 0) > 0,
+      };
     },
   }),
 
   deleteMessagesFromUser: tool({
     description: "Delete messages from a specific user in a channel",
     inputSchema: z.object({
-      channelId: z.string(),
-      userId: z.string(),
-      limit: z.number().optional(),
+      channelId: z.string().describe("The channel ID to delete messages from"),
+      userId: z.string().describe("The user ID whose messages should be deleted"),
+      limit: z.number().optional().describe("Optional maximum number of messages to check (default: 100, max: 100)"),
     }),
     execute: async ({ channelId, userId, limit = 100 }) => {
-      const channel = botDiscord.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -724,8 +1002,12 @@ export const discordTools: ToolSet = {
         }
 
         await channel.bulkDelete(userMessages, true);
-
-        return `Deleted ${userMessages.size} message(s) from user`;
+        return {
+          success: true,
+          deletedCount: userMessages.size,
+          userId: userId,
+          channelId: channelId,
+        };
       }
 
       throw new Error("Channel does not support message deletion");
@@ -735,11 +1017,11 @@ export const discordTools: ToolSet = {
   deleteMessagesInChannel: tool({
     description: "Delete multiple messages in a channel",
     inputSchema: z.object({
-      channelId: z.string(),
-      limit: z.number().optional(),
+      channelId: z.string().describe("The channel ID to delete messages from"),
+      limit: z.number().optional().describe("Optional maximum number of messages to delete (default: 100, max: 100)"),
     }),
     execute: async ({ channelId, limit = 100 }) => {
-      const channel = botDiscord.channels.cache.get(channelId);
+      const channel = discordClient.channels.cache.get(channelId);
       if (!channel?.isTextBased()) {
         throw new Error("Channel not found or not a text channel");
       }
@@ -752,8 +1034,11 @@ export const discordTools: ToolSet = {
         }
 
         await channel.bulkDelete(messages, true);
-
-        return `Deleted ${messages.size} message(s) from channel`;
+        return {
+          success: true,
+          deletedCount: messages.size,
+          channelId: channelId,
+        };
       }
 
       throw new Error("Channel does not support message deletion");
@@ -763,44 +1048,48 @@ export const discordTools: ToolSet = {
   sendDm: tool({
     description: "Send a direct message (DM) to a user",
     inputSchema: z.object({
-      userId: z.string(),
-      content: z.string(),
+      userId: z.string().describe("The user ID to send the DM to"),
+      content: z.string().describe("The message content to send"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      username: z.string().describe("Username of the recipient"),
+      userId: z.string().describe("ID of the recipient"),
     }),
     execute: async ({ userId, content }) => {
-      const user = await botDiscord.users.fetch(userId);
-      if (!user) {
-        throw new Error("User not found");
-      }
+      const user = await discordClient.users.fetch(userId);
+      if (!user) throw new Error("User not found");
 
       await user.send(content);
-
-      return `DM sent to ${user.username}`;
+      return {
+        success: true,
+        username: user.username,
+        userId: userId,
+      };
     },
   }),
 
   sendDmEmbed: tool({
     description: "Send a direct message (DM) embed to a user",
     inputSchema: z.object({
-      userId: z.string(),
-      title: z.string().optional(),
-      description: z.string().optional(),
-      color: z.string().optional(),
+      userId: z.string().describe("The user ID to send the DM embed to"),
+      title: z.string().optional().describe("Optional title for the embed"),
+      description: z.string().optional().describe("Optional description for the embed"),
+      color: z.string().optional().describe("Optional hex color code for the embed (e.g., #FF5733)"),
       fields: z.array(z.object({
-        name: z.string(),
-        value: z.string(),
-        inline: z.boolean().optional(),
-      })).optional(),
+        name: z.string().describe("Field name"),
+        value: z.string().describe("Field value"),
+        inline: z.boolean().optional().describe("Whether the field should be displayed inline"),
+      })).optional().describe("Optional array of fields to add to the embed"),
       buttons: z.array(z.object({
-        label: z.string(),
-        url: z.string().optional(),
-        style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional(),
-      })).optional(),
+        label: z.string().describe("Button label text"),
+        url: z.string().optional().describe("Optional URL for link buttons"),
+        style: z.enum(["primary", "secondary", "success", "danger", "link"]).optional().describe("Optional button style"),
+      })).optional().describe("Optional array of buttons to add to the embed"),
     }),
     execute: async ({ userId, title, description, color, fields, buttons }) => {
-      const user = await botDiscord.users.fetch(userId);
-      if (!user) {
-        throw new Error("User not found");
-      }
+      const user = await discordClient.users.fetch(userId);
+      if (!user) throw new Error("User not found");
 
       const components: any[] = [];
 
@@ -844,39 +1133,313 @@ export const discordTools: ToolSet = {
         }],
         components: components.length > 0 ? components : undefined,
       });
-
-      return `DM embed sent to ${user.username}`;
+      return {
+        success: true,
+        username: user.username,
+        userId: userId,
+      };
     },
   }),
 
   joinVoiceChannel: tool({
-    description: "Join a voice channel",
+    description: "Join a voice channel. IMPORTANT: To join the user's voice channel, first use getMembers to find the user, then use their voiceChannelId from the response.",
     inputSchema: z.object({
-      channelId: z.string(),
-      guildId: z.string(),
+      channelID: z.string().describe("The voice channel ID to join. Get this from getMembers response (voiceChannelId field)."),
+      guildId: z.string().describe("The guild/server ID"),
     }),
-    execute: async ({ channelId, guildId }) => {
-      return "Voice functionality not yet implemented - joinVoice function missing";
+    outputSchema: z.object({
+      channelId: z.string().describe("ID of the voice channel joined"),
+      guildId: z.string().describe("ID of the guild"),
+    }),
+    execute: async ({ channelID, guildId }) => {
+      const channel = discordClient.channels.cache.get(channelID);
+      if (!channel?.isVoiceBased()) {
+        throw new Error("Channel not found or not a voice channel");
+      }
+
+      joinVoiceChannel({
+        channelId: channel.id,
+        guildId: guildId,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+      });
+
+      return {
+        channelId: channelID,
+        guildId: guildId,
+      };
     },
   }),
 
   leaveVoiceChannel: tool({
     description: "Leave the current voice channel",
-    inputSchema: z.object({}),
-    execute: async () => {
-      return "Voice functionality not yet implemented - leaveVoice function missing";
+    inputSchema: z.object({
+      guildID: z.string().describe("ID of the guild/server where the voice channel is"),
+    }),
+    outputSchema: z.object({
+      action: z
+        .enum(["bot_not_connected_to_any_channel", "left_voice"])
+        .describe("Action performed, left_voice if a channel is leaved"),
+    }),
+    execute: async ({ guildID }) => {
+      const connection = getVoiceConnection(guildID);
+      if (!connection) return { action: "bot_not_connected_to_any_channel" };
+
+      connection.destroy();
+      return { action: "left_voice" };
     },
   }),
 
-  respondInVoice: tool({
-    description: "Respond to the user in voice in their voice channel. Use this when the user explicitly asks for a voice response (e.g., 'tell me in voice', 'respond in voc', 'talk to me about'). The text should be conversational, without markdown, adapted to be spoken aloud.",
+  renameGuild: tool({
+    description: "Rename the Discord server (guild)",
     inputSchema: z.object({
-      guildId: z.string(),
-      userId: z.string(),
-      text: z.string(),
+      guildId: z.string().describe("The Discord guild/server ID to rename"),
+      newName: z.string().describe("The new name for the server"),
     }),
-    execute: async ({ guildId, userId, text }) => {
-      return "Voice functionality not yet implemented - respondInVoice function missing";
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      oldName: z.string().describe("Previous guild name"),
+      newName: z.string().describe("New guild name"),
+      guildId: z.string().describe("Guild ID"),
+    }),
+    execute: async ({ guildId, newName }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      const oldName = guild.name;
+      await guild.setName(newName);
+      return {
+        success: true,
+        oldName: oldName,
+        newName: newName,
+        guildId: guildId,
+      };
+    },
+  }),
+
+  createInvite: tool({
+    description: "Create an invitation link for a channel",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID to create an invite for"),
+      maxAge: z.number().optional().describe("Optional maximum age of the invite in seconds (0 = never expires)"),
+      maxUses: z.number().optional().describe("Optional maximum number of uses (0 = unlimited)"),
+    }),
+    outputSchema: z.object({
+      url: z.string().describe("Invite URL"),
+      code: z.string().describe("Invite code"),
+      expiresAt: z.string().describe("Expiration date or 'Never'"),
+      maxUses: z.union([z.number(), z.string()]).describe("Maximum uses or 'Unlimited'"),
+    }),
+    execute: async ({ channelId, maxAge = 0, maxUses = 0 }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel) throw new Error("Channel not found");
+
+      if (!("createInvite" in channel)) {
+        throw new Error("This channel type does not support invites");
+      }
+
+      const invite = await channel.createInvite({
+        maxAge: maxAge,
+        maxUses: maxUses,
+      });
+
+      return {
+        url: invite.url,
+        code: invite.code,
+        expiresAt: maxAge > 0 ? new Date(Date.now() + maxAge * 1000).toISOString() : "Never",
+        maxUses: maxUses || "Unlimited",
+      };
+    },
+  }),
+
+  createPoll: tool({
+    description: "Create a poll in a channel",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID to create the poll in"),
+      question: z.string().describe("The poll question"),
+      answers: z.array(z.string()).describe("Array of answer options (2-10 answers)"),
+      duration: z.number().optional().describe("Optional poll duration in hours (default: 24, max: 168)"),
+      allowMultiselect: z.boolean().optional().describe("Optional whether to allow multiple selections (default: false)"),
+    }),
+    execute: async ({ channelId, question, answers, duration = 24, allowMultiselect = false }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel?.isTextBased()) {
+        throw new Error("Channel not found or not a text channel");
+      }
+
+      if (answers.length < 2 || answers.length > 10) {
+        throw new Error("Poll must have between 2 and 10 answers");
+      }
+
+      if (duration > 168) {
+        throw new Error("Poll duration cannot exceed 168 hours (7 days)");
+      }
+
+      if ("send" in channel) {
+        await channel.send({
+          poll: {
+            question: { text: question },
+            answers: answers.map((answer: string) => ({ text: answer })),
+            duration: duration,
+            allowMultiselect: allowMultiselect,
+          },
+        });
+
+        return {
+          success: true,
+          question: question,
+          answerCount: answers.length,
+          duration: duration,
+        };
+      }
+
+      throw new Error("Failed to create poll");
+    },
+  }),
+
+  getWebhooks: tool({
+    description: "Get all webhooks in a channel",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID to get webhooks from"),
+    }),
+    outputSchema: z.array(z.object({
+      webhookUrl: z.string().describe("Webhook URL"),
+      webhookId: z.string().describe("Webhook ID"),
+      name: z.string().nullable().describe("Webhook name"),
+      avatarUrl: z.string().nullable().describe("Webhook avatar URL"),
+    })).describe("List of webhooks in the channel"),
+    execute: async ({ channelId }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel?.isTextBased()) {
+        throw new Error("Channel not found or not a text channel");
+      }
+
+      if (!("fetchWebhooks" in channel)) {
+        throw new Error("This channel type does not support webhooks");
+      }
+
+      const webhooks = await channel.fetchWebhooks();
+      return webhooks.map((webhook) => ({
+        webhookUrl: webhook.url,
+        webhookId: webhook.id,
+        name: webhook.name,
+        avatarUrl: webhook.avatarURL(),
+      }));
+    },
+  }),
+
+  createWebhook: tool({
+    description: "Create a webhook in a channel",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID to create the webhook in"),
+      name: z.string().describe("The name for the webhook"),
+      avatarUrl: z.string().optional().describe("Optional avatar URL for the webhook"),
+    }),
+    outputSchema: z.object({
+      webhookUrl: z.string().describe("Webhook URL"),
+      webhookId: z.string().describe("Webhook ID"),
+      name: z.string().describe("Webhook name"),
+    }),
+    execute: async ({ channelId, name, avatarUrl }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel?.isTextBased()) {
+        throw new Error("Channel not found or not a text channel");
+      }
+
+      if (!("createWebhook" in channel)) {
+        throw new Error("This channel type does not support webhooks");
+      }
+
+      let avatarBuffer: Buffer | undefined;
+      if (avatarUrl) {
+        const response = await fetch(avatarUrl);
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          avatarBuffer = Buffer.from(arrayBuffer);
+        }
+      }
+
+      const webhook = await channel.createWebhook({
+        name: name,
+        avatar: avatarBuffer,
+      });
+
+      return {
+        webhookUrl: webhook.url,
+        webhookId: webhook.id,
+        name: webhook.name,
+      };
+    },
+  }),
+
+  sendWebhookMessage: tool({
+    description: "Send a message using a webhook (to impersonate someone)",
+    inputSchema: z.object({
+      webhookUrl: z.string().describe("The webhook URL to send the message through"),
+      content: z.string().describe("The message content to send"),
+      username: z.string().describe("The username to display for the webhook message"),
+      avatarUrl: z.string().optional().describe("Optional avatar URL for the webhook message"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      username: z.string().describe("Username used for the webhook message"),
+    }),
+    execute: async ({ webhookUrl, content, username, avatarUrl }) => {
+      const payload: any = {
+        content: content,
+        username: username,
+      };
+
+      if (avatarUrl) {
+        payload.avatar_url = avatarUrl;
+      }
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Webhook request failed (${response.status}): ${errorText}`);
+      }
+
+      return {
+        success: true,
+        username: username,
+      };
+    },
+  }),
+
+  getUserAvatar: tool({
+    description: "Get the avatar URL of a user",
+    inputSchema: z.object({
+      guildId: z.string().describe("The Discord guild/server ID"),
+      userId: z.string().describe("The user ID to get the avatar for"),
+    }),
+    outputSchema: z.object({
+      userId: z.string().describe("User ID"),
+      username: z.string().describe("Username"),
+      displayName: z.string().describe("Display name in the guild"),
+      avatarUrl: z.string().describe("Avatar URL"),
+    }),
+    execute: async ({ guildId, userId }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      const member = await guild.members.fetch(userId);
+      if (!member) throw new Error("Member not found");
+
+      const avatarUrl = member.user.displayAvatarURL({ size: 1024, extension: "png" });
+
+      return {
+        userId: member.id,
+        username: member.user.username,
+        displayName: member.displayName,
+        avatarUrl: avatarUrl,
+      };
     },
   }),
 };
