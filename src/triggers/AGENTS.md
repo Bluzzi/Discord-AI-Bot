@@ -44,6 +44,8 @@ trigger.cron(
   async () => {
     // Trigger AI logic here
   },
-  { instantTrigger: false },
+  { 
+    instantTrigger: false
+  },
 );
 ```

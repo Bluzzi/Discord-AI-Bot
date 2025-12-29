@@ -3,26 +3,29 @@ import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
 import { aiModels } from "#/utils/ai-model";
 import { day } from "#/utils/day";
+import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
-import { Cron } from "croner";
 import dedent from "dedent";
 import { ActivityType } from "discord.js";
 import z from "zod";
 
-const job = new Cron("0 * * * *", async () => {
-  if (!discordClient.user) throw new Error("Discord bot user is not available");
+await trigger.cron(
+  "discord-presence",
+  "0 * * * *",
+  async () => {
+    if (!discordClient.user) throw new Error("Discord bot user is not available");
 
-  // Generate MOTD:
-  const motd = await generateText({
-    model: aiModels.mistralLarge,
-    stopWhen: stepCountIs(5),
-    output: Output.object({
-      schema: z.object({
-        emoji: z.string().describe("Un seul emoji unicode pertinent"),
-        text: z.string().describe("Le texte du status sans emoji (40 caractères maximum)"),
+    // Generate MOTD:
+    const motd = await generateText({
+      model: aiModels.mistralLarge,
+      stopWhen: stepCountIs(5),
+      output: Output.object({
+        schema: z.object({
+          emoji: z.string().describe("Un seul emoji unicode pertinent"),
+          text: z.string().describe("Le texte du status sans emoji (40 caractères maximum)"),
+        }),
       }),
-    }),
-    prompt: dedent`
+      prompt: dedent`
       Tu es le générateur de status Discord de **Jean Pascal**, un bot Discord **drôle, décontracté et légèrement problématique**.
 
       ## Contexte
@@ -54,21 +57,23 @@ const job = new Cron("0 * * * *", async () => {
       ## Objectif
       Produire **un status court, percutant et marrant**, adapté au contexte du jour, sans explication, avec un ton humour, vanne, second degré, un peu borderline.
     `,
-    tools: {
-      ...newsTools,
-      ...holidaysTools,
-    },
-  });
+      tools: {
+        ...newsTools,
+        ...holidaysTools,
+      },
+    });
 
-  // Update Discord presence:
-  discordClient.user.setPresence({
-    status: "online",
-    activities: [{
-      name: "Custom",
-      type: ActivityType.Custom,
-      state: `${motd.output.emoji} ${motd.output.text}`,
-    }],
-  });
-});
-
-await job.trigger();
+    // Update Discord presence:
+    discordClient.user.setPresence({
+      status: "online",
+      activities: [{
+        name: "Custom",
+        type: ActivityType.Custom,
+        state: `${motd.output.emoji} ${motd.output.text}`,
+      }],
+    });
+  },
+  {
+    instantTrigger: true,
+  },
+);
