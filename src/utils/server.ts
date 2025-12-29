@@ -3,8 +3,8 @@ import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { Hono } from "hono";
 
-const app = new Hono();
+export const server = new Hono();
 
-serve({ fetch: app.fetch, port: env.PORT || 3000 }, (info) => {
+serve({ fetch: server.fetch, port: env.PORT || 3000 }, (info) => {
   logger.info(`Webhook server listening on http://localhost:${String(info.port)}`);
 });
