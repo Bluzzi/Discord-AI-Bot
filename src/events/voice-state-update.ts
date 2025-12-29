@@ -1,9 +1,9 @@
 import type { VoiceState, GuildBasedChannel } from "discord.js";
 import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice";
-import { discordClient } from "#/discord";
+import { discordEvent } from "#/discord";
 import { logger } from "#/utils/logger";
 
-discordClient.on("voiceStateUpdate", (_oldState: VoiceState, newState: VoiceState) => {
+discordEvent("voiceStateUpdate", (_oldState: VoiceState, newState: VoiceState) => {
   // Check the voice channel if the most members connected:
   const channelToJoin: { channel: GuildBasedChannel | null; membersCount: number } = {
     channel: null,
