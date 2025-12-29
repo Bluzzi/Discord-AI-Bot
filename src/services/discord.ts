@@ -19,5 +19,8 @@ export const discordClient = new Client({
   ],
 });
 
-await discordClient.login(env.DISCORD_BOT_TOKEN);
-logger.info("Discord bot successfully started!");
+export const discordClientStart = async (loadEvents: () => Promise<void>) => {
+  await discordClient.login(env.DISCORD_BOT_TOKEN);
+  await loadEvents();
+  logger.info("Discord bot successfully started!");
+};

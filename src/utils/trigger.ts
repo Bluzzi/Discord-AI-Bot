@@ -43,17 +43,21 @@ const cron = async (
 const webhook = (
   webhookName: string,
   endpoint: string,
-  fn: (ctx: Context) => void | Promise<void>,
+  fn: (ctx: Context) => Response | Promise<Response>,
 ) => {
-  server.post(endpoint, async (ctx) => {
+  server.get(endpoint, async (ctx) => {
     try {
-      await fn(ctx);
+      return await fn(ctx);
     }
     catch (error) {
       logger.error(
         `Webhook \`${webhookName}\` (POST ${endpoint}) error:`,
         error instanceof Error ? error.stack : String(error),
       );
+
+      return ctx.json({
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
     }
   });
 };

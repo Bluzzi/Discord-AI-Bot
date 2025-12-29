@@ -1,4 +1,6 @@
-import { logger } from "./utils/logger";
+import { discordClientStart } from "#/services/discord";
+import { serverStart } from "#/services/server";
+import { logger } from "#/utils/logger";
 
 // Uncaught exception handler:
 process.on("uncaughtException", (error, origin) => {
@@ -6,11 +8,15 @@ process.on("uncaughtException", (error, origin) => {
   process.exit(1);
 });
 
-// Start services:
-await import("#/services/discord");
-await import("#/services/server");
+// Start services and related triggers:
+await discordClientStart(async () => {
+  await import("#/triggers/message-create.djs-event");
+  await import("#/triggers/voice-state-update.djs-event");
+});
 
-// Load triggers:
-await import("#/triggers/message-create.djs-event");
-await import("#/triggers/voice-state-update.djs-event");
+await serverStart(async () => {
+  // empty for the moment
+});
+
+// Load others triggers:
 await import("#/triggers/discord-presence.cron");

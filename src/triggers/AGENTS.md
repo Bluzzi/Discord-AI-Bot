@@ -44,7 +44,7 @@ Webhooks allow subscription to events from external sources.
 ```ts
 import { trigger } from "#/utils/trigger";
 
-trigger.webhook("counter-strike-game-end", "/counter-strike/game-end", async () => {
+trigger.webhook("counter-strike-game-end", "/counter-strike/game-end", async (ctx) => {
   // TRIGGER and AI GENERATION
 });
 ```
