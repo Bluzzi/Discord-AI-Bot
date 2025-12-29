@@ -14,8 +14,8 @@ await discordClient.login(env.DISCORD_BOT_TOKEN);
 logger.info("Bot started!");
 
 // Load events:
-await import("#/events/message-create");
-await import("#/events/voice-state-update");
+await import("#/triggers/message-create");
+await import("#/triggers/voice-state-update");
 
 // Load features:
 await import("#/features/motd");
