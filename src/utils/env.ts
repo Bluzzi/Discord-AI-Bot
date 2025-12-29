@@ -3,6 +3,8 @@ import "dotenv/config";
 import { z } from "zod";
 
 const schema = z.object({
+  PORT: z.coerce.number().default(3000),
+
   DISCORD_BOT_ID: z.string(),
   DISCORD_BOT_TOKEN: z.string(),
 
