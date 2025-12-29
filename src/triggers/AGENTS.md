@@ -1,24 +1,31 @@
+# Triggers Directory
+
 This directory contains all entry points used to trigger the bot.
 
-Il est important de différencier deux choses :
-- `TRIGGER`: Discord events, webhooks, and scheduled jobs. Ainsi que le code conditionnel permettant optionnellement de choisir si l'IA doit être appelé ou non.
-- `AI GENERATION`: L'appel direct de l'IA, c'est ici que la prompt ce situe, que les outils sont mis à disposition et que le contenu généré par l'IA est ensuite utilisé, ceci ce fait généralement en utilisant la function `generateText` du package `ai`.
+## Core Concepts
 
-Le code doit être le plus proche possible d'un simple `TRIGGER` qui lance `AI GENERATION`, de manière à laisser libre arbitre à l'IA. Toute contrainte alogorythmique doit être limité au maximum.
+It's important to distinguish between two key components:
 
-Si le code génératif de la réponse l'IA doit être réutiliser dans plusieurs `TRIGGER` ou qu'il devient long (plusieurs centaines de lignes), il est possible de déplacer ce code du `AI GENERATION` dans `/src/features`, en gardant la logique du `TRIGGER` dans `/src/triggers`. L'event `message-create.djs-event.ts` est un bonne exemple pour ce principe.
+- **TRIGGER**: Discord events, webhooks, and scheduled jobs. This includes conditional logic that optionally determines whether the AI should be invoked.
+- **AI GENERATION**: Direct AI invocation, where the prompt is defined, tools are made available, and the AI-generated content is processed. This typically uses the `generateText` function from the `ai` package.
 
-Chaque `TRIGGER` possède une function spécifique pour être utilisé, d'écrit ci-dessous. Il est important de noter que ces functions permettent toutes de gérer les erreur de manière global, conformément au code présent dans `/src/utils/trigger.ts`.
+## Design Principles
 
-L'intégralité des fichiers triggers doivent être lancé au démarrage du projet dans `/src/main.ts` sous le commentaire approprié.
+Code should remain as close as possible to a simple `TRIGGER` that launches `AI GENERATION`, allowing maximum autonomy to the AI. Algorithmic constraints should be minimized.
+
+When the AI generation code needs to be reused across multiple `TRIGGER` files or becomes lengthy (several hundred lines), it should be moved to `/src/features`, while keeping the `TRIGGER` logic in `/src/triggers`. The `/src/triggers/message-create.djs-event.ts` and `/src/features/reply-to-message.ts` files is a good example of this principle.
+
+Each `TRIGGER` type has a specific function for implementation, described below. These functions all handle errors globally according to the code in `/src/utils/trigger.ts`.
+
+All trigger files must be initialized at project startup in `/src/main.ts` under the appropriate comment.
 
 ## Discord Events
 
-Création d'un listener sur un event Discord en particulier.
+Creates a listener for a specific Discord event.
 
-Nomminiation du fichier : `<event-name>.djs-event.ts`.
+**File naming convention**: `<event-name>.djs-event.ts`
 
-Example de code (`message-create.djs-event.ts`):
+**Example** (`message-create.djs-event.ts`):
 ```ts
 import { trigger } from "#/utils/trigger";
 
@@ -29,33 +36,34 @@ trigger.discordEvent("messageCreate", async (message) => {
 
 ## Webhooks
 
-Les webhooks permettent de s'abonner à des évènements de sources externes.
+Webhooks allow subscription to events from external sources.
 
-Nomminiation du fichier : `<webhook-source>.webhook.ts`.
+**File naming convention**: `<webhook-source>.webhook.ts`
 
-Example de code (`counter-strike-game-end.webhook.ts`):
+**Example** (`counter-strike-game-end.webhook.ts`):
 ```ts
 import { trigger } from "#/utils/trigger";
 
-trigger.webhook("counter-strike-game-send", "/counter-strike/game-end", async () => {
+trigger.webhook("counter-strike-game-end", "/counter-strike/game-end", async () => {
   // TRIGGER and AI GENERATION
 });
 ```
 
 ## CRON Jobs
 
-CRON jobs are used for scheduled or recurring triggers. 
+CRON jobs are used for scheduled or recurring triggers.
 
-Nomminiation du fichier : `<job-name>.cron.ts`.
+**File naming convention**: `<job-name>.cron.ts`
 
-Example de code (`daily-summary.cron.ts`):
+**Example** (`daily-summary.cron.ts`):
 ```ts
-// daily-summary.cron.ts
+import { trigger } from "#/utils/trigger";
+
 trigger.cron(
   "daily-summary",
   "0 8 * * *",
   async () => {
-    // Trigger AI logic here
+    // TRIGGER and AI GENERATION
   },
   { 
     triggerAtStartup: false
