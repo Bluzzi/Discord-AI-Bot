@@ -19,6 +19,7 @@
     "dedent": "^1.7.1",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
+    "hono": "^4.11.3",
     "libsodium-wrappers": "^0.7.15",
     "puppeteer": "^24.34.0",
     "rss-parser": "^3.13.0",
