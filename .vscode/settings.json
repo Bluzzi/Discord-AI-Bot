@@ -35,4 +35,9 @@
     "gql",
     "graphql"
   ],
+
+  // Copilot:
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    { "file": "./github/copilot-commit.md" }
+  ],
 }
