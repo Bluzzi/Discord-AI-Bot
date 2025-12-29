@@ -1,42 +1,44 @@
-This directory contains events, webhooks, and other types of triggers that act as the initial entry point allowing the IA bot to interact with Discord.
+This directory contains all entry points used to trigger the bot: Discord events, webhooks, and scheduled jobs.
 
-The code must remain simple and as close as possible to a straightforward trigger of an AI call, without constraining the AI in how it reacts.
+Code in this directory must stay minimal. Its only responsibility is to trigger an AI call.
+Do not embed complex logic or constrain how the AI reacts.
 
 ## Discord Events
 
-For Discord events, the file must be named `<event-name>.djs-event.ts` (the event name must be written in kebab-case **in the filename only**).
+Discord event files must be named `<event-name>.djs-event.ts`, using kebab-case **in the filename only**.
 
-The event must then be registered using the `trigger.discordEvent` function, which provides top-level error handling. Example:
+Events are registered through `trigger.discordEvent`, which handles top-level error management.
+
+Example:
 
 ```ts
 // message-create.djs-event.ts
 import { trigger } from "#/utils/trigger";
 
 trigger.discordEvent("messageCreate", async (message) => {
-  // No need to try/catch here
+  // No try/catch needed here
 });
 ```
 
 ## Webhooks
 
-Webhooks must be named `<webhook-source>.webhook.ts`.
+Webhook files must be named `<webhook-source>.webhook.ts`.
 
-At the moment, there are not enough existing webhooks to define a clear standard for how they should be implemented, so the agent is free to choose the implementation approach.
-
-Voici la section à ajouter, cohérente avec le reste du document et sans blabla :
+There is currently no strict standard for webhook implementation. The agent is free to choose an appropriate structure, as long as the code remains simple and focused on triggering the AI.
 
 ## CRON Jobs
 
-CRON jobs are used for scheduled or recurring triggers that initiate autonomous actions by the bot.
+CRON jobs are used for scheduled or recurring triggers. 
 
-They must be registered using the `trigger.cron` function, which provides top-level error handling and optional immediate execution.
+File name must use kebab-case and clearly describe the job’s intent: <job-name.cron.ts>.
 
-The goal remains the same: keep the logic minimal and focused on triggering an AI call, without embedding complex control flow or constraints.
+They must be registered using `trigger.cron`, which provides centralized error handling and optional immediate execution.
 
 Example:
 
 ```ts
-cron(
+// daily-summary.cron.ts
+trigger.cron(
   "daily-summary",
   "0 8 * * *",
   async () => {
@@ -45,8 +47,3 @@ cron(
   { instantTrigger: false },
 );
 ```
-
-* `cronName` is a unique, human-readable identifier used for logging.
-* `cronPattern` follows standard CRON syntax.
-* `fn` contains the logic to execute.
-* When `instantTrigger` is set to `true`, the CRON job is executed immediately on startup in addition to its scheduled runs.
