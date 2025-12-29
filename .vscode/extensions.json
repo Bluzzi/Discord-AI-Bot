@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    // Linting:
+    "dbaeumer.vscode-eslint",
+
+    // Utils:
+    "meganrogge.template-string-converter",
+    "YoavBls.pretty-ts-errors"
+  ]
+}
