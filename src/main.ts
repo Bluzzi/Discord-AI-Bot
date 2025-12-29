@@ -13,9 +13,7 @@ uncaughtExceptionHandler();
 await discordClient.login(env.DISCORD_BOT_TOKEN);
 logger.info("Bot started!");
 
-// Load events:
-await import("#/triggers/message-create");
-await import("#/triggers/voice-state-update");
-
-// Load features:
-await import("#/features/motd");
+// Load triggers:
+await import("#/triggers/message-create.djs-event");
+await import("#/triggers/voice-state-update.djs-event");
+await import("#/triggers/discord-presence.cron");
