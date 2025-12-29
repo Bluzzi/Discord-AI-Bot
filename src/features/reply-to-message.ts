@@ -2,11 +2,11 @@ import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
 import { DISCORD_MAX_MESSAGE_LENGTH } from "#/discord/const";
 import { fortyTwoTools } from "#/tools/42";
-import { brandlogoTools } from "#/tools/brandlogo";
 import { discordTools } from "#/tools/discord";
 import { giphyTools } from "#/tools/giphy";
 import { githubTools } from "#/tools/github";
 import { igdbTools } from "#/tools/igdb";
+import { imageTools } from "#/tools/image";
 import { newsTools } from "#/tools/news";
 import { pastebinTools } from "#/tools/pastebin";
 import { pdfTools } from "#/tools/pdf";
@@ -514,12 +514,12 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     `,
     prompt: message.content,
     tools: {
-      ...brandlogoTools,
       ...discordTools,
       ...fortyTwoTools,
       ...giphyTools,
       ...githubTools,
       ...igdbTools,
+      ...imageTools,
       ...newsTools,
       ...pastebinTools,
       ...pdfTools,

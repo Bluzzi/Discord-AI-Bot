@@ -26,13 +26,16 @@ Tu DOIS créer un HTML COMPLET avec cette structure:
 </html>
 
 IMPORTANT POUR LES IMAGES (logos, icônes, illustrations):
-- Pour les LOGOS D'ENTREPRISES: utilise OBLIGATOIREMENT le tool searchBrandLogo
-  Exemple: si le PDF mentionne "Basic-Fit", appelle searchBrandLogo avec brandName="Basic-Fit"
-  Le tool retournera une URL directe du logo à utiliser dans le HTML
-- Pour d'autres images: utilise websearch pour trouver des URLs directes (.png, .svg, .jpg, .webp)
-- Utilise toujours des URLs absolues complètes (ex: https://example.com/logo.png)
-- Privilégie les formats vectoriels (.svg) pour une meilleure qualité
-- Exemple: <img src="https://img.logo.dev/company.com" alt="Logo" style="width: 100px;">
+- Pour TOUTES les images (logos, icônes, illustrations): utilise OBLIGATOIREMENT le tool searchImage
+  Exemples:
+  * Logo d'entreprise: searchImage avec query="logo Basic-Fit"
+  * Icône: searchImage avec query="icône téléphone PNG"
+  * Illustration: searchImage avec query="illustration montagne"
+- Le tool searchImage retourne une liste d'URLs d'images avec leurs métadonnées
+- Utilise la première URL retournée (results[0].url) dans ton HTML
+- Toutes les URLs sont absolues et directement utilisables dans des balises <img>
+- Exemple: <img src="https://example.com/logo.png" alt="Logo Basic-Fit" style="width: 200px;">
+- Privilégie les images avec de bonnes dimensions (width/height) pour une meilleure qualité
 
 Le PDF sera uploadé directement sur Discord dans le channel spécifié.
 N'INVENTE PAS de problèmes techniques - ce tool fonctionne.
