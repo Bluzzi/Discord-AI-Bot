@@ -1,7 +1,6 @@
 import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
 import { DISCORD_MAX_MESSAGE_LENGTH } from "#/services/discord";
-import { fortyTwoTools } from "#/tools/42";
 import { discordTools } from "#/tools/discord";
 import { giphyTools } from "#/tools/giphy";
 import { githubTools } from "#/tools/github";
@@ -10,6 +9,7 @@ import { imageTools } from "#/tools/image";
 import { newsTools } from "#/tools/news";
 import { pastebinTools } from "#/tools/pastebin";
 import { pdfTools } from "#/tools/pdf";
+import { fortyTwoTools } from "#/tools/school-42";
 import { steamTools } from "#/tools/steam";
 import { websearchTools } from "#/tools/websearch";
 import { aiModels } from "#/utils/ai-model";
