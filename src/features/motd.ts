@@ -1,8 +1,9 @@
 import { discordClient } from "#/discord";
+import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
 import { aiModels } from "#/utils/ai-model";
 import { day } from "#/utils/day";
-import { generateText, Output } from "ai";
+import { generateText, Output, stepCountIs } from "ai";
 import { Cron } from "croner";
 import dedent from "dedent";
 import { ActivityType } from "discord.js";
@@ -14,10 +15,11 @@ const job = new Cron("0 * * * *", async () => {
   // Generate MOTD:
   const motd = await generateText({
     model: aiModels.mistralLarge,
+    stopWhen: stepCountIs(5),
     output: Output.object({
       schema: z.object({
         emoji: z.string().describe("Un seul emoji unicode pertinent"),
-        text: z.string().describe("Le texte du status sans emoji (33 caractères maximum)"),
+        text: z.string().describe("Le texte du status sans emoji (40 caractères maximum)"),
       }),
     }),
     prompt: dedent`
@@ -27,6 +29,7 @@ const job = new Cron("0 * * * *", async () => {
       - Date et heure actuelle : ${day().format("DD/MM/YYYY [à] HH[h]mm")}
       - Fêtes majeures possibles : Noël, Jour de l'an, Saint-Valentin, Pâques  
       - Autres fêtes importantes : Fête de la musique, Fête nationale, Halloween, Fête du Travail, Armistice 1918
+      - Tu connais normalement les fêtes et jours fériés en France, mais tu dispose quand même d'outils pour récupérer leur dates.
       - Tu disposes également d'outils pour récupérer les actualités (France, Monde, Crypto, Tech).  
         → Ces outils sont à utiliser uniquement si aucune des règles de priorité ci-dessous ne s'applique.
 
@@ -53,6 +56,7 @@ const job = new Cron("0 * * * *", async () => {
     `,
     tools: {
       ...newsTools,
+      ...holidaysTools,
     },
   });
 
