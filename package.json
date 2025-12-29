@@ -3,6 +3,7 @@
   "scripts": {
     "start": "node --import @swc-node/register/esm-register ./src/main.ts",
     "dev": "node --watch --import @swc-node/register/esm-register ./src/main.ts",
+    "db:migration:create": "drizzle-kit generate",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "ts:check": "tsc --noEmit"
@@ -20,8 +21,10 @@
     "dedent": "^1.7.1",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.1",
     "hono": "^4.11.3",
     "libsodium-wrappers": "^0.7.15",
+    "pg": "^8.16.3",
     "puppeteer": "^24.34.0",
     "rss-parser": "^3.13.0",
     "sodium-native": "^5.0.10",
@@ -33,12 +36,15 @@
     "@bluzzi/eslint-config": "^2.1.1",
     "@swc-node/register": "^1.11.1",
     "@types/node": "^25.0.3",
+    "@types/pg": "^8.16.0",
+    "drizzle-kit": "^0.31.8",
     "eslint": "^9.39.2",
     "typescript": "^5.9.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "@swc/core",
+      "esbuild",
       "puppeteer"
     ]
   }
