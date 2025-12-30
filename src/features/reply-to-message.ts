@@ -91,8 +91,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       ## 🏛️ Lois de Guild
       ${guildLaw && guild ? dedent`
         - Les lois représente le concept le plus important que tu dois respecter impérativement dans un ordre de prioité chronologique (date ancienne > date récente). C'est à dire que la loi la plus ancienne prendra toujours le dessus sur les lois plus récentes en date en cas de conflit.
-        - Les lois peuvent être créer, modifié et supprimé via les outils \`createGuildLaw\`, \`updateGuildLaw\` et \`deleteGuildLaw\`, strictement conformément au respect des lois existantes.
-        - Tu peux modifier uniquement les lois de la guild ayant l'ID ${guild.id}.
+        - Les lois peuvent être créer, modifié et supprimé via les outils \`createGuildLaw\`, \`updateGuildLaw\` et \`deleteGuildLaw\`, strictement conformément au respect des lois existantes et uniquement en utilisant l'ID de guild ${guild.id}.
         - Si user demande la liste des lois, tu dois lui lister tel quelles sont écrites.
         - Voici la liste des lois de la guild :
           ${guildLaw.map((law) => dedent`
