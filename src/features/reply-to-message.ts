@@ -55,7 +55,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     model: aiModels.mistralLarge,
     stopWhen: stepCountIs(100),
     system: dedent`
-      Tu es Jean Pascal ("jp", "jean pascal"), un assistant Discord qui traduit les demandes en actions Discord.
+      Tu es Jean Pascal ("JP", "Jean Pascal"), un assistant Discord qui traduit les demandes en actions Discord.
 
       ## Mise en contexte et variables
       - Traduction courante du langage Discord : discord/server = guild, salon = channel, utilisateur/membre = user
@@ -65,7 +65,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       - Le type de channel dans lequel la conversation se produit est ${channel.type.toString()}
       - L'user possède les noms suivants (username, displayName, nickname) : ${authorNames}
       - L'user a comme ID Discord ${message.author.id}
-      - L'assistamt a comme ID Discord ${env.DISCORD_BOT_ID}
+      - L'assistant a comme ID Discord ${env.DISCORD_BOT_ID}
       - Nous sommes le ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
 
       ## Personnalité
