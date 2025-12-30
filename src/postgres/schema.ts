@@ -1,6 +1,16 @@
 import { columns } from "./column";
 import { pgTable, uuid, text } from "drizzle-orm/pg-core";
 
+export const tableDiscordGuildLaw = pgTable("discord_guild_law", {
+  lawCode: text("law_code").primaryKey(),
+  lawText: text("law_text").notNull(),
+
+  guildID: text("channel_id").notNull(),
+
+  createdAt: columns.createdAt,
+  updatedAt: columns.updatedAt,
+});
+
 export const tableDiscordGuildMemory = pgTable("discord_guild_memory", {
   id: uuid("id").primaryKey().defaultRandom(),
 
@@ -8,7 +18,7 @@ export const tableDiscordGuildMemory = pgTable("discord_guild_memory", {
   memoryText: text("memory_text").notNull(),
 
   createdAt: columns.createdAt,
-  updatedAt: columns.updatedAt,
+  deletedAt: columns.deletedAt,
 });
 
 export const tableDiscordUserMemory = pgTable("discord_user_memory", {
@@ -18,7 +28,7 @@ export const tableDiscordUserMemory = pgTable("discord_user_memory", {
   memoryText: text("memory_text").notNull(),
 
   createdAt: columns.createdAt,
-  updatedAt: columns.updatedAt,
+  deletedAt: columns.deletedAt,
 });
 
 export const tableDiscordChannelMemory = pgTable("discord_channel_memory", {
@@ -28,5 +38,5 @@ export const tableDiscordChannelMemory = pgTable("discord_channel_memory", {
   memoryText: text("memory_text").notNull(),
 
   createdAt: columns.createdAt,
-  updatedAt: columns.updatedAt,
+  deletedAt: columns.deletedAt,
 });
