@@ -12,6 +12,7 @@ import { pastebinTools } from "#/tools/pastebin";
 import { pdfTools } from "#/tools/pdf";
 import { fortyTwoTools } from "#/tools/school-42";
 import { steamTools } from "#/tools/steam";
+import { tmdbTools } from "#/tools/tmdb";
 import { websearchTools } from "#/tools/websearch";
 import { aiModels } from "#/utils/ai-model";
 import { day } from "#/utils/day";
@@ -160,12 +161,13 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       ...pastebinTools,
       ...pdfTools,
       ...steamTools,
+      ...tmdbTools,
       ...websearchTools,
     },
   });
 
   // Tools listing:
-  const toolsUsed = result.steps.flatMap((step) => step.toolCalls.map((tool) => `\`${tool.toolName}\``)).join(", ");
+  const toolsUsed = result.steps.flatMap((step) => step.toolCalls.map((tool) => tool.toolName)).join(", ");
 
   logger.info(dedent`
     Reply to message:
