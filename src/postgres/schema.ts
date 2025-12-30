@@ -5,7 +5,7 @@ export const tableDiscordGuildLaw = pgTable("discord_guild_law", {
   lawCode: text("law_code").primaryKey(),
   lawText: text("law_text").notNull(),
 
-  guildID: text("channel_id").notNull(),
+  guildID: text("guild_id").notNull(),
 
   createdAt: columns.createdAt,
   updatedAt: columns.updatedAt,

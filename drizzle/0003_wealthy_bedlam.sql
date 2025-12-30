@@ -1,0 +1,1 @@
+ALTER TABLE "discord_guild_law" RENAME COLUMN "channel_id" TO "guild_id";
