@@ -8,6 +8,13 @@
       "when": 1767029636842,
       "tag": "0000_brown_blue_shield",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1767069426944,
+      "tag": "0001_stiff_grandmaster",
+      "breakpoints": true
     }
   ]
 }

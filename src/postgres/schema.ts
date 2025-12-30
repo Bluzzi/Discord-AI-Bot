@@ -30,12 +30,3 @@ export const tableDiscordChannelMemory = pgTable("discord_channel_memory", {
   createdAt: columns.createdAt,
   updatedAt: columns.updatedAt,
 });
-
-export const tableDiscordConfig = pgTable("discord_config", {
-  id: uuid("id").primaryKey().defaultRandom(),
-
-  configText: text("config_text").notNull(),
-
-  createdAt: columns.createdAt,
-  updatedAt: columns.updatedAt,
-});
