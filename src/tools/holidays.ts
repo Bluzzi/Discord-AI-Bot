@@ -12,7 +12,7 @@ export const holidaysTools: ToolSet = {
     execute: async () => {
       const url = "https://calendrier.api.gouv.fr/jours-feries/metropole.json";
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch public holidays: ${res.status}`);
+      if (!res.ok) throw new Error(`Failed to fetch public holidays: ${String(res.status)}`);
       const data = (await res.json()) as Record<string, string>;
       const holidays = Object.entries(data).map(([date, name]) => ({ date, name }));
       return { holidays };
@@ -26,8 +26,8 @@ export const holidaysTools: ToolSet = {
       festiveDays: z.array(z.object({ date: z.string(), name: z.string() })),
     }),
     execute: async ({ year }) => {
-      const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-      const toIsoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const pad = (n: number) => (n < 10 ? `0${String(n)}` : String(n));
+      const toIsoDate = (d: Date) => `${String(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
       const easterSunday = (y: number) => {
         const a = y % 19;
@@ -47,7 +47,11 @@ export const holidaysTools: ToolSet = {
         return new Date(y, month, day);
       };
 
-      const addDays = (d: Date, days: number) => { const r = new Date(d); r.setDate(r.getDate() + days); return r; };
+      const addDays = (d: Date, days: number) => {
+        const r = new Date(d);
+        r.setDate(r.getDate() + days);
+        return r;
+      };
 
       const nthWeekdayOfMonth = (y: number, monthIndex: number, weekday: number, nth: number) => {
         const first = new Date(y, monthIndex, 1);
@@ -62,10 +66,10 @@ export const holidaysTools: ToolSet = {
       };
 
       // Build festive list
-      const list: Array<{ name: string; date: string }> = [];
-      list.push({ name: "Saint-Valentin", date: `${year}-02-14` });
-      list.push({ name: "Saint-Patrick", date: `${year}-03-17` });
-      list.push({ name: "Halloween", date: `${year}-10-31` });
+      const list: { name: string; date: string }[] = [];
+      list.push({ name: "Saint-Valentin", date: `${String(year)}-02-14` });
+      list.push({ name: "Saint-Patrick", date: `${String(year)}-03-17` });
+      list.push({ name: "Halloween", date: `${String(year)}-10-31` });
 
       // Fête des Pères: third Sunday of June
       const fathers = nthWeekdayOfMonth(year, 5, 0, 3);
@@ -84,10 +88,10 @@ export const holidaysTools: ToolSet = {
       // Filter out dates that are official public holidays
       const url = "https://calendrier.api.gouv.fr/jours-feries/metropole.json";
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch public holidays: ${res.status}`);
+      if (!res.ok) throw new Error(`Failed to fetch public holidays: ${String(res.status)}`);
       const publicHolidays = (await res.json()) as Record<string, string>;
 
-      const festiveOnly = list.filter(f => !publicHolidays[f.date]);
+      const festiveOnly = list.filter((f) => !publicHolidays[f.date]);
       return { festiveDays: festiveOnly };
     },
   }),

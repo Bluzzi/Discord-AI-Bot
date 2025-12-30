@@ -14,7 +14,6 @@ export default eslintConfig(
       "src/tools/discord.ts",
       "src/tools/giphy.ts",
       "src/tools/github.ts",
-      "src/tools/holidays.ts",
       "src/tools/igdb.ts",
       "src/tools/image.ts",
       "src/tools/news.ts",
