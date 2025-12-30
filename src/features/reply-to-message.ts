@@ -103,8 +103,8 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
             ${law.lawText}
             \`\`\`
 
-            Dernière modification le ${day(law.updatedAt).tz().format("DD/MM/YYYY")}
-            Crée le ${day(law.createdAt).tz().format("DD/MM/YYYY")}
+            Dernière modification le ${day(law.updatedAt).tz().format("DD/MM/YYYY [à] HH[h]mm")}
+            Crée le ${day(law.createdAt).tz().format("DD/MM/YYYY [à] HH[h]mm")}
           `).join("\n")}
       ` : dedent`
         Aucune règle de guild en DM.
