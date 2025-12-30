@@ -900,6 +900,39 @@ export const discordTools: ToolSet = {
     },
   }),
 
+  getChannelMessages: tool({
+    description: "Get the last X messages from a text channel",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID to fetch messages from"),
+      limit: z.number().optional().describe("Number of messages to fetch (default: 10, max: 100)"),
+    }),
+    outputSchema: z.array(z.object({
+      id: z.string().describe("Message ID"),
+      authorID: z.string().describe("Author user ID"),
+      authorUsername: z.string().describe("Author username"),
+      content: z.string().describe("Message content"),
+      createdAt: z.string().describe("ISO timestamp when message was created"),
+      hasAttachments: z.boolean().describe("Whether the message has attachments"),
+    })),
+    execute: async ({ channelId, limit = 10 }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel?.isTextBased()) {
+        throw new Error("Channel not found or not a text channel");
+      }
+
+      const messages = await channel.messages.fetch({ limit: limit });
+
+      return Array.from(messages.values()).map((msg) => ({
+        id: msg.id,
+        authorID: msg.author.id,
+        authorUsername: msg.author.username,
+        content: msg.content,
+        createdAt: msg.createdAt.toISOString(),
+        hasAttachments: msg.attachments.size > 0,
+      }));
+    },
+  }),
+
   sendEmbed: tool({
     description: "Send an embed message to a channel",
     inputSchema: z.object({
@@ -1475,6 +1508,110 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
         username: member.user.username,
         displayName: member.displayName,
         avatarUrl: avatarUrl,
+      };
+    },
+  }),
+
+  getUserInfo: tool({
+    description: "Get basic information about a user by their ID. Optionally include guild-specific display name if `guildId` is provided.",
+    inputSchema: z.object({
+      userId: z.string().describe("The Discord user ID to fetch"),
+      guildId: z.string().optional().describe("Optional guild ID to fetch member-specific info (displayName)")
+    }),
+    outputSchema: z.object({
+      id: z.string().describe("User ID"),
+      username: z.string().describe("Username"),
+      tag: z.string().describe("Username#discriminator"),
+      avatarUrl: z.string().nullable().describe("Avatar URL or null"),
+      isBot: z.boolean().describe("Whether the user is a bot"),
+      displayName: z.string().optional().describe("Guild display name if guildId provided and user is a member"),
+      createdAt: z.string().optional().describe("User creation date (ISO)")
+    }),
+    execute: async ({ userId, guildId }) => {
+      const user = await discordClient.users.fetch(userId);
+      if (!user) throw new Error("User not found");
+
+      let displayName = "";
+      if (guildId) {
+        const guild = await discordClient.guilds.fetch(guildId);
+        if (!guild) throw new Error("Guild not found");
+        const member = await guild.members.fetch(userId);
+        if (!member) throw new Error("Member not found in guild");
+        displayName = member.displayName;
+      }
+
+      return {
+        id: user.id,
+        username: user.username,
+        tag: `${user.username}#${user.discriminator}`,
+        avatarUrl: user.displayAvatarURL({ size: 1024, extension: "png" }),
+        isBot: !!user.bot,
+        displayName: displayName,
+        createdAt: user.createdAt.toISOString(),
+      };
+    },
+  }),
+
+  getChannelInfo: tool({
+    description: "Get information about a channel by its ID",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID to fetch"),
+    }),
+    outputSchema: z.object({
+      id: z.string().describe("Channel ID"),
+      name: z.string().nullable().describe("Channel name if available"),
+      type: z.string().describe("Channel type"),
+      guildId: z.string().nullable().describe("Guild ID if channel belongs to a guild"),
+      parentId: z.string().nullable().describe("Category/parent ID if present"),
+      nsfw: z.boolean().optional().describe("Whether the channel is marked NSFW"),
+      topic: z.string().nullable().optional().describe("Channel topic/description for text channels"),
+    }),
+    execute: async ({ channelId }) => {
+      const channel = await discordClient.channels.fetch(channelId);
+      if (!channel) throw new Error("Channel not found");
+
+      const name = 'name' in channel ? channel.name : "";
+      const guildId = "guild" in channel ? channel.guild.id : "";
+      const parentId = 'parentId' in channel ? (channel.parentId || "") : "";
+      const nsfw = 'nsfw' in channel ? !!channel.nsfw : false;
+      const topic = 'topic' in channel ? (channel.topic || "") : "";
+
+      return {
+        id: channel.id,
+        name,
+        type: ChannelType[channel.type],
+        guildId,
+        parentId,
+        nsfw,
+        topic,
+      };
+    },
+  }),
+
+  getGuildInfo: tool({
+    description: "Get information about a guild (server) by its ID",
+    inputSchema: z.object({
+      guildId: z.string().describe("The guild ID to fetch"),
+    }),
+    outputSchema: z.object({
+      id: z.string().describe("Guild ID"),
+      name: z.string().describe("Guild name"),
+      memberCount: z.number().describe("Number of members (approx)") ,
+      ownerId: z.string().optional().describe("Owner user ID"),
+      iconUrl: z.string().nullable().describe("Guild icon URL"),
+      createdAt: z.string().optional().describe("Guild creation date (ISO)")
+    }),
+    execute: async ({ guildId }) => {
+      const guild = await discordClient.guilds.fetch(guildId);
+      if (!guild) throw new Error("Guild not found");
+
+      return {
+        id: guild.id,
+        name: guild.name,
+        memberCount: guild.memberCount,
+        ownerId: guild.ownerId as string,
+        iconUrl: guild.iconURL?.() || "",
+        createdAt: guild.createdAt.toISOString(),
       };
     },
   }),
