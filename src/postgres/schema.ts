@@ -4,7 +4,7 @@ import { pgTable, uuid, text } from "drizzle-orm/pg-core";
 export const tableDiscordGuildMemory = pgTable("discord_guild_memory", {
   id: uuid("id").primaryKey().defaultRandom(),
 
-  guildId: text("guild_id").notNull(),
+  guildID: text("guild_id").notNull(),
   memoryText: text("memory_text").notNull(),
 
   createdAt: columns.createdAt,
@@ -14,7 +14,7 @@ export const tableDiscordGuildMemory = pgTable("discord_guild_memory", {
 export const tableDiscordUserMemory = pgTable("discord_user_memory", {
   id: uuid("id").primaryKey().defaultRandom(),
 
-  userId: text("user_id").notNull(),
+  userID: text("user_id").notNull(),
   memoryText: text("memory_text").notNull(),
 
   createdAt: columns.createdAt,
@@ -24,7 +24,7 @@ export const tableDiscordUserMemory = pgTable("discord_user_memory", {
 export const tableDiscordChannelMemory = pgTable("discord_channel_memory", {
   id: uuid("id").primaryKey().defaultRandom(),
 
-  channelId: text("channel_id").notNull(),
+  channelID: text("channel_id").notNull(),
   memoryText: text("memory_text").notNull(),
 
   createdAt: columns.createdAt,

@@ -6,34 +6,42 @@ import {
   tableDiscordChannelMemory,
 } from "#/postgres/schema";
 import { tool } from "ai";
+import dedent from "dedent";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 
 export const memoryTools: ToolSet = {
   createGuildMemory: tool({
-    description: "Enregistre une information de mémoire liée à un serveur (guild). L'IA DOIT utiliser cette mémoire pour stocker des informations contextuelles ou persistantes à propos d'un serveur. Utiliser cet outil si un utilisateur demande l'enregistrement d'une information concernant le serveur OU si une information concernant le serveur est partagé.",
+    description: dedent`
+      Stores a persistent, guild-specific memory.
+
+      Use only when the information is:
+      - durable over time
+      - specific to the Discord server
+      - useful in future interactions
+
+      Do not store temporary messages or casual discussions.
+    `,
     inputSchema: z.object({
-      guildId: z.string().describe("ID du serveur Discord"),
-      memoryText: z.string().describe("Texte à enregistrer dans la mémoire du serveur, le texte doit être AI-friendly et plutôt concis"),
+      guildID: z.string().describe("Discord guild ID"),
+      memoryText: z.string().describe("Concise, factual, neutral information written in the third person. No emojis, no formatting, no conversational context."),
     }),
     outputSchema: z.object({
-      id: z.string().describe("ID de l'enregistrement inséré"),
-      guildId: z.string().describe("ID du serveur"),
-      memoryText: z.string().describe("Texte enregistré"),
-      createdAt: z.string().describe("Date de création"),
+      guildID: z.string().describe("Discord guild ID"),
+      memoryText: z.string().describe("Stored memory content"),
+      createdAt: z.string().describe("ISO date indicating when the memory was created"),
     }),
-    execute: async ({ guildId, memoryText }) => {
+    execute: async ({ guildID: guildID, memoryText }) => {
       const rows = await postgres
         .insert(tableDiscordGuildMemory)
-        .values({ guildId, memoryText })
+        .values({ guildID, memoryText })
         .returning();
 
       const row = rows[0];
       if (!row) throw new Error("Insert failed");
 
       return {
-        id: row.id,
-        guildId: row.guildId,
+        guildID: row.guildID,
         memoryText: row.memoryText,
         createdAt: row.createdAt.toISOString(),
       };
@@ -41,62 +49,79 @@ export const memoryTools: ToolSet = {
   }),
 
   getGuildMemory: tool({
-    description: "Récupère les entrées de mémoire pour un serveur. L'IA doit lire ces entrées pour retrouver le contexte pertinent lié au serveur.",
+    description: dedent`
+      Retrieves stored memories associated with a Discord guild.
+
+      The assistant must read and use these memories to restore relevant
+      server-specific context before responding.
+
+      Returned memories represent persistent knowledge about the server
+      and should be treated as factual context unless contradicted.
+    `,
     inputSchema: z.object({
-      guildId: z.string().describe("ID du serveur Discord"),
-      limit: z.number().min(1).max(100).optional().describe("Nombre maximum d'entrées à retourner"),
+      guildID: z.string().describe("Discord guild ID"),
+      limit: z.number().min(1).optional().describe("Maximum number of memory entries to return"),
     }),
     outputSchema: z.object({
-      guildId: z.string().describe("ID du serveur"),
+      guildID: z.string().describe("Discord guild ID"),
       memories: z.array(z.object({
-        id: z.string().describe("ID de l'enregistrement"),
-        memoryText: z.string().describe("Texte enregistré"),
-        createdAt: z.string().describe("Date de création"),
+        memoryText: z.string().describe("Stored memory content"),
+        createdAt: z.string().describe("ISO date indicating when the memory was created"),
       })),
-      total: z.number().describe("Nombre d'entrées retournées"),
+      total: z.number().describe("Number of memory entries returned"),
     }),
-    execute: async ({ guildId, limit = 50 }) => {
+    execute: async ({ guildID, limit = 50 }) => {
       const rows = await postgres
         .select()
         .from(tableDiscordGuildMemory)
-        .where(eq(tableDiscordGuildMemory.guildId, guildId))
+        .where(eq(tableDiscordGuildMemory.guildID, guildID))
         .orderBy(desc(tableDiscordGuildMemory.createdAt))
         .limit(limit);
 
       const memories = rows.map((row) => ({
-        id: row.id,
         memoryText: row.memoryText,
         createdAt: row.createdAt.toISOString(),
       }));
 
-      return { guildId, memories, total: memories.length };
+      return { guildID, memories, total: memories.length };
     },
   }),
 
   createUserMemory: tool({
-    description: "Enregistre une information de mémoire liée à un utilisateur. L'IA DOIT utiliser cette mémoire pour stocker des informations personnelles ou préférences liées à un utilisateur. Utiliser cet outil si un utilisateur demande l'enregistrement d'une information concernant un utilisateur OU si une information concernant un utilisateur est partagé.",
+    description: dedent`
+      Stores a persistent, user-specific memory.
+
+      Use only when the information is:
+      - durable over time
+      - specific to a single user
+      - useful for future interactions with that user
+
+      Typical examples include user preferences, recurring behaviors,
+      or explicitly stated personal information.
+
+      Do not store temporary messages, transient context, emotions,
+      or casual conversation.
+    `,
     inputSchema: z.object({
-      userId: z.string().describe("ID de l'utilisateur Discord"),
-      memoryText: z.string().describe("Texte à enregistrer dans la mémoire utilisateur, le texte doit être AI-friendly et plutôt concis"),
+      userID: z.string().describe("Discord user ID"),
+      memoryText: z.string().describe("Concise, factual, neutral information written in the third person. No emojis, no formatting, no conversational context."),
     }),
     outputSchema: z.object({
-      id: z.string().describe("ID de l'enregistrement inséré"),
-      userId: z.string().describe("ID de l'utilisateur"),
-      memoryText: z.string().describe("Texte enregistré"),
-      createdAt: z.string().describe("Date de création"),
+      userID: z.string().describe("Discord user ID"),
+      memoryText: z.string().describe("Stored memory content"),
+      createdAt: z.string().describe("ISO date indicating when the memory was created"),
     }),
-    execute: async ({ userId, memoryText }) => {
+    execute: async ({ userID, memoryText }) => {
       const rows = await postgres
         .insert(tableDiscordUserMemory)
-        .values({ userId, memoryText })
+        .values({ userID, memoryText })
         .returning();
 
       const row = rows[0];
       if (!row) throw new Error("Insert failed");
 
       return {
-        id: row.id,
-        userId: row.userId,
+        userID: row.userID,
         memoryText: row.memoryText,
         createdAt: row.createdAt.toISOString(),
       };
@@ -104,62 +129,81 @@ export const memoryTools: ToolSet = {
   }),
 
   getUserMemory: tool({
-    description: "Récupère les entrées de mémoire pour un utilisateur. L'IA doit lire ces entrées pour retrouver les préférences et le contexte utilisateur.",
+    description: dedent`
+      Retrieves stored memories associated with a Discord user.
+
+      The assistant must read and use these memories to restore relevant
+      user-specific context and preferences before responding.
+
+      Returned memories represent persistent knowledge about the user
+      and should be treated as factual context unless contradicted.
+    `,
     inputSchema: z.object({
-      userId: z.string().describe("ID de l'utilisateur Discord"),
-      limit: z.number().min(1).max(100).optional().describe("Nombre maximum d'entrées à retourner"),
+      userID: z.string().describe("Discord user ID"),
+      limit: z.number().min(1).optional().describe("Maximum number of memory entries to return"),
     }),
     outputSchema: z.object({
-      userId: z.string().describe("ID de l'utilisateur"),
-      memories: z.array(z.object({
-        id: z.string().describe("ID de l'enregistrement"),
-        memoryText: z.string().describe("Texte enregistré"),
-        createdAt: z.string().describe("Date de création"),
-      })),
-      total: z.number().describe("Nombre d'entrées retournées"),
+      userID: z.string().describe("Discord user ID"),
+      memories: z.array(
+        z.object({
+          memoryText: z.string().describe("Stored memory content"),
+          createdAt: z.string().describe("ISO date indicating when the memory was created"),
+        }),
+      ),
+      total: z.number().describe("Number of memory entries returned"),
     }),
-    execute: async ({ userId, limit = 50 }) => {
+    execute: async ({ userID, limit = 50 }) => {
       const rows = await postgres
         .select()
         .from(tableDiscordUserMemory)
-        .where(eq(tableDiscordUserMemory.userId, userId))
+        .where(eq(tableDiscordUserMemory.userID, userID))
         .orderBy(desc(tableDiscordUserMemory.createdAt))
         .limit(limit);
 
       const memories = rows.map((row) => ({
-        id: row.id,
         memoryText: row.memoryText,
         createdAt: row.createdAt.toISOString(),
       }));
 
-      return { userId, memories, total: memories.length };
+      return { userID, memories, total: memories.length };
     },
   }),
 
   createChannelMemory: tool({
-    description: "Enregistre une information de mémoire liée à un channel. L'IA DOIT utiliser cette mémoire pour stocker des informations contextuelles liées à un channel spécifique. Utiliser cet outil si un utilisateur demande l'enregistrement d'une information concernant un channel OU si une information concernant un channel est partagé.",
+    description: dedent`
+      Stores a persistent, channel-specific memory.
+
+      Use only when the information is:
+      - durable over time
+      - specific to a single Discord channel
+      - useful for future interactions within that channel
+
+      Typical examples include channel purpose, usage rules,
+      or recurring contextual information.
+
+      Do not store temporary messages, transient context,
+      or casual conversation.
+    `,
     inputSchema: z.object({
-      channelId: z.string().describe("ID du channel Discord"),
-      memoryText: z.string().describe("Texte à enregistrer dans la mémoire du channel, le texte doit être AI-friendly et plutôt concis"),
+      channelID: z.string().describe("Discord channel ID"),
+      memoryText: z.string().describe("Concise, factual, neutral information written in the third person. No emojis, no formatting, no conversational context."),
     }),
     outputSchema: z.object({
-      id: z.string().describe("ID de l'enregistrement inséré"),
-      channelId: z.string().describe("ID du channel"),
-      memoryText: z.string().describe("Texte enregistré"),
-      createdAt: z.string().describe("Date de création"),
+      channelID: z.string().describe("Discord channel ID"),
+      memoryText: z.string().describe("Stored memory content"),
+      createdAt: z.string().describe("ISO date indicating when the memory was created"),
     }),
-    execute: async ({ channelId, memoryText }) => {
+    execute: async ({ channelID, memoryText }) => {
       const rows = await postgres
         .insert(tableDiscordChannelMemory)
-        .values({ channelId, memoryText })
+        .values({ channelID, memoryText })
         .returning();
 
       const row = rows[0];
       if (!row) throw new Error("Insert failed");
 
       return {
-        id: row.id,
-        channelId: row.channelId,
+        channelID: row.channelID,
         memoryText: row.memoryText,
         createdAt: row.createdAt.toISOString(),
       };
@@ -167,35 +211,43 @@ export const memoryTools: ToolSet = {
   }),
 
   getChannelMemory: tool({
-    description: "Récupère les entrées de mémoire pour un channel. L'IA doit lire ces entrées pour retrouver le contexte lié au channel.",
+    description: dedent`
+      Retrieves stored memories associated with a Discord channel.
+
+      The assistant must read and use these memories to restore relevant
+      channel-specific context before responding.
+
+      Returned memories represent persistent knowledge about the channel
+      and should be treated as factual context unless contradicted.
+    `,
     inputSchema: z.object({
-      channelId: z.string().describe("ID du channel Discord"),
-      limit: z.number().min(1).max(100).optional().describe("Nombre maximum d'entrées à retourner"),
+      channelID: z.string().describe("Discord channel ID"),
+      limit: z.number().min(1).optional().describe("Maximum number of memory entries to return"),
     }),
     outputSchema: z.object({
-      channelId: z.string().describe("ID du channel"),
-      memories: z.array(z.object({
-        id: z.string().describe("ID de l'enregistrement"),
-        memoryText: z.string().describe("Texte enregistré"),
-        createdAt: z.string().describe("Date de création"),
-      })),
-      total: z.number().describe("Nombre d'entrées retournées"),
+      channelID: z.string().describe("Discord channel ID"),
+      memories: z.array(
+        z.object({
+          memoryText: z.string().describe("Stored memory content"),
+          createdAt: z.string().describe("ISO date indicating when the memory was created"),
+        }),
+      ),
+      total: z.number().describe("Number of memory entries returned"),
     }),
-    execute: async ({ channelId, limit = 50 }) => {
+    execute: async ({ channelID, limit = 50 }) => {
       const rows = await postgres
         .select()
         .from(tableDiscordChannelMemory)
-        .where(eq(tableDiscordChannelMemory.channelId, channelId))
+        .where(eq(tableDiscordChannelMemory.channelID, channelID))
         .orderBy(desc(tableDiscordChannelMemory.createdAt))
         .limit(limit);
 
       const memories = rows.map((row) => ({
-        id: row.id,
         memoryText: row.memoryText,
         createdAt: row.createdAt.toISOString(),
       }));
 
-      return { channelId, memories, total: memories.length };
+      return { channelID, memories, total: memories.length };
     },
   }),
 };
