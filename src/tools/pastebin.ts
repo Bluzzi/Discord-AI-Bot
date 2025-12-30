@@ -3,6 +3,16 @@ import { env } from "#/utils/env";
 import { tool } from "ai";
 import { z } from "zod";
 
+export async function getPastebinRawContent(pasteId: string): Promise<string> {
+  try {
+    const response = await fetch(`https://pastebin.com/raw/${pasteId}`);
+    if (!response.ok) return "";
+    return await response.text();
+  } catch {
+    return "";
+  }
+}
+
 export async function createPaste(content: string, title = "Paste"): Promise<string> {
   if (!env.PASTEBIN_API_KEY) {
     throw new Error("PASTEBIN_API_KEY is not configured");
@@ -37,7 +47,7 @@ export async function createPaste(content: string, title = "Paste"): Promise<str
   return pasteUrl.trim();
 }
 
-export function formatSearchResultsForPaste(results: any[]): string {
+export function formatSearchResultsForPaste(results: Array<{ title: string; url: string; snippet?: string }>): string {
   let content = "=== SEARCH RESULTS ===\n\n";
 
   results.forEach((result, index) => {
@@ -82,7 +92,7 @@ export const pastebinTools: ToolSet = {
       url: z.string().describe("Pastebin URL of the created paste"),
       title: z.string().describe("Title of the paste"),
     }),
-    execute: async ({ content, title = "Paste" }) => {
+    execute: async ({ content, title = "Paste" }: { content: string; title?: string }) => {
       const url = await createPaste(content, title);
 
       return {
