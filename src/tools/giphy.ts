@@ -35,7 +35,7 @@ export const giphyTools: ToolSet = {
       })).describe("Liste des GIFs trouvés"),
       totalFound: z.number().describe("Nombre de GIFs trouvés"),
     }),
-    execute: async ({ query, limit = 1 }) => {
+    execute: async ({ query, limit }) => {
       if (!env.GIPHY_API_KEY) {
         throw new Error("GIPHY_API_KEY is not configured");
       }
@@ -74,7 +74,7 @@ export const giphyTools: ToolSet = {
       })).describe("Liste des GIFs tendances"),
       totalFound: z.number().describe("Nombre de GIFs trouvés"),
     }),
-    execute: async ({ limit = 5 }) => {
+    execute: async ({ limit }) => {
       if (!env.GIPHY_API_KEY) {
         throw new Error("GIPHY_API_KEY is not configured");
       }

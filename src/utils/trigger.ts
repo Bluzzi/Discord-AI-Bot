@@ -7,11 +7,11 @@ import { Cron } from "croner";
 
 const discordEvent = <K extends keyof ClientEvents>(
   eventName: K,
-  fn: (...args: ClientEvents[K]) => void,
+  fn: (...args: ClientEvents[K]) => void | Promise<void>,
 ) => {
-  discordClient.on(eventName, (...args) => {
+  discordClient.on(eventName, async (...args) => {
     try {
-      fn(...args);
+      await fn(...args);
     }
     catch (error) {
       logger.error(

@@ -12,15 +12,21 @@ export const discordClient = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
   ],
   partials: [
     Partials.Channel,
     Partials.Message,
+    Partials.Reaction,
   ],
 });
 
 export const discordClientStart = async (loadEvents: () => Promise<void>) => {
-  await discordClient.login(env.DISCORD_BOT_TOKEN);
+  discordClient.once("clientReady", (readyClient) => {
+    logger.info(`Discord bot successfully started!! Logged in as ${readyClient.user.tag}`);
+  });
+
   await loadEvents();
-  logger.info("Discord bot successfully started!");
+
+  await discordClient.login(env.DISCORD_BOT_TOKEN);
 };

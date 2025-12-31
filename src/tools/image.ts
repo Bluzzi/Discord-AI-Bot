@@ -53,7 +53,7 @@ export const imageTools: ToolSet = {
     }),
     execute: async ({ query, count = 5, safesearch = "strict" }) => {
       const apiKey = process.env.BRAVE_SEARCH_API_KEY;
-      
+
       if (!apiKey) {
         throw new Error("BRAVE_SEARCH_API_KEY not configured in environment variables");
       }
@@ -65,7 +65,7 @@ export const imageTools: ToolSet = {
       searchUrl.searchParams.set("count", limitedCount.toString());
       searchUrl.searchParams.set("safesearch", safesearch);
       searchUrl.searchParams.set("search_lang", "fr");
-      
+
       const response = await fetch(searchUrl.toString(), {
         headers: {
           "Accept": "application/json",
@@ -80,7 +80,7 @@ export const imageTools: ToolSet = {
 
       const data = await response.json() as {
         type: string;
-        results: Array<{
+        results: {
           type: string;
           title: string;
           url: string;
@@ -97,7 +97,7 @@ export const imageTools: ToolSet = {
             width: number;
             height: number;
           };
-        }>;
+        }[];
       };
 
       if (!data.results || data.results.length === 0) {

@@ -212,7 +212,7 @@ export const tmdbTools: ToolSet = {
         lastAirDate: show.last_air_date || "Date inconnue",
         numberOfSeasons: show.number_of_seasons || 0,
         numberOfEpisodes: show.number_of_episodes || 0,
-        episodeRunTime: show.episode_run_time?.join(", ") + " min" || "Inconnu",
+        episodeRunTime: `${show.episode_run_time?.join(", ")} min` || "Inconnu",
         voteAverage: show.vote_average || 0,
         voteCount: show.vote_count || 0,
         genres: show.genres?.map((g: any) => g.name).join(", ") || "Inconnu",

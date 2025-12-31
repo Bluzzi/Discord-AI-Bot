@@ -23,7 +23,7 @@ export const memoryTools: ToolSet = {
       Do not store temporary messages or casual discussions.
     `,
     inputSchema: z.object({
-      guildID: z.string().describe("Discord guild ID"),
+      guildID: z.string().describe("Discord guild ID, the information saved must relate to this guild only."),
       memoryText: z.string().describe("Concise, factual, neutral information written in the third person. No emojis, no formatting, no conversational context."),
     }),
     outputSchema: z.object({
@@ -103,7 +103,7 @@ export const memoryTools: ToolSet = {
       or casual conversation.
     `,
     inputSchema: z.object({
-      userID: z.string().describe("Discord user ID"),
+      userID: z.string().describe("Discord user ID, the information saved must relate to this user only."),
       memoryText: z.string().describe("Concise, factual, neutral information written in the third person. No emojis, no formatting, no conversational context."),
     }),
     outputSchema: z.object({
@@ -185,7 +185,7 @@ export const memoryTools: ToolSet = {
       or casual conversation.
     `,
     inputSchema: z.object({
-      channelID: z.string().describe("Discord channel ID"),
+      channelID: z.string().describe("Discord channel ID, the information saved must relate to this channel only."),
       memoryText: z.string().describe("Concise, factual, neutral information written in the third person. No emojis, no formatting, no conversational context."),
     }),
     outputSchema: z.object({

@@ -22,6 +22,9 @@ export default eslintConfig(
       "src/tools/school-42.ts",
       "src/tools/steam.ts",
       "src/tools/websearch.ts",
+      "src/tools/tmdb.ts",
+      "src/tools/minecraft.ts",
+      "src/tools/letterboxd.ts",
     ],
   },
 );
