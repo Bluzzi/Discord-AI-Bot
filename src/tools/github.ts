@@ -10,7 +10,7 @@ async function githubFetch(endpoint: string) {
   };
 
   if (env.GITHUB_TOKEN) {
-    headers["Authorization"] = `Bearer ${env.GITHUB_TOKEN}`;
+    headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
   }
 
   const response = await fetch(`https://api.github.com${endpoint}`, { headers });
@@ -129,7 +129,7 @@ export const githubTools: ToolSet = {
       totalCount: z.number().describe("Nombre total de repos"),
     }),
     execute: async ({ username, sort = "updated", perPage = 100 }) => {
-      const data = await githubFetch(`/users/${username}/repos?sort=${sort}&per_page=${perPage}`) as Array<{
+      const data = await githubFetch(`/users/${username}/repos?sort=${sort}&per_page=${perPage}`) as {
         id: number;
         name: string;
         full_name: string;
@@ -147,7 +147,7 @@ export const githubTools: ToolSet = {
         fork: boolean;
         archived: boolean;
         topics: string[];
-      }>;
+      }[];
 
       return {
         repos: data.map((repo) => ({
@@ -320,7 +320,7 @@ export const githubTools: ToolSet = {
 
       const data = await githubFetch(`/search/repositories?${params.toString()}`) as {
         total_count: number;
-        items: Array<{
+        items: {
           id: number;
           name: string;
           full_name: string;
@@ -334,7 +334,7 @@ export const githubTools: ToolSet = {
           topics: string[];
           created_at: string;
           updated_at: string;
-        }>;
+        }[];
       };
 
       return {

@@ -8,7 +8,8 @@ export async function getPastebinRawContent(pasteId: string): Promise<string> {
     const response = await fetch(`https://pastebin.com/raw/${pasteId}`);
     if (!response.ok) return "";
     return await response.text();
-  } catch {
+  }
+  catch {
     return "";
   }
 }
@@ -47,7 +48,7 @@ export async function createPaste(content: string, title = "Paste"): Promise<str
   return pasteUrl.trim();
 }
 
-export function formatSearchResultsForPaste(results: Array<{ title: string; url: string; snippet?: string }>): string {
+export function formatSearchResultsForPaste(results: { title: string; url: string; snippet?: string }[]): string {
   let content = "=== SEARCH RESULTS ===\n\n";
 
   results.forEach((result, index) => {

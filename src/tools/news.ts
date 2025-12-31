@@ -52,15 +52,15 @@ CATÉGORIES DISPONIBLES:
       })).describe("Liste des articles récupérés"),
       totalArticles: z.number().describe("Nombre total d'articles récupérés"),
     }),
-    execute: async ({ category, limit = 5 }) => {
-      const feedConfig = RSS_FEEDS[category as RssFeedKey];
-      
+    execute: async ({ category, limit }) => {
+      const feedConfig = RSS_FEEDS[category];
+
       if (!feedConfig) {
         throw new Error(`Catégorie invalide: ${category}`);
       }
 
       const feed = await rss.parseURL(feedConfig.url);
-      
+
       const articles = feed.items.slice(0, limit).map((item) => ({
         title: item.title || "Sans titre",
         link: item.link || "",
@@ -98,24 +98,24 @@ CATÉGORIES DISPONIBLES:
       })).describe("Liste des articles correspondant aux mots-clés"),
       totalFound: z.number().describe("Nombre d'articles trouvés"),
     }),
-    execute: async ({ category, keywords, limit = 10 }) => {
-      const feedConfig = RSS_FEEDS[category as RssFeedKey];
-      
+    execute: async ({ category, keywords, limit }) => {
+      const feedConfig = RSS_FEEDS[category];
+
       if (!feedConfig) {
         throw new Error(`Catégorie invalide: ${category}`);
       }
 
       const feed = await rss.parseURL(feedConfig.url);
-      
+
       const searchTerms = keywords.toLowerCase().split(/\s+/);
-      
+
       const matchingArticles = feed.items
         .slice(0, limit)
         .filter((item) => {
           const title = (item.title || "").toLowerCase();
           const content = (item.contentSnippet || "").toLowerCase();
           const combined = `${title} ${content}`;
-          
+
           return searchTerms.some((term) => combined.includes(term));
         })
         .map((item) => ({

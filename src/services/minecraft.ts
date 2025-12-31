@@ -10,7 +10,7 @@ export const getMinecraftBot = (): Bot | null => {
 };
 
 export const isMinecraftConnected = (): boolean => {
-  return minecraftBot !== null && !(minecraftBot._client?.ended);
+  return minecraftBot !== null && !minecraftBot._client.ended;
 };
 
 export const connectMinecraft = async (host: string, port: number, username = "JeanPascal"): Promise<Bot> => {
@@ -18,7 +18,7 @@ export const connectMinecraft = async (host: string, port: number, username = "J
     throw new Error("Already connected to a Minecraft server");
   }
 
-  logger.info(`Connecting to Minecraft server ${host}:${port} as ${username}`);
+  logger.info(`Connecting to Minecraft server ${host}:${String(port)} as ${username}`);
 
   minecraftBot = mineflayer.createBot({
     host: host,
@@ -42,7 +42,7 @@ export const connectMinecraft = async (host: string, port: number, username = "J
 
     bot.once("spawn", () => {
       clearTimeout(timeout);
-      logger.info(`Connected to Minecraft server ${host}:${port}`);
+      logger.info(`Connected to Minecraft server ${host}:${String(port)}`);
       setupMinecraftChatListener();
       resolve(bot);
     });

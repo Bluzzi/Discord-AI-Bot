@@ -4,7 +4,7 @@ import { tool } from "ai";
 import { z } from "zod";
 
 let accessToken: string | null = null;
-let tokenExpiry: number = 0;
+let tokenExpiry = 0;
 
 async function getAccessToken(): Promise<string> {
   if (accessToken && Date.now() < tokenExpiry) {
@@ -102,7 +102,7 @@ export const fortyTwoTools: ToolSet = {
 
       const response = await fetch(`https://api.intra.42.fr/v2/users/${login}`, {
         headers: {
-          "Authorization": `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       });
 
@@ -114,30 +114,30 @@ export const fortyTwoTools: ToolSet = {
       }
 
       const data = await response.json() as {
-        id: number;
-        login: string;
-        email: string;
-        first_name: string;
-        last_name: string;
-        usual_full_name?: string;
-        displayname: string;
-        image?: {
+        "id": number;
+        "login": string;
+        "email": string;
+        "first_name": string;
+        "last_name": string;
+        "usual_full_name"?: string;
+        "displayname": string;
+        "image"?: {
           link?: string;
         };
         "staff?": boolean;
-        correction_point: number;
-        pool_month?: string;
-        pool_year?: string;
-        location?: string;
-        wallet: number;
+        "correction_point": number;
+        "pool_month"?: string;
+        "pool_year"?: string;
+        "location"?: string;
+        "wallet": number;
         "alumni?": boolean;
         "active?": boolean;
-        campus: Array<{
+        "campus": {
           id: number;
           name: string;
           time_zone: string;
-        }>;
-        cursus_users: Array<{
+        }[];
+        "cursus_users": {
           id: number;
           grade?: string;
           level: number;
@@ -146,29 +146,29 @@ export const fortyTwoTools: ToolSet = {
             id: number;
             name: string;
           };
-          skills: Array<{
+          skills: {
             name: string;
             level: number;
-          }>;
-        }>;
-        projects_users: Array<{
-          id: number;
-          final_mark?: number;
-          status: string;
+          }[];
+        }[];
+        "projects_users": {
+          "id": number;
+          "final_mark"?: number;
+          "status": string;
           "validated?": boolean;
-          project: {
+          "project": {
             id: number;
             name: string;
             slug: string;
           };
-        }>;
-        achievements: Array<{
+        }[];
+        "achievements": {
           id: number;
           name: string;
           description: string;
           tier: string;
           kind: string;
-        }>;
+        }[];
       };
 
       return {

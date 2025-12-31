@@ -298,7 +298,7 @@ export const discordTools: ToolSet = {
       }
 
       const channel = guild.channels.cache.get(channelId);
-      if (!channel || channel.type !== ChannelType.GuildVoice) {
+      if (channel?.type !== ChannelType.GuildVoice) {
         throw new Error("Voice channel not found");
       }
 
@@ -1516,7 +1516,7 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
     description: "Get basic information about a user by their ID. Optionally include guild-specific display name if `guildId` is provided.",
     inputSchema: z.object({
       userId: z.string().describe("The Discord user ID to fetch"),
-      guildId: z.string().optional().describe("Optional guild ID to fetch member-specific info (displayName)")
+      guildId: z.string().optional().describe("Optional guild ID to fetch member-specific info (displayName)"),
     }),
     outputSchema: z.object({
       id: z.string().describe("User ID"),
@@ -1525,7 +1525,7 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       avatarUrl: z.string().nullable().describe("Avatar URL or null"),
       isBot: z.boolean().describe("Whether the user is a bot"),
       displayName: z.string().optional().describe("Guild display name if guildId provided and user is a member"),
-      createdAt: z.string().optional().describe("User creation date (ISO)")
+      createdAt: z.string().optional().describe("User creation date (ISO)"),
     }),
     execute: async ({ userId, guildId }) => {
       const user = await discordClient.users.fetch(userId);
@@ -1545,7 +1545,7 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
         username: user.username,
         tag: `${user.username}#${user.discriminator}`,
         avatarUrl: user.displayAvatarURL({ size: 1024, extension: "png" }),
-        isBot: !!user.bot,
+        isBot: Boolean(user.bot),
         displayName: displayName,
         createdAt: user.createdAt.toISOString(),
       };
@@ -1570,11 +1570,11 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       const channel = await discordClient.channels.fetch(channelId);
       if (!channel) throw new Error("Channel not found");
 
-      const name = 'name' in channel ? channel.name : "";
+      const name = "name" in channel ? channel.name : "";
       const guildId = "guild" in channel ? channel.guild.id : "";
-      const parentId = 'parentId' in channel ? (channel.parentId || "") : "";
-      const nsfw = 'nsfw' in channel ? !!channel.nsfw : false;
-      const topic = 'topic' in channel ? (channel.topic || "") : "";
+      const parentId = "parentId" in channel ? (channel.parentId || "") : "";
+      const nsfw = "nsfw" in channel ? Boolean(channel.nsfw) : false;
+      const topic = "topic" in channel ? (channel.topic || "") : "";
 
       return {
         id: channel.id,
@@ -1596,10 +1596,10 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
     outputSchema: z.object({
       id: z.string().describe("Guild ID"),
       name: z.string().describe("Guild name"),
-      memberCount: z.number().describe("Number of members (approx)") ,
+      memberCount: z.number().describe("Number of members (approx)"),
       ownerId: z.string().optional().describe("Owner user ID"),
       iconUrl: z.string().nullable().describe("Guild icon URL"),
-      createdAt: z.string().optional().describe("Guild creation date (ISO)")
+      createdAt: z.string().optional().describe("Guild creation date (ISO)"),
     }),
     execute: async ({ guildId }) => {
       const guild = await discordClient.guilds.fetch(guildId);
@@ -1609,7 +1609,7 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
         id: guild.id,
         name: guild.name,
         memberCount: guild.memberCount,
-        ownerId: guild.ownerId as string,
+        ownerId: guild.ownerId,
         iconUrl: guild.iconURL?.() || "",
         createdAt: guild.createdAt.toISOString(),
       };
