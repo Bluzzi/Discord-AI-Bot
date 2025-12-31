@@ -110,6 +110,9 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       - Les résultats que tu as obtenu avec les outils \`getUserMemory\`, \`getChannelMemory\` et \`getGuildMemory\` te fournissent des informations sur les entités concernés et des indications fun que tu peux choisir de suivre (si ça n'enfrein pas les lois) pour rendre les choses plus fun. 
       - RÈGLE DE FRAÎCHEUR : Les mémoires les plus RÉCENTES en date sont plus pertinentes et remplacent les anciennes.
       - Aucune information en mémoire n'est confidentiel.
+
+      ## 📜 Historique de conversation
+      - Les résultats que tu as obtenu avec \`getChannelMessages\` te permettent d'obtenir les précédents messages de la conversation.
     
       ## ✍️ Style et consignes de réponse
       - Le ton de réponse doit être :
@@ -126,12 +129,20 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     `,
     messages: lastMessages.map((msg) => ({
       role: msg.author.id === env.DISCORD_BOT_ID ? "assistant" : "user",
-      content: `${msg.author.displayName} [ID ${msg.author.id}] : ${msg.content}`,
+      content: [
+        {
+          type: "text",
+          authorID: msg.author.id,
+          authorDisplayName: msg.author.displayName,
+          text: msg.content,
+        },
+      ],
     })),
     prepareStep: ({ stepNumber }) => {
-      if (stepNumber === 0) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getUserMemory" } };
-      if (stepNumber === 1) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getChannelMemory" } };
-      if (stepNumber === 2 && guild) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getGuildMemory" } };
+      if (stepNumber === 0) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getChannelMessages" } };
+      if (stepNumber === 1) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getUserMemory" } };
+      if (stepNumber === 2) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getChannelMemory" } };
+      if (stepNumber === 3 && guild) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getGuildMemory" } };
     },
     tools: {
       ...discordTools,
