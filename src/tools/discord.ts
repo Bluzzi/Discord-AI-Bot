@@ -1615,4 +1615,43 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       };
     },
   }),
+
+  addReaction: tool({
+    description: "Add a reaction (emoji) to a message. Supports Unicode emojis (e.g., '👍', '❤️') and custom server emojis (e.g., '<:name:id>' or 'name:id').",
+    inputSchema: z.object({
+      channelId: z.string().describe("The channel ID where the message is located"),
+      messageId: z.string().describe("The message ID to add the reaction to"),
+      emoji: z.string().describe("The emoji to react with. Can be a Unicode emoji (e.g., '👍', '❤️') or a custom emoji identifier (e.g., '<:name:id>' or 'name:id')"),
+    }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation was successful"),
+      channelId: z.string().describe("ID of the channel"),
+      messageId: z.string().describe("ID of the message"),
+      emoji: z.string().describe("Emoji that was added"),
+    }),
+    execute: async ({ channelId, messageId, emoji }) => {
+      const channel = discordClient.channels.cache.get(channelId);
+      if (!channel?.isTextBased()) {
+        throw new Error("Channel not found or not a text channel");
+      }
+
+      if (!("messages" in channel)) {
+        throw new Error("Channel does not support messages");
+      }
+
+      const message = await channel.messages.fetch(messageId);
+      if (!message) {
+        throw new Error("Message not found");
+      }
+
+      await message.react(emoji);
+
+      return {
+        success: true,
+        channelId: channelId,
+        messageId: messageId,
+        emoji: emoji,
+      };
+    },
+  }),
 };

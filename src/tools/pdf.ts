@@ -16,6 +16,7 @@ export const pdfTools: ToolSet = {
 3. Appelle generatePDF avec cet HTML et le channelId
 4. Le tool va uploader le PDF directement sur Discord
 5. Réponds UNIQUEMENT: "Voici ton pdf tu peux le télécharger ci-dessous"
+6. si le pdf comprend une signature au lieu de mettre un placeholder [singnature] met une image sans fond d'une signature
 
 ⚠️ INTERDIT:
 - Dire "j'ai un souci technique"

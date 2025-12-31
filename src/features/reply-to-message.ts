@@ -8,7 +8,9 @@ import { githubTools } from "#/tools/github";
 import { guildLawTools } from "#/tools/guild-law";
 import { igdbTools } from "#/tools/igdb";
 import { imageTools } from "#/tools/image";
+import { letterboxdTools } from "#/tools/letterboxd";
 import { memoryTools } from "#/tools/memory";
+import { minecraftTools } from "#/tools/minecraft";
 import { newsTools } from "#/tools/news";
 import { pastebinTools } from "#/tools/pastebin";
 import { pdfTools } from "#/tools/pdf";
@@ -147,6 +149,8 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       ...githubTools,
       ...igdbTools,
       ...imageTools,
+      ...letterboxdTools,
+      ...minecraftTools,
       ...newsTools,
       ...pastebinTools,
       ...pdfTools,
