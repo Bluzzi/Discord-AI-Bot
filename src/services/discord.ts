@@ -1,5 +1,4 @@
 import { env } from "#/utils/env";
-import { logger } from "#/utils/logger";
 import { Client, GatewayIntentBits, Partials } from "discord.js";
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
@@ -20,7 +19,11 @@ export const discordClient = new Client({
 });
 
 export const discordClientStart = async (loadEvents: () => Promise<void>) => {
-  await discordClient.login(env.DISCORD_BOT_TOKEN);
+  discordClient.once("clientReady", (readyClient) => {
+    console.log(`Discord bot successfully started!! Logged in as ${readyClient.user.tag}`);
+  });
+
   await loadEvents();
-  logger.info("Discord bot successfully started!");
+
+  await discordClient.login(env.DISCORD_BOT_TOKEN);
 };
