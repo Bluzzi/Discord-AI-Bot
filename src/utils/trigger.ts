@@ -1,7 +1,5 @@
 import type { ClientEvents } from "discord.js";
-import type { Context } from "hono";
 import { discordClient } from "#/services/discord";
-import { server } from "#/services/server";
 import { logger } from "#/utils/logger";
 import { Cron } from "croner";
 
@@ -40,26 +38,4 @@ const cron = async (
   if (options.triggerAtStartup) await job.trigger();
 };
 
-const webhook = (
-  webhookName: string,
-  endpoint: string,
-  fn: (ctx: Context) => Response | Promise<Response>,
-) => {
-  server.get(endpoint, async (ctx) => {
-    try {
-      return await fn(ctx);
-    }
-    catch (error) {
-      logger.error(
-        `Webhook \`${webhookName}\` (POST ${endpoint}) error:`,
-        error instanceof Error ? error.stack : String(error),
-      );
-
-      return ctx.json({
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-};
-
-export const trigger = { discordEvent, cron, webhook };
+export const trigger = { discordEvent, cron };

@@ -8,7 +8,6 @@ import { guildLawTools } from "#/tools/guild-law";
 import { imageTools } from "#/tools/image";
 import { letterboxdTools } from "#/tools/letterboxd";
 import { memoryTools } from "#/tools/memory";
-import { minecraftTools } from "#/tools/minecraft";
 import { newsTools } from "#/tools/news";
 import { pdfTools } from "#/tools/pdf";
 import { steamTools } from "#/tools/steam";
@@ -145,7 +144,6 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       ...githubTools,
       ...imageTools,
       ...letterboxdTools,
-      ...minecraftTools,
       ...newsTools,
       ...pdfTools,
       ...steamTools,
