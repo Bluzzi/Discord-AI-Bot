@@ -4,27 +4,33 @@ import { z } from "zod";
 
 export const holidaysTools: ToolSet = {
   getPublicHolidays: tool({
-    description: "Fetch French public holidays for métropole from calendrier.api.gouv.fr",
+    description: "Get the French public holidays (métropole) of the current year with their dates.",
     inputSchema: z.object({}),
-    outputSchema: z.object({
-      holidays: z.array(z.object({ date: z.string(), name: z.string() })),
-    }),
+    outputSchema: z.array(z.object({
+      date: z.string().describe("Date in ISO format (YYYY-MM-DD)"),
+      name: z.string().describe("Holiday name"),
+    })).describe("French public holidays of the current year"),
     execute: async () => {
-      const url = "https://calendrier.api.gouv.fr/jours-feries/metropole.json";
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch public holidays: ${String(res.status)}`);
-      const data = (await res.json()) as Record<string, string>;
-      const holidays = Object.entries(data).map(([date, name]) => ({ date, name }));
-      return { holidays };
+      const response = await fetch("https://calendrier.api.gouv.fr/jours-feries/metropole.json");
+      if (!response.ok) {
+        throw new Error(`Failed to fetch public holidays: HTTP ${String(response.status)}`);
+      }
+
+      const data = await response.json() as Record<string, string>;
+
+      return Object.entries(data).map(([date, name]) => ({ date, name }));
     },
   }),
 
   getFestiveDays: tool({
-    description: "Compute festive (non-official) celebration dates for a given year, filtered out if they match public holidays",
-    inputSchema: z.object({ year: z.number().int().describe("Year to compute festivities for") }),
-    outputSchema: z.object({
-      festiveDays: z.array(z.object({ date: z.string(), name: z.string() })),
+    description: "Get the festive days (unofficial celebrations: Valentine's Day, Saint Patrick's Day, Halloween, Mother's Day, Father's Day) of a given year, excluding French public holidays.",
+    inputSchema: z.object({
+      year: z.number().int().describe("Year to compute festivities for"),
     }),
+    outputSchema: z.array(z.object({
+      date: z.string().describe("Date in ISO format (YYYY-MM-DD)"),
+      name: z.string().describe("Celebration name"),
+    })).describe("Festive days of the year, sorted by date"),
     execute: async ({ year }) => {
       const pad = (n: number) => (n < 10 ? `0${String(n)}` : String(n));
       const toIsoDate = (d: Date) => `${String(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -48,9 +54,9 @@ export const holidaysTools: ToolSet = {
       };
 
       const addDays = (d: Date, days: number) => {
-        const r = new Date(d);
-        r.setDate(r.getDate() + days);
-        return r;
+        const result = new Date(d);
+        result.setDate(result.getDate() + days);
+        return result;
       };
 
       const nthWeekdayOfMonth = (y: number, monthIndex: number, weekday: number, nth: number) => {
@@ -65,34 +71,31 @@ export const holidaysTools: ToolSet = {
         return new Date(last.getFullYear(), last.getMonth(), last.getDate() - diff);
       };
 
-      // Build festive list
-      const list: { name: string; date: string }[] = [];
-      list.push({ name: "Saint-Valentin", date: `${String(year)}-02-14` });
-      list.push({ name: "Saint-Patrick", date: `${String(year)}-03-17` });
-      list.push({ name: "Halloween", date: `${String(year)}-10-31` });
+      const list: { name: string; date: string }[] = [
+        { name: "Saint-Valentin", date: `${String(year)}-02-14` },
+        { name: "Saint-Patrick", date: `${String(year)}-03-17` },
+        { name: "Halloween", date: `${String(year)}-10-31` },
+      ];
 
-      // Fête des Pères: third Sunday of June
-      const fathers = nthWeekdayOfMonth(year, 5, 0, 3);
-      list.push({ name: "Fête des Pères", date: toIsoDate(fathers) });
+      // Fête des Pères: third Sunday of June:
+      list.push({ name: "Fête des Pères", date: toIsoDate(nthWeekdayOfMonth(year, 5, 0, 3)) });
 
-      // Fête des Mères (France): last Sunday of May, unless equals Pentecost -> first Sunday of June
-      const easter = easterSunday(year);
-      const pentecost = addDays(easter, 49);
+      // Fête des Mères (France): last Sunday of May, unless it falls on Pentecost -> first Sunday of June:
+      const pentecost = addDays(easterSunday(year), 49);
       const lastSundayMay = lastWeekdayOfMonth(year, 4, 0);
-      let mothersDay = lastSundayMay;
-      if (toIsoDate(lastSundayMay) === toIsoDate(pentecost)) {
-        mothersDay = nthWeekdayOfMonth(year, 5, 0, 1);
-      }
+      const mothersDay = toIsoDate(lastSundayMay) === toIsoDate(pentecost) ? nthWeekdayOfMonth(year, 5, 0, 1) : lastSundayMay;
       list.push({ name: "Fête des Mères", date: toIsoDate(mothersDay) });
 
-      // Filter out dates that are official public holidays
-      const url = "https://calendrier.api.gouv.fr/jours-feries/metropole.json";
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch public holidays: ${String(res.status)}`);
-      const publicHolidays = (await res.json()) as Record<string, string>;
+      // Exclude dates that are official public holidays:
+      const response = await fetch("https://calendrier.api.gouv.fr/jours-feries/metropole.json");
+      if (!response.ok) {
+        throw new Error(`Failed to fetch public holidays: HTTP ${String(response.status)}`);
+      }
+      const publicHolidays = await response.json() as Record<string, string>;
 
-      const festiveOnly = list.filter((f) => publicHolidays[f.date] !== undefined);
-      return { festiveDays: festiveOnly };
+      return list
+        .filter((festiveDay) => publicHolidays[festiveDay.date] === undefined)
+        .sort((a, b) => a.date.localeCompare(b.date));
     },
   }),
 };

@@ -7,26 +7,30 @@ const discordEvent = <K extends keyof ClientEvents>(
   eventName: K,
   fn: (...args: ClientEvents[K]) => void | Promise<void>,
 ) => {
-  discordClient.on(eventName, async (...args) => {
-    try {
-      await fn(...args);
-    }
-    catch (error) {
-      logger.error(
-        `Discord \`${eventName}\` event error:`,
-        error instanceof Error ? error.stack : String(error),
-      );
-    }
+  discordClient.on(eventName, (...args) => {
+    void (async () => {
+      try {
+        await fn(...args);
+      }
+      catch (error) {
+        logger.error(
+          `Discord \`${eventName}\` event error:`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    })();
   });
 };
 
 const cron = async (
   cronName: string,
   cronPattern: string,
-  fn: () => void,
+  fn: () => Promise<void> | void,
   options: { triggerAtStartup: boolean },
 ) => {
-  const job = new Cron(cronPattern, fn, {
+  const job = new Cron(cronPattern, () => {
+    void fn();
+  }, {
     catch: (error) => {
       logger.error(
         `Cron \`${cronName}\` error:`,

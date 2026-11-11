@@ -5,26 +5,23 @@ import { z } from "zod";
 
 export const websearchTools: ToolSet = {
   searchInternet: tool({
-    description: "Search the internet for information using DuckDuckGo",
+    description: "Search the internet for current information (DuckDuckGo). Returns page titles, descriptions and URLs.",
     inputSchema: z.object({
-      query: z.string().describe("The search query to look up on the internet"),
+      query: z.string().describe("The search query"),
     }),
-    outputSchema: z.object({
-      results: z.array(z.object({
-        title: z.string().describe("Title of the search result"),
-        description: z.string().describe("Description of the search result"),
-        url: z.string().describe("URL of the search result"),
-      })).describe("Array of search results"),
-    }),
+    outputSchema: z.array(z.object({
+      title: z.string().describe("Result title"),
+      description: z.string().describe("Result description"),
+      url: z.string().describe("Result URL"),
+    })).describe("Search results, most relevant first"),
     execute: async ({ query }) => {
       const results = await webSearch(query);
+
       if (results.length === 0) {
-        throw new Error(`No results found`);
+        throw new Error("No results found for this query");
       }
 
-      return {
-        results: results,
-      };
+      return results;
     },
   }),
 };
