@@ -12,7 +12,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   if (!message.channel.isTextBased()) return;
 
   // Always reply in DM:
-  if (!message.guildId) {
+  if (message.guildId === null) {
     logger.info(`Reply to ${message.author.username} in DM (100%)`);
     await replyToMessage(message);
     return;
@@ -39,7 +39,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     output: Output.choice({
       options: ["OUI", "NON"],
     }),
-    system: dedent`
+    instructions: dedent`
       Tu détermines si le bot Discord "${botNames}" doit répondre au dernier message d'une conversation.
 
       Mémoire :

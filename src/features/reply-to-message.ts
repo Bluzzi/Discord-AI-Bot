@@ -50,7 +50,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
   const result = await generateText({
     model: aiModel,
     stopWhen: stepCountIs(100),
-    system: dedent`
+    instructions: dedent`
       Tu es Jean Pascal ("JP", "Jean Pascal"), un assistant Discord.
 
       ## 🎯 Mise en contexte et variables
@@ -132,7 +132,12 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
   if (result.text.trim().length > 0) {
     for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
       const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
-      await message.reply(chunk).catch(async () => message.channel.send(chunk));
+      try {
+        await message.reply(chunk);
+      }
+      catch {
+        await message.channel.send(chunk);
+      }
     }
   }
 

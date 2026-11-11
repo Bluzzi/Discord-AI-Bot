@@ -1,4 +1,4 @@
 allowBuilds:
-  '@swc/core': true
-  esbuild: true
-  puppeteer: true
+  "@swc/core": true
+  "esbuild": true
+  "puppeteer": true
