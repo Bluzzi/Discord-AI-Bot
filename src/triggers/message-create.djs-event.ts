@@ -1,7 +1,7 @@
 import { replyToMessage } from "#/features/reply-to-message";
 import { discordClient } from "#/services/discord";
 import { memoryTools } from "#/tools/memory";
-import { aiModels } from "#/utils/ai-model";
+import { aiModel } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
@@ -36,7 +36,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   const botNames = [discordClient.user.username, botMember?.displayName, botMember?.nickname].filter(Boolean).join(", ");
 
   const decision = await generateText({
-    model: aiModels.fast,
+    model: aiModel,
     stopWhen: stepCountIs(10),
     output: Output.choice({
       options: ["OUI", "NON"],

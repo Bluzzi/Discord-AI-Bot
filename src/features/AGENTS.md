@@ -48,7 +48,7 @@ A typical feature file contains:
 ```ts
 import { generateText } from "ai";
 import { ActivityType } from "discord.js";
-import { aiModels } from "#/config/ai";
+import { aiModel } from "#/config/ai";
 import { discordClient } from "#/config/discord";
 import { newsTools } from "#/tools/news";
 import { z } from "zod";
@@ -60,7 +60,7 @@ export const generatePresenceStatus = async () => {
 
   // AI GENERATION: Generate status content
   const result = await generateText({
-    model: aiModels.large,
+    model: aiModel,
     output: Output.object({
       schema: z.object({
         emoji: z.string().describe("A single relevant Unicode emoji"),

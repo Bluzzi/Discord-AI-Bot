@@ -1,5 +1,5 @@
 import { minecraftTools } from "#/tools/minecraft";
-import { aiModels } from "#/utils/ai-model";
+import { aiModel } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { generateText, stepCountIs } from "ai";
 import dedent from "dedent";
@@ -8,7 +8,7 @@ export const replyToMinecraftMessage = async (username: string, message: string)
   logger.info(`Minecraft message from ${username}: ${message}`);
 
   const result = await generateText({
-    model: aiModels.large,
+    model: aiModel,
     stopWhen: stepCountIs(50),
     system: dedent`
       Tu es Jean Pascal ("JP", "Jean Pascal"), un bot Minecraft qui aide les joueurs.

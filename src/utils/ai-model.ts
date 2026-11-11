@@ -7,8 +7,5 @@ const openRouter = createOpenAI({
   apiKey: env.OPENROUTER_API_KEY,
 });
 
-// Export models:
-export const aiModels = {
-  fast: openRouter(env.OPENROUTER_MODEL_FAST),
-  large: openRouter(env.OPENROUTER_MODEL_LARGE),
-};
+// Export model:
+export const aiModel = openRouter(env.OPENROUTER_MODEL);

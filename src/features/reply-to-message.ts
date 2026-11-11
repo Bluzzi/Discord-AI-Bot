@@ -13,7 +13,7 @@ import { newsTools } from "#/tools/news";
 import { pdfTools } from "#/tools/pdf";
 import { steamTools } from "#/tools/steam";
 import { websearchTools } from "#/tools/websearch";
-import { aiModels } from "#/utils/ai-model";
+import { aiModel } from "#/utils/ai-model";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
@@ -57,7 +57,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
   // Ask IA for reply:
   const result = await generateText({
-    model: aiModels.large,
+    model: aiModel,
     stopWhen: stepCountIs(100),
     system: dedent`
       Tu es Jean Pascal ("JP", "Jean Pascal"), un assistant Discord.
@@ -134,10 +134,10 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       ],
     })),
     prepareStep: ({ stepNumber }) => {
-      if (stepNumber === 0) return { model: aiModels.fast, toolChoice: { type: "tool", toolName: "getChannelMessages" } };
-      if (stepNumber === 1) return { model: aiModels.fast, toolChoice: { type: "tool", toolName: "getUserMemory" } };
-      if (stepNumber === 2) return { model: aiModels.fast, toolChoice: { type: "tool", toolName: "getChannelMemory" } };
-      if (stepNumber === 3 && guild) return { model: aiModels.fast, toolChoice: { type: "tool", toolName: "getGuildMemory" } };
+      if (stepNumber === 0) return { model: aiModel, toolChoice: { type: "tool", toolName: "getChannelMessages" } };
+      if (stepNumber === 1) return { model: aiModel, toolChoice: { type: "tool", toolName: "getUserMemory" } };
+      if (stepNumber === 2) return { model: aiModel, toolChoice: { type: "tool", toolName: "getChannelMemory" } };
+      if (stepNumber === 3 && guild) return { model: aiModel, toolChoice: { type: "tool", toolName: "getGuildMemory" } };
     },
     tools: {
       ...discordTools,
