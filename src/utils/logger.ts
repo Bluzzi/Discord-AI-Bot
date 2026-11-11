@@ -25,7 +25,7 @@ export const logger = {
   },
 
   error: (message: string, stack?: string): void => {
-    winstonLogger.error(`${message}${stack ? `\n${stack}` : ""}`);
+    winstonLogger.error(`${message}${stack !== undefined ? `\n${stack}` : ""}`);
   },
 
   warn: (message: string): void => {

@@ -38,17 +38,3 @@ An AI bot for Discord designed to act freely using various tools.
   - Variable names MUST use `camelCase`
 
 - Use of `dedent` for multi-line strings, allowing clean and consistent indentation to be preserved.
-
-## Protected Areas (Read-Only)
-
-The following files and directories are **STRICTLY read-only** and MUST NOT be modified:
-
-- `.github/**`
-- `.gitignore`
-- `AI_POLICY.md`
-- `eslint.config.js`
-- `package.json`
-- `pnpm-lock.yaml`
-- `tsconfig.json`
-
-Instead of editing these files, the AI can suggest changes to the developer and then let the developer apply them before proceeding with the update.

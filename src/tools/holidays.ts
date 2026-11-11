@@ -91,7 +91,7 @@ export const holidaysTools: ToolSet = {
       if (!res.ok) throw new Error(`Failed to fetch public holidays: ${String(res.status)}`);
       const publicHolidays = (await res.json()) as Record<string, string>;
 
-      const festiveOnly = list.filter((f) => !publicHolidays[f.date]);
+      const festiveOnly = list.filter((f) => publicHolidays[f.date] !== undefined);
       return { festiveDays: festiveOnly };
     },
   }),

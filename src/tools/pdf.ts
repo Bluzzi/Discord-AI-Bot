@@ -88,7 +88,7 @@ Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techni
         const page = await browser.newPage();
 
         await page.setContent(html, {
-          waitUntil: ["networkidle0", "domcontentloaded"],
+          waitUntil: "load",
         });
 
         await page.evaluateHandle("document.fonts.ready");
