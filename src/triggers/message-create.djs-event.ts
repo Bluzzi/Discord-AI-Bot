@@ -36,7 +36,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   const botNames = [discordClient.user.username, botMember?.displayName, botMember?.nickname].filter(Boolean).join(", ");
 
   const decision = await generateText({
-    model: aiModels.mistralFast,
+    model: aiModels.fast,
     stopWhen: stepCountIs(10),
     output: Output.choice({
       options: ["OUI", "NON"],

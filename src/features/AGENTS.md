@@ -60,7 +60,7 @@ export const generatePresenceStatus = async () => {
 
   // AI GENERATION: Generate status content
   const result = await generateText({
-    model: aiModels.mistralLarge,
+    model: aiModels.large,
     output: Output.object({
       schema: z.object({
         emoji: z.string().describe("A single relevant Unicode emoji"),

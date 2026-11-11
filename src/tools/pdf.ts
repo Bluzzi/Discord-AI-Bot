@@ -19,9 +19,9 @@ export const pdfTools: ToolSet = {
 
 ⚠️ INTERDIT:
 - Dire "j'ai un souci technique"
-- Proposer des alternatives (message privé, pastebin, etc.)
+- Proposer des alternatives (message privé, fichier texte, etc.)
 - Ignorer le résultat de generatePDF
-- Créer un pastebin à la place
+- Créer un simple fichier texte à la place
 - Dire "Voilà ton PDF : [URL]" ou mentionner une URL
 - Afficher le JSON de searchImage ou generatePDF
 - S'arrêter après searchImage sans générer le PDF

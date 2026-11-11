@@ -17,7 +17,7 @@ await trigger.cron(
 
     // Generate MOTD:
     const motd = await generateText({
-      model: aiModels.mistralLarge,
+      model: aiModels.large,
       stopWhen: stepCountIs(5),
       output: Output.object({
         schema: z.object({

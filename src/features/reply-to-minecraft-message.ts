@@ -8,7 +8,7 @@ export const replyToMinecraftMessage = async (username: string, message: string)
   logger.info(`Minecraft message from ${username}: ${message}`);
 
   const result = await generateText({
-    model: aiModels.mistralLarge,
+    model: aiModels.large,
     stopWhen: stepCountIs(50),
     system: dedent`
       Tu es Jean Pascal ("JP", "Jean Pascal"), un bot Minecraft qui aide les joueurs.
