@@ -1,9 +1,10 @@
 import { replyToMessage } from "#/features/reply-to-message";
 import { discordClient } from "#/services/discord";
+import { memoryTools } from "#/tools/memory";
 import { aiModel } from "#/utils/ai-model";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
-import { generateText, Output } from "ai";
+import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
 
 trigger.discordEvent("messageCreate", async (message) => {
@@ -29,13 +30,14 @@ trigger.discordEvent("messageCreate", async (message) => {
   const lastMessages = await message.channel.messages.fetch({ limit: 10 });
   lastMessages.sort((a, b) => a.createdTimestamp > b.createdTimestamp ? 1 : -1);
 
-  const conversation = lastMessages.map((msg) => `${msg.author.username}: ${msg.content}`).join("\n");
+  const conversation = lastMessages.map((msg) => `[ID: ${msg.author.id}, Username : ${msg.author.username}]: ${msg.content}`).join("\n");
 
   const botMember = await message.guild?.members.fetch(discordClient.user.id);
   const botNames = [discordClient.user.username, botMember?.displayName, botMember?.nickname].filter(Boolean).join(", ");
 
   const decision = await generateText({
     model: aiModel,
+    stopWhen: stepCountIs(5),
     output: Output.choice({
       options: ["OUI", "NON"],
     }),
@@ -43,7 +45,8 @@ trigger.discordEvent("messageCreate", async (message) => {
       Tu détermines si le bot Discord "${botNames}" doit répondre au dernier message d'une conversation.
 
       Mémoire :
-      - L'user dispose d'informations durables en mémoire (récupérées avec l'outil getUserMemory au moment de la réponse) qui peuvent affecter les cas où tu dois répondre ou non
+      - Chaque ligne de la conversation est préfixée par l'ID Discord de son auteur entre crochets
+      - Les users disposent d'informations durables en mémoire, consultables avec l'outil \`getUserMemory\` à partir de leur ID : elles peuvent affecter les cas où le bot doit répondre ou non (ex: préférence ou consigne permanente d'un user)
 
       Réponds "OUI" si :
       - Le bot est explicitement mentionné par son nom ("jean pascal", "jp", "jean", "yo jean", "yo jean pascal", "yo jp")
@@ -63,10 +66,13 @@ trigger.discordEvent("messageCreate", async (message) => {
       Conversation récente :
       ${conversation}
 
-      Dernier message de ${message.author.username} : "${message.content}"
+      Dernier message de ${message.author.username} (ID : ${message.author.id}) : "${message.content}"
 
       Le bot doit-il répondre ?
     `,
+    tools: {
+      ...memoryTools,
+    },
   });
 
   if (decision.output === "OUI") {

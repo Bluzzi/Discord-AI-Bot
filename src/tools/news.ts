@@ -15,6 +15,8 @@ export const newsTools: ToolSet = {
       - monde: world news (The Conversation Global)
       - crypto: cryptocurrency news (Coin Academy)
       - tech: video games and entertainment news (IGN)
+
+      Present the articles as title + link, 5 to 10 articles maximum unless the user explicitly asks for more.
     `,
     inputSchema: z.object({
       category: z.enum(["france", "monde", "crypto", "tech"]).describe("News category"),
