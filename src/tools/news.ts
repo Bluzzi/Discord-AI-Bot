@@ -22,8 +22,6 @@ const RSS_FEEDS = {
   },
 } as const;
 
-type RssFeedKey = keyof typeof RSS_FEEDS;
-
 export const newsTools: ToolSet = {
   getLatestNews: tool({
     description: `Récupère les dernières actualités depuis différents flux RSS.
@@ -55,15 +53,11 @@ CATÉGORIES DISPONIBLES:
     execute: async ({ category, limit }) => {
       const feedConfig = RSS_FEEDS[category];
 
-      if (!feedConfig) {
-        throw new Error(`Catégorie invalide: ${category}`);
-      }
-
       const feed = await rss.parseURL(feedConfig.url);
 
       const articles = feed.items.slice(0, limit).map((item) => ({
-        title: item.title || "Sans titre",
-        link: item.link || "",
+        title: item.title ?? "Sans titre",
+        link: item.link ?? "",
         pubDate: item.pubDate,
         contentSnippet: item.contentSnippet,
       }));
@@ -101,26 +95,22 @@ CATÉGORIES DISPONIBLES:
     execute: async ({ category, keywords, limit }) => {
       const feedConfig = RSS_FEEDS[category];
 
-      if (!feedConfig) {
-        throw new Error(`Catégorie invalide: ${category}`);
-      }
-
       const feed = await rss.parseURL(feedConfig.url);
 
-      const searchTerms = keywords.toLowerCase().split(/\s+/);
+      const searchTerms = keywords.toLowerCase().split(/\s+/u);
 
       const matchingArticles = feed.items
         .slice(0, limit)
         .filter((item) => {
-          const title = (item.title || "").toLowerCase();
-          const content = (item.contentSnippet || "").toLowerCase();
+          const title = (item.title ?? "").toLowerCase();
+          const content = (item.contentSnippet ?? "").toLowerCase();
           const combined = `${title} ${content}`;
 
           return searchTerms.some((term) => combined.includes(term));
         })
         .map((item) => ({
-          title: item.title || "Sans titre",
-          link: item.link || "",
+          title: item.title ?? "Sans titre",
+          link: item.link ?? "",
           pubDate: item.pubDate,
           contentSnippet: item.contentSnippet,
         }));

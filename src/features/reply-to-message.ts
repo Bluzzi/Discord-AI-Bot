@@ -20,8 +20,8 @@ import dedent from "dedent";
 const startTyping = async (message: OmitPartialGroupDMChannel<Message>) => {
   await message.channel.sendTyping();
 
-  const interval = setInterval(async () => {
-    await message.channel.sendTyping();
+  const interval = setInterval(() => {
+    void message.channel.sendTyping();
   }, 8000);
 
   return {

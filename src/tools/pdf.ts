@@ -70,8 +70,8 @@ Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techni
       }).optional().describe("Options de génération du PDF"),
     }),
     execute: async ({ channelId, html, filename, options = {} }) => {
-      const sanitizedFilename = filename.replace(/[^a-zA-Z0-9-_]/g, "-");
-      const pdfFilename = `${Date.now()}-${sanitizedFilename}.pdf`;
+      const sanitizedFilename = filename.replace(/[^a-zA-Z0-9-_]/gu, "-");
+      const pdfFilename = `${String(Date.now())}-${sanitizedFilename}.pdf`;
 
       let browser;
       try {
@@ -93,26 +93,28 @@ Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techni
 
         await page.evaluateHandle("document.fonts.ready");
 
-        await page.waitForFunction(`
+        const [imagesResult] = await Promise.allSettled([page.waitForFunction(`
                     Array.from(document.querySelectorAll("img")).every(img => img.complete && img.naturalHeight !== 0)
-                `, { timeout: 10000 }).catch(() => {
+                `, { timeout: 10000 })]);
+
+        if (imagesResult.status === "rejected") {
           console.warn("Some images may not have loaded completely");
-        });
+        }
 
         const pdfOptions: Parameters<typeof page.pdf>[0] = {
-          format: options.format || "A4",
-          landscape: options.landscape || false,
+          format: options.format ?? "A4",
+          landscape: options.landscape ?? false,
           margin: {
-            top: options.margin?.top || "10mm",
-            right: options.margin?.right || "10mm",
-            bottom: options.margin?.bottom || "10mm",
-            left: options.margin?.left || "10mm",
+            top: options.margin?.top ?? "10mm",
+            right: options.margin?.right ?? "10mm",
+            bottom: options.margin?.bottom ?? "10mm",
+            left: options.margin?.left ?? "10mm",
           },
           printBackground: options.printBackground !== false,
-          displayHeaderFooter: options.displayHeaderFooter || false,
-          headerTemplate: options.headerTemplate || "",
-          footerTemplate: options.footerTemplate || "",
-          scale: options.scale || 1,
+          displayHeaderFooter: options.displayHeaderFooter ?? false,
+          headerTemplate: options.headerTemplate ?? "",
+          footerTemplate: options.footerTemplate ?? "",
+          scale: options.scale ?? 1,
           preferCSSPageSize: false,
         };
 
@@ -122,7 +124,7 @@ Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techni
         browser = undefined;
 
         const channel = discordClient.channels.cache.get(channelId);
-        if (!channel?.isTextBased()) {
+        if (channel?.isTextBased() !== true) {
           throw new Error("Channel not found or not a text channel");
         }
 
@@ -143,7 +145,7 @@ Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techni
         if (browser) {
           await browser.close();
         }
-        throw new Error(`Erreur lors de la génération du PDF: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Erreur lors de la génération du PDF: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
       }
     },
   }),

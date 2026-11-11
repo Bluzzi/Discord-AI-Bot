@@ -24,26 +24,26 @@ export const letterboxdTools: ToolSet = {
 
       const feed = await parser.parseURL(rssUrl);
 
-      if (!feed.items || feed.items.length === 0) {
+      if (feed.items.length === 0) {
         throw new Error("No reviews found for this user");
       }
 
       const latestItem = feed.items[0];
 
-      if (!latestItem || !latestItem.title || !latestItem.link) {
+      if (latestItem?.title === undefined || latestItem.title === "" || latestItem.link === undefined || latestItem.link === "") {
         throw new Error("Invalid RSS feed item");
       }
 
-      const ratingMatch = (/★+/).exec(latestItem.title);
-      const rating = ratingMatch ? ratingMatch[0] : undefined;
+      const ratingMatch = (/★+/u).exec(latestItem.title);
+      const rating = ratingMatch === null ? undefined : ratingMatch[0];
 
       return {
         title: latestItem.title,
         link: latestItem.link,
-        pubDate: latestItem.pubDate || "Unknown",
-        content: latestItem.content || latestItem.contentSnippet || "",
+        pubDate: latestItem.pubDate ?? "Unknown",
+        content: latestItem.content ?? latestItem.contentSnippet ?? "",
         rating: rating,
-        creator: latestItem.creator || username,
+        creator: latestItem.creator ?? username,
       };
     },
   }),
@@ -68,7 +68,7 @@ export const letterboxdTools: ToolSet = {
 
       const feed = await parser.parseURL(rssUrl);
 
-      if (!feed.items || feed.items.length === 0) {
+      if (feed.items.length === 0) {
         return {
           found: false,
         };
@@ -77,28 +77,28 @@ export const letterboxdTools: ToolSet = {
       const searchTerm = filmTitle.toLowerCase().trim();
 
       const matchingItem = feed.items.find((item) => {
-        if (!item.title) return false;
+        if (item.title === undefined || item.title === "") return false;
         const itemTitle = item.title.toLowerCase();
-        return itemTitle.includes(searchTerm) || searchTerm.includes(itemTitle.replace(/★+/g, "").trim());
+        return itemTitle.includes(searchTerm) || searchTerm.includes(itemTitle.replace(/★+/gu, "").trim());
       });
 
-      if (!matchingItem || !matchingItem.title || !matchingItem.link) {
+      if (matchingItem?.title === undefined || matchingItem.title === "" || matchingItem.link === undefined || matchingItem.link === "") {
         return {
           found: false,
         };
       }
 
-      const ratingMatch = (/★+/).exec(matchingItem.title);
-      const rating = ratingMatch ? ratingMatch[0] : undefined;
+      const ratingMatch = (/★+/u).exec(matchingItem.title);
+      const rating = ratingMatch === null ? undefined : ratingMatch[0];
 
       return {
         found: true,
         title: matchingItem.title,
         link: matchingItem.link,
-        pubDate: matchingItem.pubDate || "Unknown",
-        content: matchingItem.content || matchingItem.contentSnippet || "",
+        pubDate: matchingItem.pubDate ?? "Unknown",
+        content: matchingItem.content ?? matchingItem.contentSnippet ?? "",
         rating: rating,
-        creator: matchingItem.creator || username,
+        creator: matchingItem.creator ?? username,
       };
     },
   }),

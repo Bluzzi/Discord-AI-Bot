@@ -2,7 +2,7 @@ import type { ToolSet } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 
-async function githubFetch(endpoint: string) {
+const githubFetch = async (endpoint: string) => {
   const headers: Record<string, string> = {
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -14,11 +14,11 @@ async function githubFetch(endpoint: string) {
     if (response.status === 404) {
       throw new Error(`Ressource GitHub introuvable: ${endpoint}`);
     }
-    throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    throw new Error(`GitHub API error: ${String(response.status)} ${response.statusText}`);
   }
 
   return response.json();
-}
+};
 
 export const githubTools: ToolSet = {
   getUserProfile: tool({
@@ -123,7 +123,7 @@ export const githubTools: ToolSet = {
       totalCount: z.number().describe("Nombre total de repos"),
     }),
     execute: async ({ username, sort = "updated", perPage = 100 }) => {
-      const data = await githubFetch(`/users/${username}/repos?sort=${sort}&per_page=${perPage}`) as {
+      const data = await githubFetch(`/users/${username}/repos?sort=${sort}&per_page=${String(perPage)}`) as {
         id: number;
         name: string;
         full_name: string;

@@ -2,7 +2,69 @@ import type { ToolSet } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 
-const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
+type SteamVanityUrlResponse = {
+  response: {
+    success: number;
+    steamid?: string;
+  };
+};
+
+type SteamOwnedGame = {
+  appid: number;
+  name?: string;
+  playtime_forever: number;
+  playtime_2weeks?: number;
+};
+
+type SteamOwnedGamesResponse = {
+  response: {
+    game_count?: number;
+    games?: SteamOwnedGame[];
+  };
+};
+
+type SteamAchievement = {
+  apiname: string;
+  achieved: number;
+  unlocktime: number;
+  name?: string;
+  description?: string;
+};
+
+type SteamPlayerAchievementsResponse = {
+  playerstats?: {
+    gameName: string;
+    achievements: SteamAchievement[];
+  };
+};
+
+type SteamAsset = {
+  appid: number;
+  classid: string;
+  instanceid?: string;
+};
+
+type SteamDescription = {
+  classid: string;
+  instanceid?: string;
+  name?: string;
+  market_hash_name?: string;
+  type?: string;
+  tradable?: number;
+  marketable?: number;
+  tags?: {
+    category: string;
+    localized_tag_name?: string;
+  }[];
+};
+
+type SteamInventoryResponse = {
+  success?: boolean;
+  assets?: SteamAsset[];
+  descriptions?: SteamDescription[];
+};
+
+const STEAM_API_KEY = process.env.STEAM_API_KEY ?? "";
 
 export const steamTools: ToolSet = {
   resolveSteamUsername: tool({
@@ -27,14 +89,14 @@ export const steamTools: ToolSet = {
         throw new Error(`Steam API error: ${response.statusText}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as SteamVanityUrlResponse;
 
-      if (data.response?.success !== 1) {
+      if (data.response.success !== 1) {
         throw new Error("Username not found");
       }
 
       return {
-        steamid: data.response.steamid,
+        steamid: data.response.steamid ?? "",
         username: username,
       };
     },
@@ -67,21 +129,21 @@ export const steamTools: ToolSet = {
         throw new Error(`Steam API error: ${response.statusText}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as SteamOwnedGamesResponse;
 
-      if (!data.response?.games) {
+      if (data.response.games === undefined) {
         throw new Error("No games found or profile is private");
       }
 
-      const games = data.response.games.map((game: any) => ({
+      const games = data.response.games.map((game) => ({
         appid: game.appid,
-        name: game.name,
+        name: game.name ?? "",
         playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
-        playtime2WeeksHours: game.playtime_2weeks ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
+        playtime2WeeksHours: game.playtime_2weeks !== undefined && game.playtime_2weeks > 0 ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
       }));
 
       return {
-        gameCount: data.response.game_count,
+        gameCount: data.response.game_count ?? games.length,
         games: games,
       };
     },
@@ -112,23 +174,23 @@ export const steamTools: ToolSet = {
         throw new Error(`Steam API error: ${response.statusText}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as SteamOwnedGamesResponse;
 
-      if (!data.response?.games) {
+      if (data.response.games === undefined) {
         throw new Error("No games found or profile is private");
       }
 
-      const game = data.response.games.find((g: any) => g.appid === appId);
+      const game = data.response.games.find((g) => g.appid === appId);
 
-      if (!game) {
+      if (game === undefined) {
         throw new Error("Game not found in user's library");
       }
 
       return {
         appid: game.appid,
-        name: game.name,
+        name: game.name ?? "",
         playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
-        playtime2WeeksHours: game.playtime_2weeks ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
+        playtime2WeeksHours: game.playtime_2weeks !== undefined && game.playtime_2weeks > 0 ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
       };
     },
   }),
@@ -156,22 +218,22 @@ export const steamTools: ToolSet = {
       }
 
       const response = await fetch(
-        `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&appid=${appId}&l=french`,
+        `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&appid=${String(appId)}&l=french`,
       );
 
       if (!response.ok) {
         throw new Error(`Steam API error: ${response.statusText}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as SteamPlayerAchievementsResponse;
 
-      if (!data.playerstats?.achievements) {
+      if (data.playerstats?.achievements === undefined) {
         throw new Error("No achievements found or profile is private");
       }
 
       const achievements = data.playerstats.achievements;
       const totalAchievements = achievements.length;
-      const unlockedAchievements = achievements.filter((a: any) => a.achieved === 1).length;
+      const unlockedAchievements = achievements.filter((a) => a.achieved === 1).length;
       const percentage = Math.round((unlockedAchievements / totalAchievements) * 100);
 
       return {
@@ -180,11 +242,11 @@ export const steamTools: ToolSet = {
         unlockedAchievements: unlockedAchievements,
         completionPercentage: percentage,
         recentAchievements: achievements
-          .filter((a: any) => a.achieved === 1)
-          .sort((a: any, b: any) => b.unlocktime - a.unlocktime)
+          .filter((a) => a.achieved === 1)
+          .sort((a, b) => b.unlocktime - a.unlocktime)
           .slice(0, 5)
-          .map((a: any) => ({
-            name: a.name || a.apiname,
+          .map((a) => ({
+            name: a.name ?? a.apiname,
             description: a.description,
             unlockedAt: new Date(a.unlocktime * 1000).toISOString(),
           })),
@@ -200,7 +262,7 @@ export const steamTools: ToolSet = {
     }),
     execute: async ({ steamId, appId }) => {
       const response = await fetch(
-        `https://steamcommunity.com/inventory/${steamId}/${appId}/2?l=french&count=100`,
+        `https://steamcommunity.com/inventory/${steamId}/${String(appId)}/2?l=french&count=100`,
       );
 
       if (!response.ok) {
@@ -210,49 +272,50 @@ export const steamTools: ToolSet = {
         if (response.status === 429) {
           throw new Error("Steam API rate limit reached. Please try again in a few minutes.");
         }
-        throw new Error(`Steam API error: ${response.status} ${response.statusText}`);
+        throw new Error(`Steam API error: ${String(response.status)} ${response.statusText}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as SteamInventoryResponse;
 
       if (data.success === false) {
         throw new Error("Inventory is private or doesn't exist for this game.");
       }
 
-      if (!data.assets || data.assets.length === 0) {
+      if (data.assets === undefined || data.assets.length === 0) {
         throw new Error("No items found in inventory for this game. The inventory might be empty or private.");
       }
 
-      if (!data.descriptions) {
+      if (data.descriptions === undefined) {
         throw new Error("No inventory data available.");
       }
 
-      const itemCounts = new Map<string, { count: number; description: any }>();
+      const itemCounts = new Map<string, { count: number; description: SteamDescription }>();
 
-      data.assets.forEach((asset: any) => {
+      for (const asset of data.assets) {
         const description = data.descriptions.find(
-          (d: any) => d.classid === asset.classid && d.instanceid === asset.instanceid,
+          (d) => d.classid === asset.classid && d.instanceid === asset.instanceid,
         );
 
-        if (description) {
-          const key = description.market_hash_name || description.name;
-          if (itemCounts.has(key)) {
-            itemCounts.get(key)!.count++;
+        if (description !== undefined) {
+          const key = description.market_hash_name ?? description.name ?? "Unknown";
+          const existing = itemCounts.get(key);
+          if (existing !== undefined) {
+            existing.count += 1;
           }
           else {
             itemCounts.set(key, { count: 1, description });
           }
         }
-      });
+      }
 
-      const items = Array.from(itemCounts.entries()).map(([name, data]) => ({
-        name: data.description.name || "Unknown",
-        type: data.description.type || "Unknown",
-        count: data.count,
-        tradable: data.description.tradable === 1,
-        marketable: data.description.marketable === 1,
-        rarity: data.description.tags?.find((t: any) => t.category === "Rarity")?.localized_tag_name,
-        weapon: data.description.tags?.find((t: any) => t.category === "Weapon")?.localized_tag_name,
+      const items = Array.from(itemCounts.entries()).map(([_name, entry]) => ({
+        name: entry.description.name ?? "Unknown",
+        type: entry.description.type ?? "Unknown",
+        count: entry.count,
+        tradable: entry.description.tradable === 1,
+        marketable: entry.description.marketable === 1,
+        rarity: entry.description.tags?.find((t) => t.category === "Rarity")?.localized_tag_name,
+        weapon: entry.description.tags?.find((t) => t.category === "Weapon")?.localized_tag_name,
       }));
 
       const rarityOrder: Record<string, number> = {
@@ -266,8 +329,8 @@ export const steamTools: ToolSet = {
       };
 
       items.sort((a, b) => {
-        const rarityA = rarityOrder[a.rarity || ""] || 999;
-        const rarityB = rarityOrder[b.rarity || ""] || 999;
+        const rarityA = rarityOrder[a.rarity ?? ""] ?? 999;
+        const rarityB = rarityOrder[b.rarity ?? ""] ?? 999;
         return rarityA - rarityB;
       });
 
@@ -302,15 +365,15 @@ export const steamTools: ToolSet = {
         throw new Error(`Steam API error: ${response.statusText}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as SteamOwnedGamesResponse;
 
-      if (!data.response?.games) {
+      if (data.response.games === undefined) {
         throw new Error("No games found or profile is private");
       }
 
-      const games = data.response.games.map((game: any) => ({
+      const games = data.response.games.map((game) => ({
         appid: game.appid,
-        name: game.name,
+        name: game.name ?? "",
         playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
       }));
 
@@ -318,8 +381,7 @@ export const steamTools: ToolSet = {
         throw new Error("No games found");
       }
 
-      const mostPlayed = games.reduce((max: any, game: any) => game.playtimeHours > max.playtimeHours ? game : max,
-      );
+      const mostPlayed = games.reduce((max, game) => game.playtimeHours > max.playtimeHours ? game : max);
 
       return {
         name: mostPlayed.name,

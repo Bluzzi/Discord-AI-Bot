@@ -1,8 +1,9 @@
 import type { ToolSet } from "ai";
+import type { APIActionRowComponent, APIButtonComponent, APIButtonComponentWithCustomId, APIButtonComponentWithURL, PermissionResolvable } from "discord.js";
 import { getVoiceConnection, joinVoiceChannel } from "@discordjs/voice";
 import { discordClient } from "#/services/discord";
 import { tool } from "ai";
-import { ChannelType } from "discord.js";
+import { ButtonStyle, ChannelType, ComponentType } from "discord.js";
 import { z } from "zod";
 
 export const discordTools: ToolSet = {
@@ -15,7 +16,7 @@ export const discordTools: ToolSet = {
       memberCount: z.number().describe("Number of members in the guild"),
       iconURL: z.string().nullable().describe("Guild icon URL"),
     })).describe("List of guilds where the bot is present"),
-    execute: async () => {
+    execute: () => {
       const guilds = discordClient.guilds.cache.map((guild) => ({
         id: guild.id,
         name: guild.name,
@@ -65,14 +66,6 @@ export const discordTools: ToolSet = {
       try {
         const member = await guild.members.fetch(userId);
 
-        if (!member) {
-          return {
-            error: "User is not a member of this guild",
-            isMember: false,
-            canExecuteActions: false,
-          };
-        }
-
         const permissions = member.permissions.toArray();
         const isAdmin = member.permissions.has("Administrator");
 
@@ -95,7 +88,7 @@ export const discordTools: ToolSet = {
           canMoveMembers: member.permissions.has("MoveMembers"),
         };
       }
-      catch (error) {
+      catch {
         return {
           error: "User is not a member of this guild",
           isMember: false,
@@ -130,7 +123,6 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
       const permissions = member.permissions.toArray();
       const isAdmin = member.permissions.has("Administrator");
@@ -160,7 +152,7 @@ export const discordTools: ToolSet = {
       name: z.string().describe("Guild name"),
       memberCount: z.number().describe("Number of members in the guild"),
     })).describe("List of all guilds"),
-    execute: async () => {
+    execute: () => {
       const guilds = discordClient.guilds.cache.map((guild) => ({
         id: guild.id,
         name: guild.name,
@@ -181,7 +173,7 @@ export const discordTools: ToolSet = {
       name: z.string().describe("Channel name"),
       type: z.string().describe("Channel type"),
     })).describe("List of channels in the guild"),
-    execute: async ({ guildId, nameFilter }) => {
+    execute: ({ guildId, nameFilter }) => {
       const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
@@ -193,10 +185,10 @@ export const discordTools: ToolSet = {
         type: ChannelType[channel.type],
       }));
 
-      if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+      if (nameFilter !== undefined && nameFilter !== "") {
+        const filter = nameFilter.toLowerCase().replace(/\s+/gu, "");
         channels = channels.filter((c) => {
-          const channelName = c.name.toLowerCase().replace(/\s+/g, "");
+          const channelName = c.name.toLowerCase().replace(/\s+/gu, "");
           return channelName.includes(filter) || filter.includes(channelName);
         });
       }
@@ -219,10 +211,10 @@ export const discordTools: ToolSet = {
 
       let members;
 
-      if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+      if (nameFilter !== undefined && nameFilter !== "") {
+        const filter = nameFilter.toLowerCase().replace(/\s+/gu, "");
 
-        if ((/^\d+$/).exec(filter)) {
+        if ((/^\d+$/u).exec(filter)) {
           const member = await guild.members.fetch(filter);
           members = [member];
         }
@@ -254,13 +246,13 @@ export const discordTools: ToolSet = {
           details: activity.details,
           state: activity.state,
           url: activity.url,
-        })) || [];
+        })) ?? [];
 
         return {
           id: member.id,
           username: member.user.username,
           displayName: member.displayName,
-          status: presence?.status || "offline",
+          status: presence?.status ?? "offline",
           activities: activities,
           voiceChannelId: member.voice.channelId,
           voiceChannelName: member.voice.channel?.name,
@@ -289,11 +281,7 @@ export const discordTools: ToolSet = {
       }
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
-
-      if (!member.voice.channelId) {
+      if (member.voice.channelId === null) {
         throw new Error("Member is not in a voice channel");
       }
 
@@ -331,11 +319,7 @@ export const discordTools: ToolSet = {
       }
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
-
-      if (!member.voice.channelId) {
+      if (member.voice.channelId === null) {
         throw new Error("Member is not in a voice channel");
       }
 
@@ -369,11 +353,7 @@ export const discordTools: ToolSet = {
       }
 
       const member = await guild.members.fetch(memberId);
-      if (!member) {
-        throw new Error("Member not found");
-      }
-
-      const oldNickname = member.nickname || member.user.username;
+      const oldNickname = member.nickname ?? member.user.username;
       await member.setNickname(nickname);
 
       return {
@@ -391,7 +371,7 @@ export const discordTools: ToolSet = {
       guildId: z.string().describe("The Discord guild/server ID"),
       nameFilter: z.string().optional().describe("Optional filter to search roles by name"),
     }),
-    execute: async ({ guildId, nameFilter }) => {
+    execute: ({ guildId, nameFilter }) => {
       const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) {
         throw new Error("Guild not found");
@@ -404,10 +384,10 @@ export const discordTools: ToolSet = {
         position: role.position,
       }));
 
-      if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+      if (nameFilter !== undefined && nameFilter !== "") {
+        const filter = nameFilter.toLowerCase().replace(/\s+/gu, "");
         roles = roles.filter((r) => {
-          const roleName = r.name.toLowerCase().replace(/\s+/g, "");
+          const roleName = r.name.toLowerCase().replace(/\s+/gu, "");
           return roleName.includes(filter) || filter.includes(roleName);
         });
       }
@@ -435,7 +415,7 @@ export const discordTools: ToolSet = {
 
       const role = await guild.roles.create({
         name,
-        color: color ? parseInt(color.replace("#", ""), 16) : undefined,
+        color: color !== undefined && color !== "" ? parseInt(color.replace("#", ""), 16) : undefined,
       });
 
       return {
@@ -493,7 +473,6 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
       const role = guild.roles.cache.get(roleId);
       if (!role) throw new Error("Role not found");
@@ -526,7 +505,6 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
       const role = guild.roles.cache.get(roleId);
       if (!role) throw new Error("Role not found");
@@ -547,7 +525,7 @@ export const discordTools: ToolSet = {
       guildId: z.string().describe("The Discord guild/server ID"),
       nameFilter: z.string().optional().describe("Optional filter to search categories by name"),
     }),
-    execute: async ({ guildId, nameFilter }) => {
+    execute: ({ guildId, nameFilter }) => {
       const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
 
@@ -558,10 +536,10 @@ export const discordTools: ToolSet = {
           name: channel.name,
         }));
 
-      if (nameFilter) {
-        const filter = nameFilter.toLowerCase().replace(/\s+/g, "");
+      if (nameFilter !== undefined && nameFilter !== "") {
+        const filter = nameFilter.toLowerCase().replace(/\s+/gu, "");
         categories = categories.filter((c) => {
-          const categoryName = c.name.toLowerCase().replace(/\s+/g, "");
+          const categoryName = c.name.toLowerCase().replace(/\s+/gu, "");
           return categoryName.includes(filter) || filter.includes(categoryName);
         });
       }
@@ -587,14 +565,12 @@ export const discordTools: ToolSet = {
       const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
 
-      const channelType = type === "text" ? ChannelType.GuildText
-        : type === "voice" ? ChannelType.GuildVoice
-          : ChannelType.GuildCategory;
+      const channelType = type === "text" ? ChannelType.GuildText : type === "voice" ? ChannelType.GuildVoice : ChannelType.GuildCategory;
 
       const channel = await guild.channels.create({
         name,
         type: channelType,
-        parent: categoryId || undefined,
+        parent: categoryId ?? undefined,
       });
       return {
         success: true,
@@ -678,7 +654,7 @@ export const discordTools: ToolSet = {
       const role = guild.roles.cache.get(roleId);
       if (!role) throw new Error("Role not found");
 
-      await role.setPermissions(permissions as any);
+      await role.setPermissions(permissions as PermissionResolvable[]);
       return {
         success: true,
         roleName: role.name,
@@ -738,14 +714,13 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
       await member.kick(reason);
       return {
         success: true,
         memberName: member.displayName,
         memberId: memberId,
-        reason: reason || null,
+        reason: reason ?? null,
         action: "kicked",
       };
     },
@@ -770,14 +745,13 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
       await member.ban({ reason });
       return {
         success: true,
         memberName: member.displayName,
         memberId: memberId,
-        reason: reason || null,
+        reason: reason ?? null,
         action: "banned",
       };
     },
@@ -804,7 +778,7 @@ export const discordTools: ToolSet = {
       return {
         success: true,
         userId: userId,
-        reason: reason || null,
+        reason: reason ?? null,
         action: "unbanned",
       };
     },
@@ -827,9 +801,8 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
-      if (!member.voice.channelId) throw new Error("Member is not in a voice channel");
+      if (member.voice.channelId === null) throw new Error("Member is not in a voice channel");
 
       await member.voice.setMute(true);
       return {
@@ -858,9 +831,8 @@ export const discordTools: ToolSet = {
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(memberId);
-      if (!member) throw new Error("Member not found");
 
-      if (!member.voice.channelId) throw new Error("Member is not in a voice channel");
+      if (member.voice.channelId === null) throw new Error("Member is not in a voice channel");
 
       await member.voice.setMute(false);
       return {
@@ -885,7 +857,7 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, content }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -916,7 +888,7 @@ export const discordTools: ToolSet = {
     })),
     execute: async ({ channelId, limit = 10 }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -956,40 +928,44 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, title, description, color, thumbnail, fields, buttons }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
       if ("send" in channel) {
-        const components: any[] = [];
+        const components: APIActionRowComponent<APIButtonComponent>[] = [];
 
-        if (buttons && buttons.length > 0) {
-          const buttonStyleMap: any = {
-            primary: 1,
-            secondary: 2,
-            success: 3,
-            danger: 4,
-            link: 5,
+        if (buttons !== undefined && buttons.length > 0) {
+          const buttonStyleMap: Record<"primary" | "secondary" | "success" | "danger" | "link", ButtonStyle> = {
+            primary: ButtonStyle.Primary,
+            secondary: ButtonStyle.Secondary,
+            success: ButtonStyle.Success,
+            danger: ButtonStyle.Danger,
+            link: ButtonStyle.Link,
           };
 
           components.push({
-            type: 1,
-            components: buttons.map((btn: any) => {
-              const style = buttonStyleMap[btn.style || "primary"];
-              const button: any = {
-                type: 2,
+            type: ComponentType.ActionRow,
+            components: buttons.map((btn) => {
+              const style = buttonStyleMap[btn.style ?? "primary"];
+
+              if (btn.url !== undefined && style === ButtonStyle.Link) {
+                const linkButton: APIButtonComponentWithURL = {
+                  type: ComponentType.Button,
+                  label: btn.label,
+                  style: ButtonStyle.Link,
+                  url: btn.url,
+                };
+                return linkButton;
+              }
+
+              const customButton = {
+                type: ComponentType.Button,
                 label: btn.label,
                 style,
-              };
-
-              if (btn.url && style === 5) {
-                button.url = btn.url;
-              }
-              else if (!btn.url) {
-                button.custom_id = `btn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-              }
-
-              return button;
+                custom_id: `btn_${String(Date.now())}_${Math.random().toString(36).slice(2, 9)}`,
+              } as APIButtonComponentWithCustomId;
+              return customButton;
             }),
           });
         }
@@ -998,7 +974,7 @@ export const discordTools: ToolSet = {
           embeds: [{
             title,
             description,
-            color: color ? parseInt(color.replace("#", ""), 16) : undefined,
+            color: color !== undefined && color !== "" ? parseInt(color.replace("#", ""), 16) : undefined,
             thumbnail,
             fields,
           }],
@@ -1008,7 +984,7 @@ export const discordTools: ToolSet = {
       return {
         success: true,
         channelId: channelId,
-        hasButtons: (buttons?.length || 0) > 0,
+        hasButtons: buttons !== undefined && buttons.length > 0,
       };
     },
   }),
@@ -1022,7 +998,7 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, userId, limit = 100 }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -1055,7 +1031,7 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, limit = 100 }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -1091,7 +1067,6 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ userId, content }) => {
       const user = await discordClient.users.fetch(userId);
-      if (!user) throw new Error("User not found");
 
       await user.send(content);
       return {
@@ -1122,37 +1097,39 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ userId, title, description, color, fields, buttons }) => {
       const user = await discordClient.users.fetch(userId);
-      if (!user) throw new Error("User not found");
+      const components: APIActionRowComponent<APIButtonComponent>[] = [];
 
-      const components: any[] = [];
-
-      if (buttons && buttons.length > 0) {
-        const buttonStyleMap: any = {
-          primary: 1,
-          secondary: 2,
-          success: 3,
-          danger: 4,
-          link: 5,
+      if (buttons !== undefined && buttons.length > 0) {
+        const buttonStyleMap: Record<"primary" | "secondary" | "success" | "danger" | "link", ButtonStyle> = {
+          primary: ButtonStyle.Primary,
+          secondary: ButtonStyle.Secondary,
+          success: ButtonStyle.Success,
+          danger: ButtonStyle.Danger,
+          link: ButtonStyle.Link,
         };
 
         components.push({
-          type: 1,
-          components: buttons.map((btn: any) => {
-            const style = buttonStyleMap[btn.style || "primary"];
-            const button: any = {
-              type: 2,
+          type: ComponentType.ActionRow,
+          components: buttons.map((btn) => {
+            const style = buttonStyleMap[btn.style ?? "primary"];
+
+            if (btn.url !== undefined && style === ButtonStyle.Link) {
+              const linkButton: APIButtonComponentWithURL = {
+                type: ComponentType.Button,
+                label: btn.label,
+                style: ButtonStyle.Link,
+                url: btn.url,
+              };
+              return linkButton;
+            }
+
+            const customButton = {
+              type: ComponentType.Button,
               label: btn.label,
               style,
-            };
-
-            if (btn.url && style === 5) {
-              button.url = btn.url;
-            }
-            else if (!btn.url) {
-              button.custom_id = `btn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            }
-
-            return button;
+              custom_id: `btn_${String(Date.now())}_${Math.random().toString(36).slice(2, 9)}`,
+            } as APIButtonComponentWithCustomId;
+            return customButton;
           }),
         });
       }
@@ -1161,7 +1138,7 @@ export const discordTools: ToolSet = {
         embeds: [{
           title,
           description,
-          color: color ? parseInt(color.replace("#", ""), 16) : undefined,
+          color: color !== undefined && color !== "" ? parseInt(color.replace("#", ""), 16) : undefined,
           fields,
         }],
         components: components.length > 0 ? components : undefined,
@@ -1184,9 +1161,9 @@ export const discordTools: ToolSet = {
       channelId: z.string().describe("ID of the voice channel joined"),
       guildId: z.string().describe("ID of the guild"),
     }),
-    execute: async ({ channelID, guildId }) => {
+    execute: ({ channelID, guildId }) => {
       const channel = discordClient.channels.cache.get(channelID);
-      if (!channel?.isVoiceBased()) {
+      if (channel?.isVoiceBased() !== true) {
         throw new Error("Channel not found or not a voice channel");
       }
 
@@ -1213,7 +1190,7 @@ export const discordTools: ToolSet = {
         .enum(["bot_not_connected_to_any_channel", "left_voice"])
         .describe("Action performed, left_voice if a channel is leaved"),
     }),
-    execute: async ({ guildID }) => {
+    execute: ({ guildID }) => {
       const connection = getVoiceConnection(guildID);
       if (!connection) return { action: "bot_not_connected_to_any_channel" };
 
@@ -1295,7 +1272,7 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, question, answers, duration = 24, allowMultiselect = false }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -1342,7 +1319,7 @@ export const discordTools: ToolSet = {
     })).describe("List of webhooks in the channel"),
     execute: async ({ channelId }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -1374,7 +1351,7 @@ export const discordTools: ToolSet = {
     }),
     execute: async ({ channelId, name, avatarUrl }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -1383,7 +1360,7 @@ export const discordTools: ToolSet = {
       }
 
       let avatarBuffer: Buffer | undefined;
-      if (avatarUrl) {
+      if (avatarUrl !== undefined && avatarUrl !== "") {
         const response = await fetch(avatarUrl);
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();
@@ -1453,12 +1430,12 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       username: z.string().describe("Username used for the webhook message"),
     }),
     execute: async ({ webhookUrl, content, username, avatarUrl }) => {
-      const payload: any = {
+      const payload: { content: string; username: string; avatar_url?: string } = {
         content: content,
         username: username,
       };
 
-      if (avatarUrl) {
+      if (avatarUrl !== undefined && avatarUrl !== "") {
         payload.avatar_url = avatarUrl;
       }
 
@@ -1472,7 +1449,7 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Webhook request failed (${response.status}): ${errorText}`);
+        throw new Error(`Webhook request failed (${String(response.status)}): ${errorText}`);
       }
 
       return {
@@ -1499,7 +1476,6 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       if (!guild) throw new Error("Guild not found");
 
       const member = await guild.members.fetch(userId);
-      if (!member) throw new Error("Member not found");
 
       const avatarUrl = member.user.displayAvatarURL({ size: 1024, extension: "png" });
 
@@ -1528,24 +1504,20 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       createdAt: z.string().optional().describe("User creation date (ISO)"),
     }),
     execute: async ({ userId, guildId }) => {
-      const user = await discordClient.users.fetch(userId);
-      if (!user) throw new Error("User not found");
-
       let displayName = "";
-      if (guildId) {
+      if (guildId !== undefined && guildId !== "") {
         const guild = await discordClient.guilds.fetch(guildId);
-        if (!guild) throw new Error("Guild not found");
         const member = await guild.members.fetch(userId);
-        if (!member) throw new Error("Member not found in guild");
         displayName = member.displayName;
       }
 
+      const user = await discordClient.users.fetch(userId);
       return {
         id: user.id,
         username: user.username,
         tag: `${user.username}#${user.discriminator}`,
         avatarUrl: user.displayAvatarURL({ size: 1024, extension: "png" }),
-        isBot: Boolean(user.bot),
+        isBot: user.bot,
         displayName: displayName,
         createdAt: user.createdAt.toISOString(),
       };
@@ -1572,9 +1544,9 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
 
       const name = "name" in channel ? channel.name : "";
       const guildId = "guild" in channel ? channel.guild.id : "";
-      const parentId = "parentId" in channel ? (channel.parentId || "") : "";
-      const nsfw = "nsfw" in channel ? Boolean(channel.nsfw) : false;
-      const topic = "topic" in channel ? (channel.topic || "") : "";
+      const parentId = "parentId" in channel ? (channel.parentId ?? "") : "";
+      const nsfw = "nsfw" in channel ? (channel.nsfw) : false;
+      const topic = "topic" in channel ? (channel.topic ?? "") : "";
 
       return {
         id: channel.id,
@@ -1603,14 +1575,13 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
     }),
     execute: async ({ guildId }) => {
       const guild = await discordClient.guilds.fetch(guildId);
-      if (!guild) throw new Error("Guild not found");
 
       return {
         id: guild.id,
         name: guild.name,
         memberCount: guild.memberCount,
         ownerId: guild.ownerId,
-        iconUrl: guild.iconURL?.() || "",
+        iconUrl: guild.iconURL() ?? "",
         createdAt: guild.createdAt.toISOString(),
       };
     },
@@ -1631,7 +1602,7 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
     }),
     execute: async ({ channelId, messageId, emoji }) => {
       const channel = discordClient.channels.cache.get(channelId);
-      if (!channel?.isTextBased()) {
+      if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
       }
 
@@ -1640,9 +1611,6 @@ CAS 2 - La personne N'EST PAS sur le serveur (ou introuvable):
       }
 
       const message = await channel.messages.fetch(messageId);
-      if (!message) {
-        throw new Error("Message not found");
-      }
 
       await message.react(emoji);
 

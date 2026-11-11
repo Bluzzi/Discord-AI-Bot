@@ -54,7 +54,7 @@ export const imageTools: ToolSet = {
     execute: async ({ query, count = 5, safesearch = "strict" }) => {
       const apiKey = process.env.BRAVE_SEARCH_API_KEY;
 
-      if (!apiKey) {
+      if (apiKey === undefined || apiKey === "") {
         throw new Error("BRAVE_SEARCH_API_KEY not configured in environment variables");
       }
 
@@ -75,7 +75,7 @@ export const imageTools: ToolSet = {
       });
 
       if (!response.ok) {
-        throw new Error(`Brave Search API error: ${response.status} ${response.statusText}`);
+        throw new Error(`Brave Search API error: ${String(response.status)} ${response.statusText}`);
       }
 
       const data = await response.json() as {
@@ -100,7 +100,7 @@ export const imageTools: ToolSet = {
         }[];
       };
 
-      if (!data.results || data.results.length === 0) {
+      if (data.results.length === 0) {
         throw new Error(`No images found for query: ${query}`);
       }
 
