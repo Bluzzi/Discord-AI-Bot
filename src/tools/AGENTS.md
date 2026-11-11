@@ -13,23 +13,23 @@ export const discordTools: ToolSet = {
   renameMember: tool({
     description: "Rename a guild member",
     inputSchema: z.object({
-      guildID: z.string().describe("The Discord guild/server ID"),
-      memberID: z.string().describe("The Discord member ID to rename"),
+      guildId: z.string().describe("The Discord guild/server ID"),
+      memberId: z.string().describe("The Discord member ID to rename"),
       nickname: z.string().describe("The new nickname for the member"),
     }),
-    outputSchema: z.object({ 
+    outputSchema: z.object({
       oldNickname: z.string().describe("Previous nickname"),
       newNickname: z.string().describe("New nickname"),
-      memberID: z.string().describe("Member ID"),
+      memberId: z.string().describe("Member ID"),
     }),
-    execute: async ({ guildID, userID, nickname }) => {
-      const guild = discordClient.guilds.get(guildID);
+    execute: async ({ guildId, memberId, nickname }) => {
+      const guild = discordClient.guilds.cache.get(guildId);
       if (!guild) throw new Error("Guild not found");
 
-      const member = await guild.members.fetch(memberID);
+      const member = await guild.members.fetch(memberId);
       if (!member) throw new Error("Member not found");
 
-      const oldNickname = member.nickname || member.user.username;
+      const oldNickname = member.nickname ?? member.user.username;
       await member.setNickname(nickname);
 
       return {
