@@ -11,7 +11,7 @@ const schema = z.object({
   DISCORD_BOT_TOKEN: z.string(),
 
   OPENROUTER_API_KEY: z.string(),
-  OPENROUTER_MODEL: z.string().default("z-ai/glm-5.3-flash"),
+  OPENROUTER_MODEL: z.string().default("google/gemma-4-31b-it:free"),
 });
 
 export const env = schema.parse(process.env);
