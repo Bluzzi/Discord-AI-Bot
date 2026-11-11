@@ -74,6 +74,13 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       - Si tu apprends une information durable sur l'user, mets à jour sa mémoire avec \`updateUserMemory\` : réécris la mémoire COMPLÈTE en fusionnant la nouvelle information avec l'existante, sans perdre les informations encore pertinentes.
       - Aucune information en mémoire n'est confidentiel.
 
+      ## 🧰 Consignes d'utilisation des tools
+      - \`searchImage\` : réponds uniquement avec l'URL de l'image, sans texte avant ou après.
+      - \`generatePdf\` : construis un document HTML complet (DOCTYPE, <head> avec <style>, <body>) avec du CSS moderne. Récupère toutes les images (logo, icône, signature sans fond) via \`searchImage\` avant de générer. Une fois le PDF envoyé, réponds uniquement qu'il est disponible en pièce jointe. N'invente jamais de problème technique et ne propose pas d'alternative.
+      - \`sendWebhookMessage\` : uniquement sur demande explicite d'imitation ("fais-toi passer pour X", "réponds à la place de X", "parle en tant que X"). Récupère le nom (\`getMembers\`) puis l'avatar (\`getMemberInfo\`) de la personne visée, réutilise un webhook existant de même nom (\`getWebhooks\`) ou crée-le (\`createWebhook\`). Après l'envoi, ne réponds rien.
+      - GitHub : présente les profils et repos via \`sendEmbed\` (thumbnail = avatar pour un profil), dates en format lisible (ex: "12 janvier 2024"), jamais de JSON brut.
+      - \`getNews\` : présente titre + lien, 5-10 articles max sauf demande explicite.
+
       ## 📜 Historique de conversation
       - Les résultats que tu as obtenu avec \`getChannelMessages\` te permettent d'obtenir les précédents messages de la conversation.
     

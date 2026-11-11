@@ -1,111 +1,39 @@
+import type { SteamDescription, SteamInventoryResponse, SteamOwnedGamesResponse, SteamPlayerAchievementsResponse, SteamVanityUrlResponse } from "#/utils/steam-api";
 import type { ToolSet } from "ai";
+import { steamFetch } from "#/utils/steam-api";
 import { tool } from "ai";
 import { z } from "zod";
 
-type SteamVanityUrlResponse = {
-  response: {
-    success: number;
-    steamid?: string;
-  };
-};
-
-type SteamOwnedGame = {
-  appid: number;
-  name?: string;
-  playtime_forever: number;
-  playtime_2weeks?: number;
-};
-
-type SteamOwnedGamesResponse = {
-  response: {
-    game_count?: number;
-    games?: SteamOwnedGame[];
-  };
-};
-
-type SteamAchievement = {
-  apiname: string;
-  achieved: number;
-  unlocktime: number;
-  name?: string;
-  description?: string;
-};
-
-type SteamPlayerAchievementsResponse = {
-  playerstats?: {
-    gameName: string;
-    achievements: SteamAchievement[];
-  };
-};
-
-type SteamAsset = {
-  appid: number;
-  classid: string;
-  instanceid?: string;
-};
-
-type SteamDescription = {
-  classid: string;
-  instanceid?: string;
-  name?: string;
-  market_hash_name?: string;
-  type?: string;
-  tradable?: number;
-  marketable?: number;
-  tags?: {
-    category: string;
-    localized_tag_name?: string;
-  }[];
-};
-
-type SteamInventoryResponse = {
-  success?: boolean;
-  assets?: SteamAsset[];
-  descriptions?: SteamDescription[];
-};
-
-const STEAM_API_KEY = process.env.STEAM_API_KEY ?? "";
+const steamIdSchema = z.string().regex(/^\d{17}$/u, "Expected a 64-bit Steam ID (17 digits)").describe("The 64-bit Steam ID of the user (17 digits)");
 
 export const steamTools: ToolSet = {
   resolveSteamUsername: tool({
-    description: "Convert a Steam username (vanity URL) to a Steam ID 64-bit. Use this when you have a username instead of a Steam ID.",
+    description: "Convert a Steam username (vanity URL) to a 64-bit Steam ID. Use this first when you only have a username or profile URL.",
     inputSchema: z.object({
-      username: z.string().describe("The Steam username (vanity URL) to convert to Steam ID"),
+      username: z.string().describe("The Steam username (vanity URL) to resolve"),
     }),
     outputSchema: z.object({
-      steamid: z.string().describe("The 64-bit Steam ID"),
+      steamId: z.string().describe("The resolved 64-bit Steam ID"),
       username: z.string().describe("The username that was resolved"),
     }),
     execute: async ({ username }) => {
-      if (!STEAM_API_KEY) {
-        throw new Error("Steam API key not configured");
-      }
-
-      const response = await fetch(
-        `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${STEAM_API_KEY}&vanityurl=${username}`,
-      );
-
-      if (!response.ok) {
-        throw new Error(`Steam API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as SteamVanityUrlResponse;
+      const data = await steamFetch(`/ISteamUser/ResolveVanityURL/v1/?vanityurl=${encodeURIComponent(username)}`) as SteamVanityUrlResponse;
 
       if (data.response.success !== 1) {
-        throw new Error("Username not found");
+        throw new Error("Steam username not found");
       }
 
       return {
-        steamid: data.response.steamid ?? "",
-        username: username,
+        steamId: data.response.steamid ?? "",
+        username,
       };
     },
   }),
 
   getSteamUserGames: tool({
-    description: "Get the list of games owned by a Steam user. Returns game names and playtime.",
+    description: "Get the list of games owned by a Steam user, with their playtime.",
     inputSchema: z.object({
-      steamId: z.string().describe("The Steam ID 64-bit of the user"),
+      steamId: steamIdSchema,
     }),
     outputSchema: z.object({
       gameCount: z.number().describe("Total number of games owned"),
@@ -113,75 +41,48 @@ export const steamTools: ToolSet = {
         appid: z.number().describe("Steam app ID"),
         name: z.string().describe("Game name"),
         playtimeHours: z.number().describe("Total playtime in hours"),
-        playtime2WeeksHours: z.number().describe("Playtime in the last 2 weeks in hours"),
-      })).describe("List of games owned"),
+        playtime2WeeksHours: z.number().describe("Playtime over the last 2 weeks in hours"),
+      })).describe("Games owned"),
     }),
     execute: async ({ steamId }) => {
-      if (!STEAM_API_KEY) {
-        throw new Error("Steam API key not configured");
-      }
-
-      const response = await fetch(
-        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`,
-      );
-
-      if (!response.ok) {
-        throw new Error(`Steam API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as SteamOwnedGamesResponse;
+      const data = await steamFetch(`/IPlayerService/GetOwnedGames/v1/?steamid=${steamId}&include_appinfo=1&include_played_free_games=1`) as SteamOwnedGamesResponse;
 
       if (data.response.games === undefined) {
         throw new Error("No games found or profile is private");
       }
 
-      const games = data.response.games.map((game) => ({
-        appid: game.appid,
-        name: game.name ?? "",
-        playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
-        playtime2WeeksHours: game.playtime_2weeks !== undefined && game.playtime_2weeks > 0 ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
-      }));
-
       return {
-        gameCount: data.response.game_count ?? games.length,
-        games: games,
+        gameCount: data.response.game_count ?? data.response.games.length,
+        games: data.response.games.map((game) => ({
+          appid: game.appid,
+          name: game.name ?? "",
+          playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
+          playtime2WeeksHours: game.playtime_2weeks !== undefined && game.playtime_2weeks > 0 ? Math.round(game.playtime_2weeks / 60 * 10) / 10 : 0,
+        })),
       };
     },
   }),
 
   getSteamUserGamePlaytime: tool({
-    description: "Get the playtime (hours) for a specific game owned by a Steam user.",
+    description: "Get the playtime of a Steam user for a specific game they own.",
     inputSchema: z.object({
-      steamId: z.string().describe("The Steam ID 64-bit of the user"),
-      appId: z.number().describe("The Steam app ID of the game"),
+      steamId: steamIdSchema,
+      appId: z.number().int().describe("The Steam app ID of the game"),
     }),
     outputSchema: z.object({
       appid: z.number().describe("Steam app ID"),
       name: z.string().describe("Game name"),
       playtimeHours: z.number().describe("Total playtime in hours"),
-      playtime2WeeksHours: z.number().describe("Playtime in the last 2 weeks in hours"),
+      playtime2WeeksHours: z.number().describe("Playtime over the last 2 weeks in hours"),
     }),
     execute: async ({ steamId, appId }) => {
-      if (!STEAM_API_KEY) {
-        throw new Error("Steam API key not configured");
-      }
-
-      const response = await fetch(
-        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&format=json`,
-      );
-
-      if (!response.ok) {
-        throw new Error(`Steam API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as SteamOwnedGamesResponse;
+      const data = await steamFetch(`/IPlayerService/GetOwnedGames/v1/?steamid=${steamId}&include_appinfo=1`) as SteamOwnedGamesResponse;
 
       if (data.response.games === undefined) {
         throw new Error("No games found or profile is private");
       }
 
-      const game = data.response.games.find((g) => g.appid === appId);
-
+      const game = data.response.games.find((entry) => entry.appid === appId);
       if (game === undefined) {
         throw new Error("Game not found in user's library");
       }
@@ -196,36 +97,24 @@ export const steamTools: ToolSet = {
   }),
 
   getSteamUserAchievements: tool({
-    description: "Get the achievements for a specific game owned by a Steam user. Shows completion percentage and recent unlocks.",
+    description: "Get the achievement progress of a Steam user for a specific game: completion percentage and recent unlocks.",
     inputSchema: z.object({
-      steamId: z.string().describe("The Steam ID 64-bit of the user"),
-      appId: z.number().describe("The Steam app ID of the game"),
+      steamId: steamIdSchema,
+      appId: z.number().int().describe("The Steam app ID of the game"),
     }),
     outputSchema: z.object({
-      gameName: z.string().describe("Name of the game"),
+      gameName: z.string().describe("Game name"),
       totalAchievements: z.number().describe("Total number of achievements"),
       unlockedAchievements: z.number().describe("Number of unlocked achievements"),
       completionPercentage: z.number().describe("Completion percentage (0-100)"),
       recentAchievements: z.array(z.object({
         name: z.string().describe("Achievement name"),
         description: z.string().optional().describe("Achievement description"),
-        unlockedAt: z.string().describe("ISO timestamp when unlocked"),
+        unlockedAt: z.string().describe("Unlock date (ISO)"),
       })).describe("5 most recent achievements unlocked"),
     }),
     execute: async ({ steamId, appId }) => {
-      if (!STEAM_API_KEY) {
-        throw new Error("Steam API key not configured");
-      }
-
-      const response = await fetch(
-        `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&appid=${String(appId)}&l=french`,
-      );
-
-      if (!response.ok) {
-        throw new Error(`Steam API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as SteamPlayerAchievementsResponse;
+      const data = await steamFetch(`/ISteamUserStats/GetPlayerAchievements/v1/?steamid=${steamId}&appid=${String(appId)}&l=french`) as SteamPlayerAchievementsResponse;
 
       if (data.playerstats?.achievements === undefined) {
         throw new Error("No achievements found or profile is private");
@@ -233,37 +122,48 @@ export const steamTools: ToolSet = {
 
       const achievements = data.playerstats.achievements;
       const totalAchievements = achievements.length;
-      const unlockedAchievements = achievements.filter((a) => a.achieved === 1).length;
-      const percentage = Math.round((unlockedAchievements / totalAchievements) * 100);
+      const unlockedAchievements = achievements.filter((achievement) => achievement.achieved === 1).length;
+      const completionPercentage = Math.round((unlockedAchievements / totalAchievements) * 100);
 
       return {
         gameName: data.playerstats.gameName,
-        totalAchievements: totalAchievements,
-        unlockedAchievements: unlockedAchievements,
-        completionPercentage: percentage,
+        totalAchievements,
+        unlockedAchievements,
+        completionPercentage,
         recentAchievements: achievements
-          .filter((a) => a.achieved === 1)
+          .filter((achievement) => achievement.achieved === 1)
           .sort((a, b) => b.unlocktime - a.unlocktime)
           .slice(0, 5)
-          .map((a) => ({
-            name: a.name ?? a.apiname,
-            description: a.description,
-            unlockedAt: new Date(a.unlocktime * 1000).toISOString(),
+          .map((achievement) => ({
+            name: achievement.name ?? achievement.apiname,
+            description: achievement.description,
+            unlockedAt: new Date(achievement.unlocktime * 1000).toISOString(),
           })),
       };
     },
   }),
 
   getSteamUserInventory: tool({
-    description: "Get the inventory items for a Steam user. By default shows CS:GO inventory (appId 730).",
+    description: "Get the inventory items of a Steam user, sorted by rarity (default: Counter-Strike 2). Fails if the inventory is private.",
     inputSchema: z.object({
-      steamId: z.string().describe("The Steam ID 64-bit of the user"),
-      appId: z.number().describe("Steam app ID for the inventory (use 730 for CS:GO)"),
+      steamId: steamIdSchema,
+      appId: z.number().int().optional().describe("Steam app ID owning the inventory (default: 730 for Counter-Strike 2)"),
     }),
-    execute: async ({ steamId, appId }) => {
-      const response = await fetch(
-        `https://steamcommunity.com/inventory/${steamId}/${String(appId)}/2?l=french&count=100`,
-      );
+    outputSchema: z.object({
+      totalItems: z.number().describe("Total number of items in the inventory"),
+      uniqueItems: z.number().describe("Number of distinct items"),
+      items: z.array(z.object({
+        name: z.string().describe("Item name"),
+        type: z.string().describe("Item type"),
+        count: z.number().describe("Quantity owned"),
+        tradable: z.boolean().describe("Whether the item can be traded"),
+        marketable: z.boolean().describe("Whether the item can be sold on the market"),
+        rarity: z.string().optional().describe("Item rarity"),
+        weapon: z.string().optional().describe("Weapon type"),
+      })).describe("Distinct items sorted by rarity (max 15)"),
+    }),
+    execute: async ({ steamId, appId = 730 }) => {
+      const response = await fetch(`https://steamcommunity.com/inventory/${steamId}/${String(appId)}/2?l=french&count=100`);
 
       if (!response.ok) {
         if (response.status === 403) {
@@ -278,7 +178,7 @@ export const steamTools: ToolSet = {
       const data = await response.json() as SteamInventoryResponse;
 
       if (data.success === false) {
-        throw new Error("Inventory is private or doesn't exist for this game.");
+        throw new Error("Inventory is private or does not exist for this game.");
       }
 
       if (data.assets === undefined || data.assets.length === 0) {
@@ -293,7 +193,7 @@ export const steamTools: ToolSet = {
 
       for (const asset of data.assets) {
         const description = data.descriptions.find(
-          (d) => d.classid === asset.classid && d.instanceid === asset.instanceid,
+          (entry) => entry.classid === asset.classid && entry.instanceid === asset.instanceid,
         );
 
         if (description !== undefined) {
@@ -314,8 +214,8 @@ export const steamTools: ToolSet = {
         count: entry.count,
         tradable: entry.description.tradable === 1,
         marketable: entry.description.marketable === 1,
-        rarity: entry.description.tags?.find((t) => t.category === "Rarity")?.localized_tag_name,
-        weapon: entry.description.tags?.find((t) => t.category === "Weapon")?.localized_tag_name,
+        rarity: entry.description.tags?.find((tag) => tag.category === "Rarity")?.localized_tag_name,
+        weapon: entry.description.tags?.find((tag) => tag.category === "Weapon")?.localized_tag_name,
       }));
 
       const rarityOrder: Record<string, number> = {
@@ -328,11 +228,7 @@ export const steamTools: ToolSet = {
         "De qualité grand public": 7,
       };
 
-      items.sort((a, b) => {
-        const rarityA = rarityOrder[a.rarity ?? ""] ?? 999;
-        const rarityB = rarityOrder[b.rarity ?? ""] ?? 999;
-        return rarityA - rarityB;
-      });
+      items.sort((a, b) => (rarityOrder[a.rarity ?? ""] ?? 999) - (rarityOrder[b.rarity ?? ""] ?? 999));
 
       return {
         totalItems: data.assets.length,
@@ -343,9 +239,9 @@ export const steamTools: ToolSet = {
   }),
 
   findMostPlayedGame: tool({
-    description: "Find the most played game of a Steam user. Returns the game with the highest playtime.",
+    description: "Find the most played game of a Steam user: the one with the highest total playtime.",
     inputSchema: z.object({
-      steamId: z.string().describe("The Steam ID 64-bit of the user"),
+      steamId: steamIdSchema,
     }),
     outputSchema: z.object({
       name: z.string().describe("Game name"),
@@ -353,40 +249,18 @@ export const steamTools: ToolSet = {
       playtimeHours: z.number().describe("Total playtime in hours"),
     }),
     execute: async ({ steamId }) => {
-      if (!STEAM_API_KEY) {
-        throw new Error("Steam API key not configured");
-      }
+      const data = await steamFetch(`/IPlayerService/GetOwnedGames/v1/?steamid=${steamId}&include_appinfo=1&include_played_free_games=1`) as SteamOwnedGamesResponse;
 
-      const response = await fetch(
-        `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`,
-      );
-
-      if (!response.ok) {
-        throw new Error(`Steam API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as SteamOwnedGamesResponse;
-
-      if (data.response.games === undefined) {
+      if (data.response.games === undefined || data.response.games.length === 0) {
         throw new Error("No games found or profile is private");
       }
 
-      const games = data.response.games.map((game) => ({
-        appid: game.appid,
-        name: game.name ?? "",
-        playtimeHours: Math.round(game.playtime_forever / 60 * 10) / 10,
-      }));
-
-      if (games.length === 0) {
-        throw new Error("No games found");
-      }
-
-      const mostPlayed = games.reduce((max, game) => game.playtimeHours > max.playtimeHours ? game : max);
+      const mostPlayed = data.response.games.reduce((max, game) => game.playtime_forever > max.playtime_forever ? game : max);
 
       return {
-        name: mostPlayed.name,
+        name: mostPlayed.name ?? "",
         appid: mostPlayed.appid,
-        playtimeHours: mostPlayed.playtimeHours,
+        playtimeHours: Math.round(mostPlayed.playtime_forever / 60 * 10) / 10,
       };
     },
   }),

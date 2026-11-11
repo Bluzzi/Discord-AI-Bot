@@ -1,152 +1,56 @@
 import type { ToolSet } from "ai";
 import { discordClient } from "#/services/discord";
+import { renderHtmlToPdf } from "#/utils/html-to-pdf";
 import { tool } from "ai";
-import { AttachmentBuilder } from "discord.js";
-import puppeteer from "puppeteer";
 import { z } from "zod";
 
 export const pdfTools: ToolSet = {
-  generatePDF: tool({
-    description: `GÉNÈRE UN PDF PROFESSIONNEL - CE TOOL FONCTIONNE PARFAITEMENT.
-
-⚠️ RÈGLE ABSOLUE: SI quelqu'un demande un PDF (mise en demeure, CV, facture, rapport, proposition d'emploi, etc.):
-1. Si le PDF nécessite un logo/image: appelle searchImage EN INTERNE, attends le résultat, récupère l'URL
-2. Crée un HTML complet avec CSS (inclus l'URL de l'image si nécessaire)
-3. Appelle generatePDF avec cet HTML et le channelId
-4. Le tool va uploader le PDF directement sur Discord
-5. Réponds UNIQUEMENT: "Voici ton pdf tu peux le télécharger ci-dessous"
-6. si le pdf comprend une signature au lieu de mettre un placeholder [singnature] met une image sans fond d'une signature
-
-⚠️ INTERDIT:
-- Dire "j'ai un souci technique"
-- Proposer des alternatives (message privé, fichier texte, etc.)
-- Ignorer le résultat de generatePDF
-- Créer un simple fichier texte à la place
-- Dire "Voilà ton PDF : [URL]" ou mentionner une URL
-- Afficher le JSON de searchImage ou generatePDF
-- S'arrêter après searchImage sans générer le PDF
-
-STRUCTURE HTML COMPLÈTE REQUISE:
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 30px; }
-        /* Ajoute ton CSS moderne ici (flexbox, grid, couleurs, etc.) */
-    </style>
-</head>
-<body>
-    <!-- Ton contenu HTML structuré ici -->
-</body>
-</html>
-
-IMAGES (logos, icônes, illustrations):
-- Pour TOUTES les images: utilise OBLIGATOIREMENT le tool searchImage
-- Exemples: Logo d'entreprise: searchImage avec query="logo Basic-Fit PNG transparent"
-- Le tool searchImage retourne une liste d'URLs d'images avec leurs métadonnées
-- Utilise la première URL retournée (results[0].url) dans ton HTML
-- Exemple: <img src="https://example.com/logo.png" alt="Logo Basic-Fit" style="width: 200px;">
-
-Le PDF sera uploadé directement sur Discord. N'INVENTE PAS de problèmes techniques - ce tool fonctionne.`,
+  generatePdf: tool({
+    description: "Render a complete HTML document to a PDF file and upload it to a Discord channel. The HTML must be a full document (DOCTYPE, <head> with embedded CSS, <body>) and images must use absolute URLs (fetch them with searchImage first).",
     inputSchema: z.object({
-      channelId: z.string().describe("L'ID du channel Discord où uploader le PDF"),
-      html: z.string().describe("Le contenu HTML complet du document. DOIT inclure <!DOCTYPE html>, <html>, <head> avec <style> pour le CSS, et <body>. Utilise du CSS moderne pour le style (flexbox, grid, etc.). Pour les images, utilise des URLs absolues ou data URIs."),
-      filename: z.string().describe("Le nom du fichier PDF (sans extension, elle sera ajoutée automatiquement). Ex: 'rapport-mensuel', 'facture-2024-01'"),
+      channelId: z.string().describe("The channel ID to upload the PDF to"),
+      html: z.string().describe("The complete HTML document to render"),
+      filename: z.string().describe("The PDF file name without extension (e.g. 'monthly-report')"),
       options: z.object({
-        format: z.enum(["A4", "A3", "A5", "Letter", "Legal", "Tabloid"]).optional().describe("Format de page (défaut: A4)"),
-        landscape: z.boolean().optional().describe("Orientation paysage (défaut: false = portrait)"),
+        format: z.enum(["A4", "A3", "A5", "Letter", "Legal", "Tabloid"]).optional().describe("Page format (default: A4)"),
+        landscape: z.boolean().optional().describe("Landscape orientation (default: false)"),
         margin: z.object({
-          top: z.string().optional().describe("Marge haute (ex: '20mm', '1in', '2cm')"),
-          right: z.string().optional().describe("Marge droite"),
-          bottom: z.string().optional().describe("Marge basse"),
-          left: z.string().optional().describe("Marge gauche"),
-        }).optional().describe("Marges personnalisées (défaut: 10mm partout)"),
-        displayHeaderFooter: z.boolean().optional().describe("Afficher en-tête et pied de page (défaut: false)"),
-        headerTemplate: z.string().optional().describe("Template HTML pour l'en-tête (si displayHeaderFooter = true)"),
-        footerTemplate: z.string().optional().describe("Template HTML pour le pied de page (si displayHeaderFooter = true). Utilise <span class='pageNumber'></span> pour le numéro de page et <span class='totalPages'></span> pour le total"),
-        printBackground: z.boolean().optional().describe("Imprimer les couleurs et images de fond (défaut: true)"),
-        scale: z.number().optional().describe("Échelle de rendu (0.1 à 2, défaut: 1)"),
-      }).optional().describe("Options de génération du PDF"),
+          top: z.string().optional().describe("Top margin (e.g. '20mm', '1in', '2cm')"),
+          right: z.string().optional().describe("Right margin"),
+          bottom: z.string().optional().describe("Bottom margin"),
+          left: z.string().optional().describe("Left margin"),
+        }).optional().describe("Custom margins (default: 10mm on all sides)"),
+        displayHeaderFooter: z.boolean().optional().describe("Display header and footer (default: false)"),
+        headerTemplate: z.string().optional().describe("HTML template for the header (requires displayHeaderFooter)"),
+        footerTemplate: z.string().optional().describe("HTML template for the footer (requires displayHeaderFooter). Use <span class='pageNumber'></span> and <span class='totalPages'></span> for page numbers"),
+        printBackground: z.boolean().optional().describe("Print background colors and images (default: true)"),
+        scale: z.number().min(0.1).max(2).optional().describe("Rendering scale, 0.1 to 2 (default: 1)"),
+      }).optional().describe("PDF generation options"),
     }),
-    execute: async ({ channelId, html, filename, options = {} }) => {
-      const sanitizedFilename = filename.replace(/[^a-zA-Z0-9-_]/gu, "-");
-      const pdfFilename = `${String(Date.now())}-${sanitizedFilename}.pdf`;
+    outputSchema: z.object({
+      filename: z.string().describe("Uploaded file name"),
+      size: z.number().describe("File size in bytes"),
+      messageId: z.string().describe("Uploaded message ID"),
+    }),
+    execute: async ({ channelId, html, filename, options }) => {
+      const pdf = await renderHtmlToPdf(html, options ?? {});
 
-      let browser;
-      try {
-        browser = await puppeteer.launch({
-          headless: true,
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-          ],
-        });
-
-        const page = await browser.newPage();
-
-        await page.setContent(html, {
-          waitUntil: "load",
-        });
-
-        await page.evaluateHandle("document.fonts.ready");
-
-        const [imagesResult] = await Promise.allSettled([page.waitForFunction(`
-                    Array.from(document.querySelectorAll("img")).every(img => img.complete && img.naturalHeight !== 0)
-                `, { timeout: 10000 })]);
-
-        if (imagesResult.status === "rejected") {
-          console.warn("Some images may not have loaded completely");
-        }
-
-        const pdfOptions: Parameters<typeof page.pdf>[0] = {
-          format: options.format ?? "A4",
-          landscape: options.landscape ?? false,
-          margin: {
-            top: options.margin?.top ?? "10mm",
-            right: options.margin?.right ?? "10mm",
-            bottom: options.margin?.bottom ?? "10mm",
-            left: options.margin?.left ?? "10mm",
-          },
-          printBackground: options.printBackground !== false,
-          displayHeaderFooter: options.displayHeaderFooter ?? false,
-          headerTemplate: options.headerTemplate ?? "",
-          footerTemplate: options.footerTemplate ?? "",
-          scale: options.scale ?? 1,
-          preferCSSPageSize: false,
-        };
-
-        const pdfBuffer = await page.pdf(pdfOptions);
-
-        await browser.close();
-        browser = undefined;
-
-        const channel = discordClient.channels.cache.get(channelId);
-        if (channel?.isTextBased() !== true) {
-          throw new Error("Channel not found or not a text channel");
-        }
-
-        const attachment = new AttachmentBuilder(Buffer.from(pdfBuffer), { name: pdfFilename });
-
-        if ("send" in channel) {
-          await channel.send({ files: [attachment] });
-        }
-
-        return {
-          success: true,
-          filename: pdfFilename,
-          size: pdfBuffer.length,
-          channelId: channelId,
-        };
+      const channel = discordClient.channels.cache.get(channelId);
+      if (channel?.isTextBased() !== true) {
+        throw new Error("Channel not found or not a text channel");
       }
-      catch (error) {
-        if (browser) {
-          await browser.close();
-        }
-        throw new Error(`Erreur lors de la génération du PDF: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      if (!("send" in channel)) {
+        throw new Error("Channel does not support sending messages");
       }
+
+      const pdfFilename = `${filename.replace(/[^a-zA-Z0-9-_]/gu, "-")}.pdf`;
+      const message = await channel.send({ files: [{ name: pdfFilename, attachment: pdf }] });
+
+      return {
+        filename: pdfFilename,
+        size: pdf.length,
+        messageId: message.id,
+      };
     },
   }),
 };

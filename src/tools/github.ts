@@ -1,57 +1,35 @@
 import type { ToolSet } from "ai";
+import { githubFetch } from "#/utils/github-api";
 import { tool } from "ai";
 import { z } from "zod";
 
-const githubFetch = async (endpoint: string) => {
-  const headers: Record<string, string> = {
-    "Accept": "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-
-  const response = await fetch(`https://api.github.com${endpoint}`, { headers });
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(`Ressource GitHub introuvable: ${endpoint}`);
-    }
-    throw new Error(`GitHub API error: ${String(response.status)} ${response.statusText}`);
-  }
-
-  return response.json();
-};
-
 export const githubTools: ToolSet = {
   getUserProfile: tool({
-    description: `Récupère toutes les informations d'un profil GitHub (bio, stats, repos publics, followers, etc.).
-
-⚠️ IMPORTANT:
-- Pour les profils, TOUJOURS utiliser sendEmbed avec thumbnail
-- Formate les dates en format lisible (ex: "12 janvier 2024")
-- NE JAMAIS afficher le JSON brut des tools - TOUJOURS envoyer l'embed d'abord puis répondre`,
+    description: "Get a GitHub user profile: bio, company, location, follower counts and public repo stats.",
     inputSchema: z.object({
-      username: z.string().describe("Le nom d'utilisateur GitHub (ex: 'torvalds', 'octocat')"),
+      username: z.string().describe("The GitHub username (e.g. 'torvalds', 'octocat')"),
     }),
     outputSchema: z.object({
-      login: z.string().describe("Login GitHub"),
-      id: z.number().describe("ID de l'utilisateur"),
-      avatarUrl: z.string().describe("URL de l'avatar"),
-      htmlUrl: z.string().describe("URL du profil"),
-      name: z.string().optional().describe("Nom complet"),
-      company: z.string().optional().describe("Entreprise"),
-      blog: z.string().optional().describe("Site web/blog"),
-      location: z.string().optional().describe("Localisation"),
-      email: z.string().optional().describe("Email public"),
-      bio: z.string().optional().describe("Biographie"),
-      twitterUsername: z.string().optional().describe("Nom d'utilisateur Twitter"),
-      publicRepos: z.number().describe("Nombre de repos publics"),
-      publicGists: z.number().describe("Nombre de gists publics"),
-      followers: z.number().describe("Nombre de followers"),
-      following: z.number().describe("Nombre de following"),
-      createdAt: z.string().describe("Date de création du compte"),
-      updatedAt: z.string().describe("Date de dernière mise à jour"),
+      login: z.string().describe("GitHub login"),
+      id: z.number().describe("User ID"),
+      avatarUrl: z.string().describe("Avatar URL"),
+      htmlUrl: z.string().describe("Profile URL"),
+      name: z.string().optional().describe("Full name"),
+      company: z.string().optional().describe("Company"),
+      blog: z.string().optional().describe("Website/blog"),
+      location: z.string().optional().describe("Location"),
+      email: z.string().optional().describe("Public email"),
+      bio: z.string().optional().describe("Bio"),
+      twitterUsername: z.string().optional().describe("Twitter/X username"),
+      publicRepos: z.number().describe("Public repositories count"),
+      publicGists: z.number().describe("Public gists count"),
+      followers: z.number().describe("Followers count"),
+      following: z.number().describe("Following count"),
+      createdAt: z.string().describe("Account creation date (ISO)"),
+      updatedAt: z.string().describe("Last update date (ISO)"),
     }),
     execute: async ({ username }) => {
-      const data = await githubFetch(`/users/${username}`) as {
+      const data = await githubFetch<{
         login: string;
         id: number;
         avatar_url: string;
@@ -69,7 +47,7 @@ export const githubTools: ToolSet = {
         following: number;
         created_at: string;
         updated_at: string;
-      };
+      }>(`/users/${encodeURIComponent(username)}`);
 
       return {
         login: data.login,
@@ -94,36 +72,35 @@ export const githubTools: ToolSet = {
   }),
 
   getUserRepos: tool({
-    description: "Récupère TOUS les repositories publics d'un utilisateur GitHub avec leurs stats (stars, forks, language, etc.).",
+    description: "List the public repositories of a GitHub user with their stats (stars, forks, language, dates).",
     inputSchema: z.object({
-      username: z.string().describe("Le nom d'utilisateur GitHub"),
-      sort: z.enum(["created", "updated", "pushed", "full_name"]).optional().describe("Tri des repos (défaut: updated)"),
-      perPage: z.number().optional().describe("Nombre de repos par page (max 100, défaut: 100)"),
+      username: z.string().describe("The GitHub username"),
+      sort: z.enum(["created", "updated", "pushed", "full_name"]).optional().describe("Sort repositories (default: updated)"),
+      perPage: z.number().int().min(1).max(100).optional().describe("Results per page (default: 100)"),
     }),
     outputSchema: z.object({
       repos: z.array(z.object({
-        id: z.number().describe("ID du repo"),
-        name: z.string().describe("Nom du repo"),
-        fullName: z.string().describe("Nom complet (user/repo)"),
+        id: z.number().describe("Repository ID"),
+        name: z.string().describe("Repository name"),
+        fullName: z.string().describe("Full name (owner/repo)"),
         description: z.string().optional().describe("Description"),
-        htmlUrl: z.string().describe("URL du repo"),
-        language: z.string().optional().describe("Langage principal"),
-        stargazersCount: z.number().describe("Nombre d'étoiles"),
-        forksCount: z.number().describe("Nombre de forks"),
-        watchersCount: z.number().describe("Nombre de watchers"),
-        openIssuesCount: z.number().describe("Nombre d'issues ouvertes"),
-        size: z.number().describe("Taille en KB"),
-        createdAt: z.string().describe("Date de création"),
-        updatedAt: z.string().describe("Date de dernière mise à jour"),
-        pushedAt: z.string().describe("Date du dernier push"),
-        fork: z.boolean().describe("Est-ce un fork"),
-        archived: z.boolean().describe("Est-ce archivé"),
+        htmlUrl: z.string().describe("Repository URL"),
+        language: z.string().optional().describe("Main language"),
+        stargazersCount: z.number().describe("Stars count"),
+        forksCount: z.number().describe("Forks count"),
+        watchersCount: z.number().describe("Watchers count"),
+        openIssuesCount: z.number().describe("Open issues count"),
+        size: z.number().describe("Size in KB"),
+        createdAt: z.string().describe("Creation date (ISO)"),
+        updatedAt: z.string().describe("Last update date (ISO)"),
+        pushedAt: z.string().describe("Last push date (ISO)"),
+        fork: z.boolean().describe("Whether the repository is a fork"),
+        archived: z.boolean().describe("Whether the repository is archived"),
         topics: z.array(z.string()).describe("Topics/tags"),
-      })).describe("Liste des repositories"),
-      totalCount: z.number().describe("Nombre total de repos"),
+      })).describe("Repositories"),
     }),
     execute: async ({ username, sort = "updated", perPage = 100 }) => {
-      const data = await githubFetch(`/users/${username}/repos?sort=${sort}&per_page=${String(perPage)}`) as {
+      const data = await githubFetch<{
         id: number;
         name: string;
         full_name: string;
@@ -141,7 +118,7 @@ export const githubTools: ToolSet = {
         fork: boolean;
         archived: boolean;
         topics: string[];
-      }[];
+      }[]>(`/users/${encodeURIComponent(username)}/repos?sort=${sort}&per_page=${String(perPage)}`);
 
       return {
         repos: data.map((repo) => ({
@@ -163,51 +140,50 @@ export const githubTools: ToolSet = {
           archived: repo.archived,
           topics: repo.topics,
         })),
-        totalCount: data.length,
       };
     },
   }),
 
   getRepoInfo: tool({
-    description: "Récupère toutes les informations détaillées d'un repository GitHub (description, stats, languages, contributors, etc.).",
+    description: "Get detailed information about a GitHub repository: description, stats, license and enabled features.",
     inputSchema: z.object({
-      owner: z.string().describe("Le propriétaire du repo (username ou org)"),
-      repo: z.string().describe("Le nom du repository"),
+      owner: z.string().describe("The repository owner (username or organization)"),
+      repo: z.string().describe("The repository name"),
     }),
     outputSchema: z.object({
-      id: z.number().describe("ID du repo"),
-      name: z.string().describe("Nom du repo"),
-      fullName: z.string().describe("Nom complet (owner/repo)"),
+      id: z.number().describe("Repository ID"),
+      name: z.string().describe("Repository name"),
+      fullName: z.string().describe("Full name (owner/repo)"),
       description: z.string().optional().describe("Description"),
-      htmlUrl: z.string().describe("URL du repo"),
-      homepage: z.string().optional().describe("Site web du projet"),
-      language: z.string().optional().describe("Langage principal"),
-      stargazersCount: z.number().describe("Nombre d'étoiles"),
-      forksCount: z.number().describe("Nombre de forks"),
-      watchersCount: z.number().describe("Nombre de watchers"),
-      openIssuesCount: z.number().describe("Nombre d'issues ouvertes"),
-      size: z.number().describe("Taille en KB"),
-      defaultBranch: z.string().describe("Branche par défaut"),
-      createdAt: z.string().describe("Date de création"),
-      updatedAt: z.string().describe("Date de dernière mise à jour"),
-      pushedAt: z.string().describe("Date du dernier push"),
-      fork: z.boolean().describe("Est-ce un fork"),
-      archived: z.boolean().describe("Est-ce archivé"),
-      disabled: z.boolean().describe("Est-ce désactivé"),
+      htmlUrl: z.string().describe("Repository URL"),
+      homepage: z.string().optional().describe("Project website"),
+      language: z.string().optional().describe("Main language"),
+      stargazersCount: z.number().describe("Stars count"),
+      forksCount: z.number().describe("Forks count"),
+      watchersCount: z.number().describe("Watchers count"),
+      openIssuesCount: z.number().describe("Open issues count"),
+      size: z.number().describe("Size in KB"),
+      defaultBranch: z.string().describe("Default branch"),
+      createdAt: z.string().describe("Creation date (ISO)"),
+      updatedAt: z.string().describe("Last update date (ISO)"),
+      pushedAt: z.string().describe("Last push date (ISO)"),
+      fork: z.boolean().describe("Whether the repository is a fork"),
+      archived: z.boolean().describe("Whether the repository is archived"),
+      disabled: z.boolean().describe("Whether the repository is disabled"),
       topics: z.array(z.string()).describe("Topics/tags"),
       license: z.object({
-        key: z.string().describe("Clé de la licence"),
-        name: z.string().describe("Nom de la licence"),
+        key: z.string().describe("License key"),
+        name: z.string().describe("License name"),
         spdxId: z.string().describe("SPDX ID"),
-      }).optional().describe("Licence du projet"),
-      hasIssues: z.boolean().describe("Issues activées"),
-      hasProjects: z.boolean().describe("Projects activés"),
-      hasWiki: z.boolean().describe("Wiki activé"),
-      hasPages: z.boolean().describe("GitHub Pages activé"),
-      hasDiscussions: z.boolean().describe("Discussions activées"),
+      }).optional().describe("Repository license"),
+      hasIssues: z.boolean().describe("Whether issues are enabled"),
+      hasProjects: z.boolean().describe("Whether projects are enabled"),
+      hasWiki: z.boolean().describe("Whether the wiki is enabled"),
+      hasPages: z.boolean().describe("Whether GitHub Pages is enabled"),
+      hasDiscussions: z.boolean().describe("Whether discussions are enabled"),
     }),
     execute: async ({ owner, repo }) => {
-      const data = await githubFetch(`/repos/${owner}/${repo}`) as {
+      const data = await githubFetch<{
         id: number;
         name: string;
         full_name: string;
@@ -238,7 +214,7 @@ export const githubTools: ToolSet = {
         has_wiki: boolean;
         has_pages: boolean;
         has_discussions: boolean;
-      };
+      }>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
 
       return {
         id: data.id,
@@ -276,30 +252,30 @@ export const githubTools: ToolSet = {
   }),
 
   searchRepos: tool({
-    description: "Recherche des repositories GitHub par mots-clés avec filtres (language, stars, etc.).",
+    description: "Search GitHub repositories by keywords. Supports search qualifiers in the query (e.g. 'discord bot language:typescript stars:>100').",
     inputSchema: z.object({
-      query: z.string().describe("Requête de recherche (ex: 'discord bot', 'machine learning')"),
-      sort: z.enum(["stars", "forks", "help-wanted-issues", "updated"]).optional().describe("Tri des résultats"),
-      order: z.enum(["asc", "desc"]).optional().describe("Ordre de tri (défaut: desc)"),
-      perPage: z.number().optional().describe("Nombre de résultats (max 100, défaut: 30)"),
+      query: z.string().describe("Search query (e.g. 'discord bot', 'machine learning stars:>500')"),
+      sort: z.enum(["stars", "forks", "help-wanted-issues", "updated"]).optional().describe("Sort results"),
+      order: z.enum(["asc", "desc"]).optional().describe("Sort order (default: desc)"),
+      perPage: z.number().int().min(1).max(100).optional().describe("Results per page (default: 30)"),
     }),
     outputSchema: z.object({
-      totalCount: z.number().describe("Nombre total de résultats"),
+      totalCount: z.number().describe("Total matching repositories"),
       repos: z.array(z.object({
-        id: z.number().describe("ID du repo"),
-        name: z.string().describe("Nom du repo"),
-        fullName: z.string().describe("Nom complet (owner/repo)"),
+        id: z.number().describe("Repository ID"),
+        name: z.string().describe("Repository name"),
+        fullName: z.string().describe("Full name (owner/repo)"),
         description: z.string().optional().describe("Description"),
-        htmlUrl: z.string().describe("URL du repo"),
-        language: z.string().optional().describe("Langage principal"),
-        stargazersCount: z.number().describe("Nombre d'étoiles"),
-        forksCount: z.number().describe("Nombre de forks"),
-        watchersCount: z.number().describe("Nombre de watchers"),
-        openIssuesCount: z.number().describe("Nombre d'issues ouvertes"),
+        htmlUrl: z.string().describe("Repository URL"),
+        language: z.string().optional().describe("Main language"),
+        stargazersCount: z.number().describe("Stars count"),
+        forksCount: z.number().describe("Forks count"),
+        watchersCount: z.number().describe("Watchers count"),
+        openIssuesCount: z.number().describe("Open issues count"),
         topics: z.array(z.string()).describe("Topics/tags"),
-        createdAt: z.string().describe("Date de création"),
-        updatedAt: z.string().describe("Date de dernière mise à jour"),
-      })).describe("Liste des repositories trouvés"),
+        createdAt: z.string().describe("Creation date (ISO)"),
+        updatedAt: z.string().describe("Last update date (ISO)"),
+      })).describe("Matching repositories"),
     }),
     execute: async ({ query, sort, order = "desc", perPage = 30 }) => {
       const params = new URLSearchParams({
@@ -312,7 +288,7 @@ export const githubTools: ToolSet = {
         params.append("sort", sort);
       }
 
-      const data = await githubFetch(`/search/repositories?${params.toString()}`) as {
+      const data = await githubFetch<{
         total_count: number;
         items: {
           id: number;
@@ -329,7 +305,7 @@ export const githubTools: ToolSet = {
           created_at: string;
           updated_at: string;
         }[];
-      };
+      }>(`/search/repositories?${params.toString()}`);
 
       return {
         totalCount: data.total_count,
