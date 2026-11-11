@@ -5,7 +5,7 @@ import { join } from "path";
 import { cwd } from "process";
 
 // Export client:
-export const postgres = drizzle(env.POSTGRES_URL);
+export const postgres = drizzle(env.POSTGRESQL_URL);
 
 // Apply migrations:
 await migrate(postgres, {
