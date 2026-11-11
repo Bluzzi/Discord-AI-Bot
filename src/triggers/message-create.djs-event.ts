@@ -42,6 +42,9 @@ trigger.discordEvent("messageCreate", async (message) => {
     system: dedent`
       Tu détermines si le bot Discord "${botNames}" doit répondre au dernier message d'une conversation.
 
+      Mémoire :
+      - L'user dispose d'informations durables en mémoire (récupérées avec l'outil getUserMemory au moment de la réponse) qui peuvent affecter les cas où tu dois répondre ou non
+
       Réponds "OUI" si :
       - Le bot est explicitement mentionné par son nom ("jean pascal", "jp", "jean", "yo jean", "yo jean pascal", "yo jp")
       - On lui accorde le droit de réponse ("jp droit de réponse", "jean pascal droit de réponse")

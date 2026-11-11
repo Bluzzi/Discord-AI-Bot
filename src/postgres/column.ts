@@ -7,6 +7,5 @@ const updatedAt = timestamp("updated_at", { withTimezone: true })
   .notNull()
   .defaultNow()
   .$onUpdate(() => new Date());
-const deletedAt = timestamp("deleted_at", { withTimezone: true });
 
-export const columns = { createdAt, updatedAt, deletedAt };
+export const columns = { createdAt, updatedAt };
