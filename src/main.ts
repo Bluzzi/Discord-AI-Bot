@@ -1,5 +1,4 @@
 import { discordClientStart } from "#/services/discord";
-import { serverStart } from "#/services/server";
 import { logger } from "#/utils/logger";
 
 // Uncaught exception handler:
@@ -12,10 +11,6 @@ process.on("uncaughtException", (error, origin) => {
 await discordClientStart(async () => {
   await import("#/triggers/message-create.djs-event");
   await import("#/triggers/voice-state-update.djs-event");
-});
-
-await serverStart(async () => {
-  // empty for the moment
 });
 
 // Load others triggers:
