@@ -29,6 +29,13 @@
       "when": 1767109876622,
       "tag": "0003_wealthy_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794425491645,
+      "tag": "0004_tiny_magus",
+      "breakpoints": true
     }
   ]
 }
