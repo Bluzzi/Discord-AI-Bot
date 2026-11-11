@@ -10,23 +10,6 @@ import { z } from "zod";
 export const discordTools: ToolSet = {
   // Guilds:
 
-  listGuilds: tool({
-    description: "List all guilds (servers) the bot is a member of. Use this when the user refers to another server by name.",
-    inputSchema: z.object({}),
-    outputSchema: z.array(z.object({
-      id: z.string().describe("Guild ID"),
-      name: z.string().describe("Guild name"),
-      memberCount: z.number().describe("Member count"),
-      iconUrl: z.string().nullable().describe("Guild icon URL"),
-    })).describe("Guilds where the bot is present"),
-    execute: () => discordClient.guilds.cache.map((guild) => ({
-      id: guild.id,
-      name: guild.name,
-      memberCount: guild.memberCount,
-      iconUrl: guild.iconURL(),
-    })),
-  }),
-
   getGuildInfo: tool({
     description: "Get detailed information about a guild: name, member count, owner, icon and creation date.",
     inputSchema: z.object({
