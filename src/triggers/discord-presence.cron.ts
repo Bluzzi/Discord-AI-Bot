@@ -1,7 +1,7 @@
 import { discordClient } from "#/services/discord";
 import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
-import { aiModels } from "#/utils/ai-model";
+import { aiModel } from "#/utils/ai-model";
 import { day } from "#/utils/day";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
@@ -17,7 +17,7 @@ await trigger.cron(
 
     // Generate MOTD:
     const motd = await generateText({
-      model: aiModels.mistralLarge,
+      model: aiModel,
       stopWhen: stepCountIs(5),
       output: Output.object({
         schema: z.object({

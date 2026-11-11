@@ -9,10 +9,8 @@
     "ts:check": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/mistral": "^3.0.1",
     "@ai-sdk/openai": "^3.0.1",
     "@discordjs/voice": "^0.19.0",
-    "@giphy/js-fetch-api": "^5.7.0",
     "@hono/node-server": "^1.19.7",
     "@snazzah/davey": "^0.1.9",
     "ai": "^6.0.3",
@@ -44,12 +42,5 @@
     "drizzle-kit": "^0.31.8",
     "eslint": "^9.39.2",
     "typescript": "^5.9.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@swc/core",
-      "esbuild",
-      "puppeteer"
-    ]
   }
 }

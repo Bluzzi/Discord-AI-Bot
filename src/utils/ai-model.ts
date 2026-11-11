@@ -1,14 +1,11 @@
-import { createMistral } from "@ai-sdk/mistral";
+import { createOpenAI } from "@ai-sdk/openai";
 import { env } from "#/utils/env";
 
 // Providers:
-const mistral = createMistral({
-  baseURL: env.MISTRAL_BASE_URL,
-  apiKey: env.MISTRAL_API_KEY,
+const openRouter = createOpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: env.OPENROUTER_API_KEY,
 });
 
-// Export models:
-export const aiModels = {
-  mistralFast: mistral("mistral-small-latest"),
-  mistralLarge: mistral("mistral-large-latest"),
-};
+// Export model:
+export const aiModel = openRouter(env.OPENROUTER_MODEL);

@@ -1,5 +1,4 @@
 import type { ToolSet } from "ai";
-import { env } from "#/utils/env";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -8,10 +7,6 @@ async function githubFetch(endpoint: string) {
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-
-  if (env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-  }
 
   const response = await fetch(`https://api.github.com${endpoint}`, { headers });
 
@@ -32,7 +27,6 @@ export const githubTools: ToolSet = {
 ⚠️ IMPORTANT:
 - Pour les profils, TOUJOURS utiliser sendEmbed avec thumbnail
 - Formate les dates en format lisible (ex: "12 janvier 2024")
-- Si pas de token GitHub configuré, l'API fonctionne quand même (rate limit plus bas)
 - NE JAMAIS afficher le JSON brut des tools - TOUJOURS envoyer l'embed d'abord puis répondre`,
     inputSchema: z.object({
       username: z.string().describe("Le nom d'utilisateur GitHub (ex: 'torvalds', 'octocat')"),

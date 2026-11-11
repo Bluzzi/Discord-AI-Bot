@@ -3,22 +3,17 @@ import type { OmitPartialGroupDMChannel } from "discord.js";
 import { postgres, tableDiscordGuildLaw } from "#/postgres";
 import { DISCORD_MAX_MESSAGE_LENGTH } from "#/services/discord";
 import { discordTools } from "#/tools/discord";
-import { giphyTools } from "#/tools/giphy";
 import { githubTools } from "#/tools/github";
 import { guildLawTools } from "#/tools/guild-law";
-import { igdbTools } from "#/tools/igdb";
 import { imageTools } from "#/tools/image";
 import { letterboxdTools } from "#/tools/letterboxd";
 import { memoryTools } from "#/tools/memory";
 import { minecraftTools } from "#/tools/minecraft";
 import { newsTools } from "#/tools/news";
-import { pastebinTools } from "#/tools/pastebin";
 import { pdfTools } from "#/tools/pdf";
-import { fortyTwoTools } from "#/tools/school-42";
 import { steamTools } from "#/tools/steam";
-import { tmdbTools } from "#/tools/tmdb";
 import { websearchTools } from "#/tools/websearch";
-import { aiModels } from "#/utils/ai-model";
+import { aiModel } from "#/utils/ai-model";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
@@ -62,7 +57,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
   // Ask IA for reply:
   const result = await generateText({
-    model: aiModels.mistralLarge,
+    model: aiModel,
     stopWhen: stepCountIs(100),
     system: dedent`
       Tu es Jean Pascal ("JP", "Jean Pascal"), un assistant Discord.
@@ -139,26 +134,21 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       ],
     })),
     prepareStep: ({ stepNumber }) => {
-      if (stepNumber === 0) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getChannelMessages" } };
-      if (stepNumber === 1) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getUserMemory" } };
-      if (stepNumber === 2) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getChannelMemory" } };
-      if (stepNumber === 3 && guild) return { model: aiModels.mistralFast, toolChoice: { type: "tool", toolName: "getGuildMemory" } };
+      if (stepNumber === 0) return { model: aiModel, toolChoice: { type: "tool", toolName: "getChannelMessages" } };
+      if (stepNumber === 1) return { model: aiModel, toolChoice: { type: "tool", toolName: "getUserMemory" } };
+      if (stepNumber === 2) return { model: aiModel, toolChoice: { type: "tool", toolName: "getChannelMemory" } };
+      if (stepNumber === 3 && guild) return { model: aiModel, toolChoice: { type: "tool", toolName: "getGuildMemory" } };
     },
     tools: {
       ...discordTools,
       ...memoryTools,
-      ...fortyTwoTools,
-      ...giphyTools,
       ...githubTools,
-      ...igdbTools,
       ...imageTools,
       ...letterboxdTools,
       ...minecraftTools,
       ...newsTools,
-      ...pastebinTools,
       ...pdfTools,
       ...steamTools,
-      ...tmdbTools,
       ...websearchTools,
       ...(!isDM ? guildLawTools : {}),
     },

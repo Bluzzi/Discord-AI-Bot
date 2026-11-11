@@ -10,24 +10,8 @@ const schema = z.object({
   DISCORD_BOT_ID: z.string(),
   DISCORD_BOT_TOKEN: z.string(),
 
-  MISTRAL_API_KEY: z.string(),
-  MISTRAL_BASE_URL: z.string().default("https://api.mistral.ai/v1"),
-  MISTRAL_MODEL: z.string().default("mistral-large-latest"),
-
-  IGDB_CLIENT_ID: z.string().optional(),
-  IGDB_CLIENT_SECRET: z.string().optional(),
-  IGDB_ACCESS_TOKEN: z.string().optional(),
-
-  PASTEBIN_API_KEY: z.string().optional(),
-
-  GIPHY_API_KEY: z.string().optional(),
-
-  FORTYTWO_CLIENT_ID: z.string().optional(),
-  FORTYTWO_CLIENT_SECRET: z.string().optional(),
-
-  GITHUB_TOKEN: z.string().optional(),
-
-  TMDB_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string(),
+  OPENROUTER_MODEL: z.string().default("z-ai/glm-5.3-flash"),
 });
 
 export const env = schema.parse(process.env);
