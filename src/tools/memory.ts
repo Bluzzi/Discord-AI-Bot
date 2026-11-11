@@ -11,6 +11,8 @@ export const memoryTools: ToolSet = {
     description: dedent`
       Retrieve the persistent memory of a Discord user: a single consolidated text with durable information about them (preferences, habits, personal facts).
 
+      The memory may also contain fun notes that you can choose to follow to make interactions more playful. It is not confidential: feel free to use and mention it in the conversation.
+
       Returns null values if no memory exists yet for this user.
     `,
     inputSchema: z.object({

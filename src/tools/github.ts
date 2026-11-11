@@ -5,7 +5,7 @@ import { z } from "zod";
 
 export const githubTools: ToolSet = {
   getUserProfile: tool({
-    description: "Get a GitHub user profile: bio, company, location, follower counts and public repo stats.",
+    description: "Get a GitHub user profile: bio, company, location, follower counts and public repo stats. Present the profile as a Discord embed via sendEmbed (thumbnail: the user's avatarUrl), with human-readable dates, never raw JSON.",
     inputSchema: z.object({
       username: z.string().describe("The GitHub username (e.g. 'torvalds', 'octocat')"),
     }),
@@ -72,7 +72,7 @@ export const githubTools: ToolSet = {
   }),
 
   getUserRepos: tool({
-    description: "List the public repositories of a GitHub user with their stats (stars, forks, language, dates).",
+    description: "List the public repositories of a GitHub user with their stats (stars, forks, language, dates). Present the results as a Discord embed via sendEmbed, with human-readable dates, never raw JSON.",
     inputSchema: z.object({
       username: z.string().describe("The GitHub username"),
       sort: z.enum(["created", "updated", "pushed", "full_name"]).optional().describe("Sort repositories (default: updated)"),
@@ -145,7 +145,7 @@ export const githubTools: ToolSet = {
   }),
 
   getRepoInfo: tool({
-    description: "Get detailed information about a GitHub repository: description, stats, license and enabled features.",
+    description: "Get detailed information about a GitHub repository: description, stats, license and enabled features. Present the result as a Discord embed via sendEmbed, with human-readable dates, never raw JSON.",
     inputSchema: z.object({
       owner: z.string().describe("The repository owner (username or organization)"),
       repo: z.string().describe("The repository name"),
@@ -252,7 +252,7 @@ export const githubTools: ToolSet = {
   }),
 
   searchRepos: tool({
-    description: "Search GitHub repositories by keywords. Supports search qualifiers in the query (e.g. 'discord bot language:typescript stars:>100').",
+    description: "Search GitHub repositories by keywords. Supports search qualifiers in the query (e.g. 'discord bot language:typescript stars:>100'). Present the results as a Discord embed via sendEmbed, with human-readable dates, never raw JSON.",
     inputSchema: z.object({
       query: z.string().describe("Search query (e.g. 'discord bot', 'machine learning stars:>500')"),
       sort: z.enum(["stars", "forks", "help-wanted-issues", "updated"]).optional().describe("Sort results"),

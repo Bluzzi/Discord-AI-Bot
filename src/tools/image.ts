@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export const imageTools: ToolSet = {
   searchImage: tool({
-    description: "Search for images on the web (Brave Image Search). Add \"PNG transparent\" to the query for logos and icons without background.",
+    description: "Search for images on the web (Brave Image Search). Add \"PNG transparent\" to the query for logos and icons without background. When the request is to find or send an image, reply with the image URL only, without any text before or after.",
     inputSchema: z.object({
       query: z.string().describe("Image search query (e.g. \"Nike logo PNG transparent\")"),
       count: z.number().int().min(1).max(20).optional().describe("Number of results (default: 5)"),
