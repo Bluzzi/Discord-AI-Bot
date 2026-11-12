@@ -88,6 +88,9 @@ await trigger.cron(
         state: `${motd.output.emoji} ${motd.output.text}`,
       }],
     });
+
+    // Usage tracking:
+    await aiUsage.track("discord_presence", motd);
   },
   {
     triggerAtStartup: true,

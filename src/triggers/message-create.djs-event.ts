@@ -112,4 +112,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   if (decision.output === "OUI") {
     await replyToMessage(message);
   }
+
+  // Usage tracking:
+  await aiUsage.track("reply_decision", decision);
 });

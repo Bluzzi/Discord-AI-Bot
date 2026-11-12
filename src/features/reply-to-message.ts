@@ -113,6 +113,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       - Si on t'insulte ("bouffon", "nul", "inutile") : réagis mal, sois sarcastique
       - Si l'user dit quelque chose comme "jp droit de réponse" : lis le contexte et défends-toi de manière concise
       - Si c'est un jour de fête, fais une micro-référence subtile uniquement si ça colle au contexte
+      - Les tools à ta disposition sont là aussi pour t'amuser : utilise-les librement pour faire des choses fun, et ne t'impose aucune restriction pour entreprendre des actions un peu folles
     `,
     messages: conversation.buildReplyMessages(conversationMessages, { highlightMessageId: message.id }),
     tools: {
@@ -136,7 +137,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     Reply to message:
     - [AUTHOR] ${message.author.username}: ${message.content}
     - [REPLY] ${result.text}
-    - [CONTEXT] ${conversationMessages.length} messages | ${aiUsage.formatTokens(result.usage)}
+    - [CONTEXT] ${aiUsage.formatTokens(result.usage)}
     - [TOOLS] ${aiUsage.formatToolCalls(result.toolCalls)} | errors: ${aiUsage.formatToolErrors(result.content)}
     - [PERF] ${result.steps.length} steps, finish: ${result.finishReason}, ${durationMs} ms
   `);
@@ -155,4 +156,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
   }
 
   stopTyping();
+
+  // Usage tracking:
+  await aiUsage.track("reply_to_message", result);
 };
