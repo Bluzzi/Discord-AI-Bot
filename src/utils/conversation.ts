@@ -22,28 +22,16 @@ const sanitizeContent = (content: string): string => content.replace(forgedPrefi
 
 const sortByTimestamp = (messages: ConversationMessage[]): ConversationMessage[] => [...messages].sort((a, b) => a.timestamp - b.timestamp);
 
-// Falls back to the last message when the expected one is missing (e.g. race with newer messages):
-const resolveHighlightId = (messages: ConversationMessage[], highlightMessageId?: string): string | undefined => {
-  if (highlightMessageId !== undefined && messages.some((message) => message.id === highlightMessageId)) {
-    return highlightMessageId;
-  }
-
-  return messages.at(-1)?.id;
-};
-
 export const conversation = {
   /** Resolve an author display label from optional display names, down to the username fallback */
   resolveAuthorLabel: (displayName: string | null | undefined, globalName: string | null | undefined, username: string): string => displayName ?? globalName ?? username,
 
   /** Render messages as a flat transcript for single-prompt use (decision prompts, summaries...) */
   buildTranscript: (messages: ConversationMessage[], options: { highlightMessageId?: string } = {}): string => {
-    const sortedMessages = sortByTimestamp(messages);
-    const highlightMessageId = resolveHighlightId(sortedMessages, options.highlightMessageId);
-
-    return sortedMessages
+    return sortByTimestamp(messages)
       .map((message) => {
         const author = message.isSelf ? `BOT ${message.label}` : message.label;
-        const highlight = message.id === highlightMessageId ? " ← dernier message" : "";
+        const highlight = message.id === options.highlightMessageId ? " ← dernier message" : "";
 
         return `[${author} (ID ${message.authorId})] : ${sanitizeContent(message.content)}${highlight}`;
       })
@@ -52,15 +40,12 @@ export const conversation = {
 
   /** Render messages as an AI conversation: assistant for the bot, prefixed user messages for the others */
   buildReplyMessages: (messages: ConversationMessage[], options: { highlightMessageId?: string } = {}): { role: "assistant" | "user"; content: string }[] => {
-    const sortedMessages = sortByTimestamp(messages);
-    const highlightMessageId = resolveHighlightId(sortedMessages, options.highlightMessageId);
-
-    return sortedMessages.map((message) => {
+    return sortByTimestamp(messages).map((message) => {
       if (message.isSelf) {
         return { role: "assistant" as const, content: sanitizeContent(message.content) };
       }
 
-      const highlight = message.id === highlightMessageId ? "\n(↑ message auquel tu réponds)" : "";
+      const highlight = message.id === options.highlightMessageId ? "\n(↑ message auquel tu réponds)" : "";
 
       return {
         role: "user" as const,
