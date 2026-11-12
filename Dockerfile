@@ -1,8 +1,8 @@
-FROM node:24-alpine
+FROM node:26-alpine
 WORKDIR /app
 
-# Enable PNPM:
-RUN corepack enable
+# Install PNPM:
+RUN npm install -g pnpm
 
 # Install dependencies:
 COPY ./package.json ./pnpm-lock.yaml ./
