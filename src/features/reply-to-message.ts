@@ -3,6 +3,7 @@ import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
 import { DISCORD_MAX_MESSAGE_LENGTH } from "#/services/discord";
 import { discordTools } from "#/tools/discord";
+import { featureRequestTools } from "#/tools/feature-request";
 import { githubTools } from "#/tools/github";
 import { holidaysTools } from "#/tools/holidays";
 import { imageTools } from "#/tools/image";
@@ -118,6 +119,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     messages: conversation.buildReplyMessages(conversationMessages, { highlightMessageId: message.id }),
     tools: {
       ...discordTools,
+      ...featureRequestTools,
       ...memoryTools,
       ...githubTools,
       ...holidaysTools,

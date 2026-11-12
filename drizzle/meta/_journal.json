@@ -43,6 +43,13 @@
       "when": 1794485737362,
       "tag": "0005_good_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794488789537,
+      "tag": "0006_burly_trish_tilby",
+      "breakpoints": true
     }
   ]
 }
