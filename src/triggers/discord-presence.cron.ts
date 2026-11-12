@@ -26,8 +26,8 @@ await trigger.cron(
       stopWhen: stepCountIs(5),
       output: Output.object({
         schema: z.object({
-          emoji: z.string().describe("Un seul emoji unicode pertinent"),
-          text: z.string().describe("Le texte du status sans emoji (40 caractères maximum)"),
+          emoji: z.string().trim().min(1).describe("Un seul emoji unicode pertinent, jamais vide"),
+          text: z.string().trim().min(1).max(120).describe("Le texte du status sans emoji (40 caractères maximum), jamais vide"),
         }),
       }),
       prompt: dedent`
