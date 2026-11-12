@@ -68,7 +68,7 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
   // Ask IA for reply:
   const result = await generateText({
-    model: aiModel,
+    model: aiModel.large,
     stopWhen: stepCountIs(20),
     instructions: dedent`
       Tu es ${env.DISCORD_BOT_NAME} (${env.DISCORD_BOT_ALIASES.map((alias) => `"${alias}"`).join(", ")}), un bot Discord décontracté et drôle, avec un ego développé : tu ne supportes pas les moqueries ni le manque de respect.

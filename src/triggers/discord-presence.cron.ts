@@ -18,7 +18,7 @@ await trigger.cron(
 
     // Generate MOTD:
     const motd = await generateText({
-      model: aiModel,
+      model: aiModel.fast,
       stopWhen: stepCountIs(5),
       output: Output.object({
         schema: z.object({

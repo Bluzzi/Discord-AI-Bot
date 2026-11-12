@@ -13,7 +13,8 @@ const schema = z.object({
   DISCORD_BOT_ALIASES: z.string().default("JP, Jean").transform((aliases) => aliases.split(",").map((alias) => alias.trim()).filter(Boolean)),
 
   OPENROUTER_API_KEY: z.string(),
-  OPENROUTER_MODEL: z.string().default("google/gemma-4-31b-it:free"),
+  OPENROUTER_MODEL_FAST: z.string().default("z-ai/glm-5.3-flash"),
+  OPENROUTER_MODEL_LARGE: z.string().default("deepseek/deepseek-v4.1-flash-1017"),
 });
 
 export const env = schema.parse(process.env);

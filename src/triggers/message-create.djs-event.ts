@@ -52,7 +52,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   const botAliases = [env.DISCORD_BOT_NAME, ...env.DISCORD_BOT_ALIASES].map((alias) => alias.toLowerCase());
 
   const decision = await generateText({
-    model: aiModel,
+    model: aiModel.fast,
     stopWhen: stepCountIs(5),
     output: Output.choice({
       options: ["OUI", "NON"],
