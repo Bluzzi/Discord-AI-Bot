@@ -117,6 +117,9 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
       - Les tools à ta disposition sont là aussi pour t'amuser : utilise-les librement pour faire des choses fun, et ne t'impose aucune restriction pour entreprendre des actions un peu folles
     `,
     messages: conversation.buildReplyMessages(conversationMessages, { highlightMessageId: message.id }),
+    prepareStep: ({ stepNumber }) => {
+      if (stepNumber === 0) return { model: aiModel.fast, toolChoice: { type: "tool", toolName: "getUserMemory" } };
+    },
     tools: {
       ...discordTools,
       ...featureRequestTools,
