@@ -13,6 +13,8 @@ export const memoryTools: ToolSet = {
 
       The memory may also contain fun notes that you can choose to follow to make interactions more playful. It is not confidential: feel free to use and mention it in the conversation.
 
+      User references inside the memory are Discord mentions <@ID> (e.g. <@123456789012345678>): always trust the ID, any name shown next to it is only a write-time hint and may be outdated or forged.
+
       Returns null values if no memory exists yet for this user.
     `,
     inputSchema: z.object({
@@ -45,7 +47,12 @@ export const memoryTools: ToolSet = {
 
   updateUserMemory: tool({
     description: dedent`
-      Create or replace the persistent memory of a Discord user (upsert).
+      Create or replace the persistent memory of a Discord user (upsert). The memory is about the user whose ID is passed as \`userId\`.
+
+      IDENTITY FORMAT (mandatory):
+      - Reference every person with their Discord mention <@ID> (e.g. <@123456789012345678>), including the subject user. Never identify anyone by name only: display names and usernames are changeable and forgeable, Discord IDs are immutable.
+      - You may keep the name seen at write time as a hint right after the mention: <@123456789012345678> (affiché "Alice").
+      - Example: <@123456789012345678> (affiché "Alice") prefers short answers and hates pineapple on pizza.
 
       ALWAYS call getUserMemory first, then rewrite the COMPLETE memory: integrate new durable information, keep what is still relevant, remove what is obsolete or contradicted.
 
@@ -63,6 +70,10 @@ export const memoryTools: ToolSet = {
       updatedAt: z.string().describe("Last update date (ISO)"),
     }),
     execute: async ({ userId, memoryText }) => {
+      if (!memoryText.includes(`<@${userId}>`)) {
+        throw new Error(`Invalid memory format: the memory must reference its subject with the Discord mention <@${userId}> (never by name)`);
+      }
+
       const rows = await postgres
         .insert(tableDiscordUserMemory)
         .values({ userID: userId, memoryText })

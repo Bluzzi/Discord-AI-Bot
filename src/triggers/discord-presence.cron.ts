@@ -3,6 +3,7 @@ import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
 import { aiModel } from "#/utils/ai-model";
 import { day } from "#/utils/day";
+import { env } from "#/utils/env";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
@@ -26,7 +27,7 @@ await trigger.cron(
         }),
       }),
       prompt: dedent`
-      Tu es le générateur de status Discord de **Jean Pascal**, un bot Discord **drôle, décontracté et légèrement problématique**.
+      Tu es le générateur de status Discord de **${env.DISCORD_BOT_NAME}**, un bot Discord **drôle, décontracté et légèrement problématique**.
 
       ## Contexte
       - Date et heure actuelle : ${day().format("DD/MM/YYYY [à] HH[h]mm")}
