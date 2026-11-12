@@ -3,6 +3,7 @@ import { replyToMessage } from "#/features/reply-to-message";
 import { discordClient } from "#/services/discord";
 import { memoryTools } from "#/tools/memory";
 import { aiModel } from "#/utils/ai-model";
+import { aiUsage } from "#/utils/ai-usage";
 import { conversation } from "#/utils/conversation";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
@@ -51,6 +52,8 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   const botAliases = [env.DISCORD_BOT_NAME, ...env.DISCORD_BOT_ALIASES].map((alias) => alias.toLowerCase());
 
+  const startedAt = Date.now();
+
   const decision = await generateText({
     model: aiModel.fast,
     stopWhen: stepCountIs(5),
@@ -94,8 +97,19 @@ trigger.discordEvent("messageCreate", async (message) => {
     },
   });
 
+  // Usage stats:
+  const durationMs = Date.now() - startedAt;
+
+  logger.info(dedent`
+    AI decision:
+    - [AUTHOR] ${message.author.displayName}: ${message.content}
+    - [DECISION] ${decision.output} (${decision.output === "OUI" ? "replying" : "ignoring"})
+    - [CONTEXT] ${aiUsage.formatTokens(decision.usage)}
+    - [TOOLS] ${aiUsage.formatToolCalls(decision.toolCalls)} | errors: ${aiUsage.formatToolErrors(decision.content)}
+    - [PERF] ${decision.steps.length} steps, finish: ${decision.finishReason}, ${durationMs} ms
+  `);
+
   if (decision.output === "OUI") {
-    logger.info(`Reply to ${message.author.displayName} based on AI decision`);
     await replyToMessage(message);
   }
 });

@@ -2,8 +2,10 @@ import { discordClient } from "#/services/discord";
 import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
 import { aiModel } from "#/utils/ai-model";
+import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
+import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
@@ -17,6 +19,8 @@ await trigger.cron(
     if (!discordClient.user) throw new Error("Discord bot user is not available");
 
     // Generate MOTD:
+    const startedAt = Date.now();
+
     const motd = await generateText({
       model: aiModel.fast,
       stopWhen: stepCountIs(5),
@@ -63,6 +67,17 @@ await trigger.cron(
         ...holidaysTools,
       },
     });
+
+    // Usage stats:
+    const durationMs = Date.now() - startedAt;
+
+    logger.info(dedent`
+      Discord presence:
+      - [STATUS] ${motd.output.emoji} ${motd.output.text}
+      - [CONTEXT] ${aiUsage.formatTokens(motd.usage)}
+      - [TOOLS] ${aiUsage.formatToolCalls(motd.toolCalls)} | errors: ${aiUsage.formatToolErrors(motd.content)}
+      - [PERF] ${motd.steps.length} steps, finish: ${motd.finishReason}, ${durationMs} ms
+    `);
 
     // Update Discord presence:
     discordClient.user.setPresence({

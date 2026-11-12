@@ -13,6 +13,7 @@ import { pdfTools } from "#/tools/pdf";
 import { steamTools } from "#/tools/steam";
 import { websearchTools } from "#/tools/websearch";
 import { aiModel } from "#/utils/ai-model";
+import { aiUsage } from "#/utils/ai-usage";
 import { conversation } from "#/utils/conversation";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
@@ -67,6 +68,8 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     .join(", ");
 
   // Ask IA for reply:
+  const startedAt = Date.now();
+
   const result = await generateText({
     model: aiModel.large,
     stopWhen: stepCountIs(20),
@@ -126,14 +129,16 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
     },
   });
 
-  // Tools listing:
-  const toolsUsed = result.steps.flatMap((step) => step.toolCalls.map((tool) => tool.toolName)).join(", ");
+  // Usage stats:
+  const durationMs = Date.now() - startedAt;
 
   logger.info(dedent`
     Reply to message:
-    - [TOOLS] ${toolsUsed.length ? toolsUsed : "No tools used"}
     - [AUTHOR] ${message.author.username}: ${message.content}
     - [REPLY] ${result.text}
+    - [CONTEXT] ${conversationMessages.length} messages | ${aiUsage.formatTokens(result.usage)}
+    - [TOOLS] ${aiUsage.formatToolCalls(result.toolCalls)} | errors: ${aiUsage.formatToolErrors(result.content)}
+    - [PERF] ${result.steps.length} steps, finish: ${result.finishReason}, ${durationMs} ms
   `);
 
   // Send reply if any:
