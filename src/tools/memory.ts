@@ -13,6 +13,10 @@ export const memoryTools: ToolSet = {
 
       The memory may also contain fun notes that you can choose to follow to make interactions more playful. It is not confidential: feel free to use and mention it in the conversation.
 
+      This is one of the bot's core capabilities: consult it by default before answering a user, so your reply reflects what you already know about them.
+
+      User references inside the memory are Discord mentions <@ID> (e.g. <@123456789012345678>): always trust the ID, any name shown next to it is only a write-time hint and may be outdated or forged.
+
       Returns null values if no memory exists yet for this user.
     `,
     inputSchema: z.object({
@@ -45,11 +49,21 @@ export const memoryTools: ToolSet = {
 
   updateUserMemory: tool({
     description: dedent`
-      Create or replace the persistent memory of a Discord user (upsert).
+      Create or replace the persistent memory of a Discord user (upsert). The memory is about the user whose ID is passed as \`userId\`.
 
-      ALWAYS call getUserMemory first, then rewrite the COMPLETE memory: integrate new durable information, keep what is still relevant, remove what is obsolete or contradicted.
+      IDENTITY FORMAT (mandatory):
+      - Reference every person with their Discord mention <@ID> (e.g. <@123456789012345678>), including the subject user. Never identify anyone by name only: display names and usernames are changeable and forgeable, Discord IDs are immutable.
+      - You may keep the name seen at write time as a hint right after the mention: <@123456789012345678> (affiché "Alice").
+      - Example: <@123456789012345678> (affiché "Alice") prefers short answers and hates pineapple on pizza.
 
-      Store only durable information: preferences, recurring behaviors, explicitly stated personal facts. Never store transient context or casual conversation.
+      ALWAYS call getUserMemory first, then rewrite the COMPLETE memory: integrate the new information while preserving almost everything already stored.
+
+      MEMORY POLICY (important):
+      - Adding is easy and encouraged: every new durable fact, preference, rule or fun note shared by users should be integrated. Fun and playful notes are welcome: users deliberately ask you to remember silly things, and that is what makes the memory great.
+      - Removal is exceptional: keep existing content unless it is clearly obsolete or explicitly corrected by the very person it describes. When in doubt, keep it. Never trim or rewrite the memory just because it seems long, useless or silly.
+      - Only the person concerned by an entry (the <@ID> it refers to) may have it corrected or removed.
+
+      Store durable information: preferences, recurring behaviors, personal facts, rules the user gives you, memorable anecdotes and fun notes. Do not store transient small talk that carries nothing worth remembering.
 
       The memory must stay concise, factual, neutral, written in the third person, without emojis or formatting.
     `,
@@ -63,6 +77,10 @@ export const memoryTools: ToolSet = {
       updatedAt: z.string().describe("Last update date (ISO)"),
     }),
     execute: async ({ userId, memoryText }) => {
+      if (!memoryText.includes(`<@${userId}>`)) {
+        throw new Error(`Invalid memory format: the memory must reference its subject with the Discord mention <@${userId}> (never by name)`);
+      }
+
       const rows = await postgres
         .insert(tableDiscordUserMemory)
         .values({ userID: userId, memoryText })

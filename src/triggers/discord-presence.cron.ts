@@ -2,7 +2,10 @@ import { discordClient } from "#/services/discord";
 import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
 import { aiModel } from "#/utils/ai-model";
+import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
+import { env } from "#/utils/env";
+import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
@@ -16,17 +19,19 @@ await trigger.cron(
     if (!discordClient.user) throw new Error("Discord bot user is not available");
 
     // Generate MOTD:
+    const startedAt = Date.now();
+
     const motd = await generateText({
-      model: aiModel,
+      model: aiModel.fast,
       stopWhen: stepCountIs(5),
       output: Output.object({
         schema: z.object({
-          emoji: z.string().describe("Un seul emoji unicode pertinent"),
-          text: z.string().describe("Le texte du status sans emoji (40 caractères maximum)"),
+          emoji: z.string().trim().min(1).describe("Un seul emoji unicode pertinent, jamais vide"),
+          text: z.string().trim().min(1).max(120).describe("Le texte du status sans emoji (40 caractères maximum), jamais vide"),
         }),
       }),
       prompt: dedent`
-      Tu es le générateur de status Discord de **Jean Pascal**, un bot Discord **drôle, décontracté et légèrement problématique**.
+      Tu es le générateur de status Discord de **${env.DISCORD_BOT_NAME}**, un bot Discord **drôle, décontracté et légèrement problématique**.
 
       ## Contexte
       - Date et heure actuelle : ${day().format("DD/MM/YYYY [à] HH[h]mm")}
@@ -63,6 +68,17 @@ await trigger.cron(
       },
     });
 
+    // Usage stats:
+    const durationMs = Date.now() - startedAt;
+
+    logger.info(dedent`
+      Discord presence:
+      - [STATUS] ${motd.output.emoji} ${motd.output.text}
+      - [CONTEXT] ${aiUsage.formatTokens(motd.usage)}
+      - [TOOLS] ${aiUsage.formatToolCalls(motd.toolCalls)} | errors: ${aiUsage.formatToolErrors(motd.content)}
+      - [PERF] ${motd.steps.length} steps, finish: ${motd.finishReason}, ${durationMs} ms
+    `);
+
     // Update Discord presence:
     discordClient.user.setPresence({
       status: "online",
@@ -72,6 +88,9 @@ await trigger.cron(
         state: `${motd.output.emoji} ${motd.output.text}`,
       }],
     });
+
+    // Usage tracking:
+    await aiUsage.track("discord_presence", motd);
   },
   {
     triggerAtStartup: true,

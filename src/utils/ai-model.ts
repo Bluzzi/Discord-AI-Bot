@@ -6,5 +6,8 @@ const openRouter = createOpenRouter({
   apiKey: env.OPENROUTER_API_KEY,
 });
 
-// Export model:
-export const aiModel = openRouter(env.OPENROUTER_MODEL);
+// Export models:
+export const aiModel = {
+  fast: openRouter(env.OPENROUTER_MODEL_FAST),
+  large: openRouter(env.OPENROUTER_MODEL_LARGE),
+};

@@ -13,6 +13,7 @@ export const discordClient = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildScheduledEvents,
   ],
   partials: [
     Partials.Channel,
