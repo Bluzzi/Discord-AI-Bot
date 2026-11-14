@@ -28,9 +28,7 @@ const cron = async (
   fn: () => Promise<void> | void,
   options: { triggerAtStartup: boolean },
 ) => {
-  const job = new Cron(cronPattern, () => {
-    void fn();
-  }, {
+  const job = new Cron(cronPattern, async () => fn(), {
     catch: (error) => {
       logger.error(
         `Cron \`${cronName}\` error:`,
