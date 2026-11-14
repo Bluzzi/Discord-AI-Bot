@@ -1,4 +1,5 @@
 import { logger } from "#/utils/logger";
+import { existsSync } from "node:fs";
 import puppeteer from "puppeteer";
 
 export type HtmlToPdfMargin = {
@@ -23,9 +24,39 @@ const IMAGES_READY_SCRIPT = "Array.from(document.querySelectorAll('img')).every(
 
 const DEFAULT_MARGIN = "10mm";
 
+// System browser locations, checked when Puppeteer's environment variable is missing or invalid (e.g. in Docker images built from an older configuration):
+const SYSTEM_BROWSER_PATHS = [
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
+  "/usr/bin/google-chrome",
+] as const;
+
+// Resolve the browser executable to launch: prefer Puppeteer's environment variable, then system-installed browsers on Linux.
+// Returning undefined lets Puppeteer use its own downloaded Chrome (dev environments):
+const resolveBrowserExecutablePath = (): string | undefined => {
+  const fromEnvironment = process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  if (fromEnvironment !== undefined && existsSync(fromEnvironment)) {
+    return fromEnvironment;
+  }
+
+  if (process.platform !== "linux") {
+    return undefined;
+  }
+
+  const systemPath = SYSTEM_BROWSER_PATHS.find((candidatePath) => existsSync(candidatePath));
+
+  if (systemPath === undefined) {
+    throw new Error("No Chrome or Chromium executable found on this system: install Chromium or set PUPPETEER_EXECUTABLE_PATH");
+  }
+
+  return systemPath;
+};
+
 export const renderHtmlToPdf = async (html: string, options: HtmlToPdfOptions = {}): Promise<Buffer> => {
   const browser = await puppeteer.launch({
     headless: true,
+    executablePath: resolveBrowserExecutablePath(),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
