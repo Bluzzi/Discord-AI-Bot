@@ -9,7 +9,7 @@ Each file MUST:
 Expected structure:
 
 ```ts
-export const discordTools: ToolSet = {
+export const discordTools = {
   renameMember: tool({
     description: "Rename a guild member",
     inputSchema: z.object({
@@ -40,8 +40,10 @@ export const discordTools: ToolSet = {
     },
   }),
   // ... other tools for this service
-};
+} satisfies ToolSet;
 ```
+
+The toolset MUST be typed with `satisfies ToolSet` instead of a `: ToolSet` annotation. The annotation erases the types inferred from `inputSchema`, `outputSchema` and `contextSchema`, which breaks typed tool inputs at call sites and disables `toolsContext` inference in AI generation calls (AI SDK v7).
 
 If `outputSchema` has no meaningful data to return, it MUST be defined as an empty object:
 

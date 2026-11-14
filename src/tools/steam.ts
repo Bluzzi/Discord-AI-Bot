@@ -6,7 +6,7 @@ import { z } from "zod";
 
 const steamIdSchema = z.string().regex(/^\d{17}$/u, "Expected a 64-bit Steam ID (17 digits)").describe("The 64-bit Steam ID of the user (17 digits)");
 
-export const steamTools: ToolSet = {
+export const steamTools = {
   resolveSteamUsername: tool({
     description: "Convert a Steam username (vanity URL) to a 64-bit Steam ID. Use this first when you only have a username or profile URL.",
     inputSchema: z.object({
@@ -264,4 +264,4 @@ export const steamTools: ToolSet = {
       };
     },
   }),
-};
+} satisfies ToolSet;

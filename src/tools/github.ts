@@ -3,7 +3,7 @@ import { githubFetch } from "#/utils/github-api";
 import { tool } from "ai";
 import { z } from "zod";
 
-export const githubTools: ToolSet = {
+export const githubTools = {
   getUserProfile: tool({
     description: "Get a GitHub user profile: bio, company, location, follower counts and public repo stats. Present the profile as a Discord embed via sendEmbed (thumbnail: the user's avatarUrl), with human-readable dates, never raw JSON.",
     inputSchema: z.object({
@@ -327,4 +327,4 @@ export const githubTools: ToolSet = {
       };
     },
   }),
-};
+} satisfies ToolSet;

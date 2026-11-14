@@ -4,7 +4,7 @@ import { renderHtmlToPdf } from "#/utils/html-to-pdf";
 import { tool } from "ai";
 import { z } from "zod";
 
-export const pdfTools: ToolSet = {
+export const pdfTools = {
   generatePdf: tool({
     description: "Render a complete HTML document to a PDF file and upload it to a Discord channel. The HTML must be a full document (DOCTYPE, <head> with embedded CSS, <body>) and images must use absolute URLs (fetch them with searchImage first). After uploading, reply only that the PDF is available as an attachment. Never invent technical problems and never propose an alternative.",
     inputSchema: z.object({
@@ -53,4 +53,4 @@ export const pdfTools: ToolSet = {
       };
     },
   }),
-};
+} satisfies ToolSet;

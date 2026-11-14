@@ -2,7 +2,7 @@ import type { ToolSet } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 
-export const holidaysTools: ToolSet = {
+export const holidaysTools = {
   getPublicHolidays: tool({
     description: "Get the French public holidays (métropole) of the current year with their dates.",
     inputSchema: z.object({}),
@@ -98,4 +98,4 @@ export const holidaysTools: ToolSet = {
         .sort((a, b) => a.date.localeCompare(b.date));
     },
   }),
-};
+} satisfies ToolSet;

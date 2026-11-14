@@ -3,7 +3,7 @@ import { webSearch } from "#/utils/web-search";
 import { tool } from "ai";
 import { z } from "zod";
 
-export const websearchTools: ToolSet = {
+export const websearchTools = {
   searchInternet: tool({
     description: "Search the internet for current information (DuckDuckGo). Returns page titles, descriptions and URLs.",
     inputSchema: z.object({
@@ -24,4 +24,4 @@ export const websearchTools: ToolSet = {
       return results;
     },
   }),
-};
+} satisfies ToolSet;
