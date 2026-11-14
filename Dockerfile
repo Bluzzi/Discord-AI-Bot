@@ -1,6 +1,13 @@
 FROM node:26-alpine
 WORKDIR /app
 
+# Install Chromium for Puppeteer:
+RUN apk add --no-cache chromium
+
+# Puppeteer must use the system Chromium: its own Chrome download is a glibc build that cannot run on Alpine:
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
 # Install PNPM:
 RUN npm install -g pnpm
 
