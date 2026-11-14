@@ -93,7 +93,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       Le bot doit-il répondre au dernier message (marqué "← dernier message") ?
     `,
     tools: {
-      ...memoryTools,
+      getUserMemory: memoryTools.getUserMemory,
     },
   });
 

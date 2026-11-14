@@ -2,7 +2,7 @@ import type { ToolSet } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 
-export const imageTools: ToolSet = {
+export const imageTools = {
   searchImage: tool({
     description: "Search for images on the web (Brave Image Search). Add \"PNG transparent\" to the query for logos and icons without background. When the request is to find or send an image, reply with the image URL only, without any text before or after.",
     inputSchema: z.object({
@@ -72,4 +72,4 @@ export const imageTools: ToolSet = {
       }));
     },
   }),
-};
+} satisfies ToolSet;

@@ -8,7 +8,7 @@ import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, G
 import { Readable } from "node:stream";
 import { z } from "zod";
 
-export const discordTools: ToolSet = {
+export const discordTools = {
   // Guilds:
 
   getGuildInfo: tool({
@@ -1756,4 +1756,4 @@ export const discordTools: ToolSet = {
       };
     },
   }),
-};
+} satisfies ToolSet;

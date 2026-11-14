@@ -5,7 +5,7 @@ import { tool } from "ai";
 import dedent from "dedent";
 import { z } from "zod";
 
-export const newsTools: ToolSet = {
+export const newsTools = {
   getNews: tool({
     description: dedent`
       Get the latest news from a curated RSS feed, optionally filtered by keywords.
@@ -49,4 +49,4 @@ export const newsTools: ToolSet = {
       }));
     },
   }),
-};
+} satisfies ToolSet;

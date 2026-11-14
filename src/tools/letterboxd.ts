@@ -12,7 +12,7 @@ const letterboxdReviewSchema = z.object({
   creator: z.string().describe("Reviewer username"),
 });
 
-export const letterboxdTools: ToolSet = {
+export const letterboxdTools = {
   getLatestLetterboxdReview: tool({
     description: "Get the latest review or diary entry from a Letterboxd user's RSS feed.",
     inputSchema: z.object({
@@ -93,4 +93,4 @@ export const letterboxdTools: ToolSet = {
       };
     },
   }),
-};
+} satisfies ToolSet;
