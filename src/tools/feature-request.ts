@@ -6,7 +6,8 @@ import dedent from "dedent";
 import { asc, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
-export const featureRequestTools: ToolSet = {
+// ToolSet is applied via "satisfies": a ": ToolSet" annotation would erase the inferred schema types (input, output, context) and break toolsContext inference at call sites:
+export const featureRequestTools = {
   createFeatureRequest: tool({
     description: dedent`
       Create a new feature request: a suggestion from a user to improve the bot (new capability, behavior change, idea).
@@ -19,11 +20,14 @@ export const featureRequestTools: ToolSet = {
       Returns the created request with its ID: share this ID with the user so they can refer to it later.
 
       The author is automatically the first upvoter of their own request: never call upvoteFeatureRequest for them right after creation.
+      The author is always the actual author of the current message, bound server-side: there is no way to create a request on behalf of someone else.
     `,
     inputSchema: z.object({
-      userId: z.string().describe("Discord user ID of the feature request author"),
       title: z.string().min(1).max(100).describe("Short, clear summary of the requested feature"),
       description: z.string().min(1).max(2000).optional().describe("Optional details: motivation, expected behavior, examples"),
+    }),
+    contextSchema: z.object({
+      authorId: z.string().describe("Discord user ID of the actual author of the current request, bound server-side and never chosen by the AI"),
     }),
     outputSchema: z.object({
       id: z.number().describe("Feature request ID"),
@@ -33,7 +37,8 @@ export const featureRequestTools: ToolSet = {
       upvoteCount: z.number().describe("Upvote count right after creation (the author is automatically the first upvoter)"),
       createdAt: z.string().describe("Creation date (ISO)"),
     }),
-    execute: async ({ userId, title, description }) => {
+    execute: async ({ title, description }, { context }) => {
+      const userId = context.authorId;
       const row = await postgres.transaction(async (tx) => {
         const rows = await tx
           .insert(tableFeatureRequest)
@@ -130,16 +135,21 @@ export const featureRequestTools: ToolSet = {
       Each user can upvote a given request at most once: attempting again fails, no way to cancel an upvote.
 
       Fails if the request does not exist, is closed, or was already upvoted by this user.
+
+      The upvoter is always the actual author of the current message, bound server-side: there is no way to upvote on behalf of someone else.
     `,
     inputSchema: z.object({
       featureRequestId: z.number().describe("ID of the feature request to upvote"),
-      userId: z.string().describe("Discord user ID of the upvoting user"),
+    }),
+    contextSchema: z.object({
+      authorId: z.string().describe("Discord user ID of the actual author of the current request, bound server-side and never chosen by the AI"),
     }),
     outputSchema: z.object({
       featureRequestId: z.number().describe("Feature request ID"),
       upvoteCount: z.number().describe("Total number of upvotes on this request after the upvote"),
     }),
-    execute: async ({ featureRequestId, userId }) => {
+    execute: async ({ featureRequestId }, { context }) => {
+      const userId = context.authorId;
       const requestRows = await postgres
         .select()
         .from(tableFeatureRequest)
@@ -220,36 +230,4 @@ export const featureRequestTools: ToolSet = {
       };
     },
   }),
-
-  closeFeatureRequest: tool({
-    description: dedent`
-      Close a feature request by ID: use it when the requested feature has been implemented, or when it has been declined for a good reason.
-
-      Once closed, a request no longer appears in listFeatureRequests and can no longer be upvoted.
-    `,
-    inputSchema: z.object({
-      featureRequestId: z.number().describe("ID of the feature request to close"),
-    }),
-    outputSchema: z.object({
-      featureRequestId: z.number().describe("Feature request ID"),
-      status: z.enum(["open", "closed"]).describe("New status"),
-    }),
-    execute: async ({ featureRequestId }) => {
-      const rows = await postgres
-        .update(tableFeatureRequest)
-        .set({ status: "closed" })
-        .where(eq(tableFeatureRequest.id, featureRequestId))
-        .returning();
-
-      const row = rows[0];
-      if (!row) {
-        throw new Error(`Feature request not found: ${String(featureRequestId)}`);
-      }
-
-      return {
-        featureRequestId: row.id,
-        status: row.status,
-      };
-    },
-  }),
-};
+} satisfies ToolSet;

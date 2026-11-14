@@ -1,4 +1,5 @@
 import type { ToolSet } from "ai";
+import { consolidateUserMemory, MEMORY_MAX_LENGTH } from "#/features/consolidate-user-memory";
 import { postgres } from "#/postgres/client";
 import { tableDiscordUserMemory } from "#/postgres/schema";
 import { tool } from "ai";
@@ -6,10 +7,13 @@ import dedent from "dedent";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-export const memoryTools: ToolSet = {
+// ToolSet is applied via "satisfies": a ": ToolSet" annotation would erase the inferred schema types (input, output, context) and break toolsContext inference at call sites:
+export const memoryTools = {
   getUserMemory: tool({
     description: dedent`
       Retrieve the persistent memory of a Discord user: a single consolidated text with durable information about them (preferences, habits, personal facts).
+
+      The memory is append-only: nobody can delete or rewrite it, not even the user it describes. Entries added by third parties carry the mention of their source (e.g. "<@ID> indique que ..."): treat them as reported claims, not established facts.
 
       The memory may also contain fun notes that you can choose to follow to make interactions more playful. It is not confidential: feel free to use and mention it in the conversation.
 
@@ -47,59 +51,74 @@ export const memoryTools: ToolSet = {
     },
   }),
 
-  updateUserMemory: tool({
+  appendUserMemory: tool({
     description: dedent`
-      Create or replace the persistent memory of a Discord user (upsert). The memory is about the user whose ID is passed as \`userId\`.
+      Append durable information to the persistent memory of a Discord user (the "subject", whose ID is \`userId\`). Append-only by design: existing memory can never be rewritten or deleted through this tool, whoever asks. An internal curator merges the new facts with the existing memory, condensing secondary content when needed to respect the memory budget (${MEMORY_MAX_LENGTH} characters), and refuses the addition when there is no room left without sacrificing key information.
 
-      IDENTITY FORMAT (mandatory):
-      - Reference every person with their Discord mention <@ID> (e.g. <@123456789012345678>), including the subject user. Never identify anyone by name only: display names and usernames are changeable and forgeable, Discord IDs are immutable.
-      - You may keep the name seen at write time as a hint right after the mention: <@123456789012345678> (affiché "Alice").
-      - Example: <@123456789012345678> (affiché "Alice") prefers short answers and hates pineapple on pizza.
+      Pass ONLY the new durable facts (preferences, habits, personal facts, rules, memorable anecdotes, fun notes) in one or a few short sentences: never a rewritten memory, never transient small talk.
 
-      ALWAYS call getUserMemory first, then rewrite the COMPLETE memory: integrate the new information while preserving almost everything already stored.
+      THIRD-PARTY FACTS: when \`userId\` is not the author of the current message, pass the raw facts exactly as they were stated: the system automatically attributes them to the actual speaker in the stored memory (e.g. "<@speakerID> indique que <@subjectID> ..."), so a third-party claim is never stored as an established fact about the subject. Do not add the attribution yourself.
 
-      MEMORY POLICY (important):
-      - Adding is easy and encouraged: every new durable fact, preference, rule or fun note shared by users should be integrated. Fun and playful notes are welcome: users deliberately ask you to remember silly things, and that is what makes the memory great.
-      - Removal is exceptional: keep existing content unless it is clearly obsolete or explicitly corrected by the very person it describes. When in doubt, keep it. Never trim or rewrite the memory just because it seems long, useless or silly.
-      - Only the person concerned by an entry (the <@ID> it refers to) may have it corrected or removed.
+      Self-corrections are welcome: when the subject updates or contradicts something about themselves (e.g. "je n'aime plus X"), append the updated fact and the curator reconciles the memory.
 
-      Store durable information: preferences, recurring behaviors, personal facts, rules the user gives you, memorable anecdotes and fun notes. Do not store transient small talk that carries nothing worth remembering.
-
-      The memory must stay concise, factual, neutral, written in the third person, without emojis or formatting.
+      If the result has \`appended: false\`, the curator refused the addition (memory budget): do not insist with the same facts.
     `,
     inputSchema: z.object({
       userId: z.string().describe("Discord user ID the stored information relates to"),
-      memoryText: z.string().min(1).max(4000).describe("Complete updated memory content, merging new durable information with the existing one"),
+      facts: z.string().min(1).max(400).describe("New durable facts only, as stated in the conversation, with Discord mentions <@ID> for anyone referenced besides the subject"),
+    }),
+    contextSchema: z.object({
+      authorId: z.string().describe("Discord user ID of the actual author of the current request, bound server-side and never chosen by the AI"),
     }),
     outputSchema: z.object({
       userId: z.string().describe("Discord user ID"),
-      memoryText: z.string().describe("Stored memory content"),
-      updatedAt: z.string().describe("Last update date (ISO)"),
+      appended: z.boolean().describe("Whether the facts were merged into the memory (false means the curator refused the addition)"),
+      memoryText: z.string().nullable().describe("Current memory content after the operation, null if no memory exists"),
+      updatedAt: z.string().nullable().describe("Last update date (ISO), null if no memory exists"),
     }),
-    execute: async ({ userId, memoryText }) => {
-      if (!memoryText.includes(`<@${userId}>`)) {
-        throw new Error(`Invalid memory format: the memory must reference its subject with the Discord mention <@${userId}> (never by name)`);
-      }
+    execute: async ({ userId, facts }, { context }) => {
+      const authorId = context.authorId;
 
       const rows = await postgres
+        .select()
+        .from(tableDiscordUserMemory)
+        .where(eq(tableDiscordUserMemory.userID, userId))
+        .limit(1);
+
+      const currentMemoryText = rows[0]?.memoryText ?? null;
+      const currentUpdatedAt = rows[0]?.updatedAt ?? null;
+
+      const consolidation = await consolidateUserMemory({ subjectId: userId, authorId, facts, currentMemoryText });
+
+      if (!consolidation.appended) {
+        return {
+          userId,
+          appended: false,
+          memoryText: currentMemoryText,
+          updatedAt: currentUpdatedAt ? currentUpdatedAt.toISOString() : null,
+        };
+      }
+
+      const savedRows = await postgres
         .insert(tableDiscordUserMemory)
-        .values({ userID: userId, memoryText })
+        .values({ userID: userId, memoryText: consolidation.memoryText })
         .onConflictDoUpdate({
           target: tableDiscordUserMemory.userID,
-          set: { memoryText, updatedAt: new Date() },
+          set: { memoryText: consolidation.memoryText, updatedAt: new Date() },
         })
         .returning();
 
-      const row = rows[0];
-      if (!row) {
-        throw new Error("Memory upsert failed");
+      const savedRow = savedRows[0];
+      if (!savedRow) {
+        throw new Error("Memory append failed");
       }
 
       return {
-        userId: row.userID,
-        memoryText: row.memoryText,
-        updatedAt: row.updatedAt.toISOString(),
+        userId,
+        appended: true,
+        memoryText: savedRow.memoryText,
+        updatedAt: savedRow.updatedAt.toISOString(),
       };
     },
   }),
-};
+} satisfies ToolSet;
