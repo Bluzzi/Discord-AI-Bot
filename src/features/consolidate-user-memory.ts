@@ -1,4 +1,5 @@
 import { aiModel } from "#/utils/ai-model";
+import { aiUsage } from "#/utils/ai-usage";
 import { generateText, Output } from "ai";
 import dedent from "dedent";
 import { z } from "zod";
@@ -90,6 +91,9 @@ export const consolidateUserMemory = async ({ subjectId, authorId, facts, curren
       ${attributedFacts}
     `,
   });
+
+  // Usage tracking (placed before validation: tokens are consumed even if the consolidation is rejected afterwards):
+  await aiUsage.track("consolidate_user_memory", result);
 
   const consolidation = result.output;
 
