@@ -4,7 +4,7 @@ import { postgres } from "#/postgres/client";
 import { tableDiscordUserMemory } from "#/postgres/schema";
 import { tool } from "ai";
 import dedent from "dedent";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 // ToolSet is applied via "satisfies": a ": ToolSet" annotation would erase the inferred schema types (input, output, context) and break toolsContext inference at call sites:
@@ -47,6 +47,37 @@ export const memoryTools = {
         userId: row.userID,
         memoryText: row.memoryText,
         updatedAt: row.updatedAt.toISOString(),
+      };
+    },
+  }),
+
+  getAllUsersMemories: tool({
+    description: dedent`
+      Retrieve the persistent memories of the 10 most recently updated Discord users, one entry per user with their userId and memoryText.
+
+      Use this tool ONLY when the request explicitly concerns the whole Discord community rather than a single user: cross-user questions, the server's "hierarchy" or social dynamics, recap of each member's behavior, a document/PDF about the Discord members, etc. Never use it to answer a request about a specific user: use getUserMemory instead.
+    `,
+    inputSchema: z.object({}),
+    outputSchema: z.object({
+      memories: z.array(z.object({
+        userId: z.string().describe("Discord user ID"),
+        memoryText: z.string().describe("Stored memory content"),
+        updatedAt: z.string().describe("Last update date (ISO)"),
+      })).describe("The 10 most recently updated memories, newest first"),
+    }),
+    execute: async () => {
+      const rows = await postgres
+        .select()
+        .from(tableDiscordUserMemory)
+        .orderBy(desc(tableDiscordUserMemory.updatedAt))
+        .limit(10);
+
+      return {
+        memories: rows.map((row) => ({
+          userId: row.userID,
+          memoryText: row.memoryText,
+          updatedAt: row.updatedAt.toISOString(),
+        })),
       };
     },
   }),
