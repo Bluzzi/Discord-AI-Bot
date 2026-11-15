@@ -64,6 +64,13 @@
       "when": 1794735512719,
       "tag": "0008_panoramic_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794738665076,
+      "tag": "0009_safe_norrin_radd",
+      "breakpoints": true
     }
   ]
 }

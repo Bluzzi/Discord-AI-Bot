@@ -44,11 +44,6 @@ export const tableFeatureRequest = pgTable("feature_request", {
   updatedAt: columns.updatedAt,
 });
 
-export const messageFeedbackAuthorTypeEnum = pgEnum("message_feedback_author_type", [
-  "bot",
-  "discord_user",
-]);
-
 export const messageFeedbackReactionEnum = pgEnum("message_feedback_reaction", [
   "upvote",
   "downvote",
@@ -56,8 +51,6 @@ export const messageFeedbackReactionEnum = pgEnum("message_feedback_reaction", [
 
 export const tableMessageFeedback = pgTable("message_feedback", {
   id: uuid("id").primaryKey().defaultRandom(),
-  authorType: messageFeedbackAuthorTypeEnum("author_type").notNull(),
-  authorId: text("author_id").notNull(),
   messageContent: text("message_content").notNull(),
   previousMessages: text("previous_messages").notNull(),
   reaction: messageFeedbackReactionEnum("reaction").notNull(),

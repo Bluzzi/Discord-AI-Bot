@@ -22,6 +22,9 @@ trigger.discordEvent("messageReactionAdd", async (rawReaction, rawReactor) => {
   const reactor: User = rawReactor.partial ? await rawReactor.fetch() : rawReactor;
   const message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
 
+  // Only store feedback for the bot's own messages:
+  if (message.author.id !== env.DISCORD_BOT_ID) return;
+
   // Fetch the 5 previous messages in the channel for context:
   const previousMessages = await message.channel.messages.fetch({ limit: 5, before: message.id });
 
@@ -38,8 +41,6 @@ trigger.discordEvent("messageReactionAdd", async (rawReaction, rawReactor) => {
 
   // Store the feedback:
   await postgres.insert(tableMessageFeedback).values({
-    authorType: message.author.bot ? "bot" : "discord_user",
-    authorId: message.author.id,
     messageContent: message.content,
     previousMessages: transcript,
     reaction: feedbackReaction,
@@ -48,6 +49,6 @@ trigger.discordEvent("messageReactionAdd", async (rawReaction, rawReactor) => {
   logger.info(dedent`
     Message feedback stored:
     - [REACTION] ${feedbackReaction} by ${reactor.username}
-    - [AUTHOR] ${message.author.username} (${message.author.bot ? "bot" : "discord_user"}): ${message.content}
+    - [BOT MESSAGE] ${message.content}
   `);
 });
