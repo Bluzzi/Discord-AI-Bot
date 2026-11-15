@@ -13,6 +13,7 @@ export const aiCauseEnum = pgEnum("ai_cause", [
   "reply_to_message",
   "reply_decision",
   "discord_presence",
+  "consolidate_user_memory",
 ]);
 
 export const tableModelUsage = pgTable("model_usage", {

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ai_cause" ADD VALUE 'consolidate_user_memory';
