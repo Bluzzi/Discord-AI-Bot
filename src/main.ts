@@ -10,6 +10,7 @@ process.on("uncaughtException", (error, origin) => {
 // Start services and related triggers:
 await discordClientStart(async () => {
   await import("#/triggers/message-create.djs-event");
+  await import("#/triggers/message-reaction-add.djs-event");
   await import("#/triggers/voice-state-update.djs-event");
 });
 
