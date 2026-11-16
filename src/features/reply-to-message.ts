@@ -19,54 +19,67 @@ import { conversation } from "#/utils/conversation";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
+import { withTypingIndicator } from "#/utils/typing-indicator";
 import { stepCountIs, generateText } from "ai";
 import dedent from "dedent";
 
-const startTyping = async (message: OmitPartialGroupDMChannel<Message>) => {
-  await message.channel.sendTyping();
+// Low-level: send the reply text as direct replies to the message, split into chunks
+// respecting the Discord message length limit. Falls back to plain channel sends
+// when the direct reply is not possible (e.g. missing permissions):
+const sendReplyChunks = async (message: OmitPartialGroupDMChannel<Message>, text: string) => {
+  for (let i = 0; i < text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
+    const chunk = text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
 
-  const interval = setInterval(() => {
-    void message.channel.sendTyping();
-  }, 8000);
-
-  return {
-    stopTyping: () => clearInterval(interval),
-  };
+    try {
+      await message.reply(chunk);
+    }
+    catch {
+      await message.channel.send(chunk);
+    }
+  }
 };
 
-export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
-  // Start typing:
-  const { stopTyping } = await startTyping(message);
-
+const generateAndSendReply = async (message: OmitPartialGroupDMChannel<Message>) => {
   // Data:
   const guild = message.guild;
   const channel = message.channel;
 
   const isDM = !guild;
 
-  // Data: recent conversation, rendered for the AI:
-  const recentMessages = await message.channel.messages.fetch({ limit: 10 });
-  const channelMessages = [...recentMessages.values()];
+  // Data: conversation context, rendered for the AI. Fetched strictly BEFORE the trigger message,
+  // then the trigger message itself is appended: messages posted after it (while the bot was
+  // deciding or typing) must never leak into the conversation it is about to answer:
+  const previousMessages = await message.channel.messages.fetch({ limit: 10, before: message.id });
+  const channelMessages = [...previousMessages.values()];
 
-  const conversationMessages: ConversationMessage[] = channelMessages.map((msg) => ({
-    id: msg.id,
-    authorId: msg.author.id,
-    timestamp: msg.createdTimestamp,
-    label: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
-    content: msg.content,
-    isSelf: msg.author.id === env.DISCORD_BOT_ID,
-  }));
+  const triggerConversationMessage: ConversationMessage = {
+    id: message.id,
+    authorId: message.author.id,
+    timestamp: message.createdTimestamp,
+    label: conversation.resolveAuthorLabel(message.member?.displayName, message.author.globalName, message.author.username),
+    content: message.content,
+    isSelf: message.author.id === env.DISCORD_BOT_ID,
+  };
 
-  // Ground truth: message replied to + explicitly mentioned users:
+  const conversationMessages: ConversationMessage[] = [
+    ...channelMessages.map((msg) => ({
+      id: msg.id,
+      authorId: msg.author.id,
+      timestamp: msg.createdTimestamp,
+      label: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
+      content: msg.content,
+      isSelf: msg.author.id === env.DISCORD_BOT_ID,
+    })),
+    triggerConversationMessage,
+  ];
+
+  // Ground truth: message replied to + explicitly mentioned users. The referenced message resolves
+  // only when it falls inside the fetched window; the prompt simply omits it otherwise:
   const referencedMessage = message.reference?.messageId !== undefined ? channelMessages.find((msg) => msg.id === message.reference?.messageId) : undefined;
 
   const mentionedUsers = [...message.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID);
 
-  const referencedLabel = referencedMessage ? conversation.resolveAuthorLabel(referencedMessage.member?.displayName, referencedMessage.author.globalName, referencedMessage.author.username) : "";
-
-  const mentionedList = mentionedUsers
-    .map((user) => `${conversation.resolveAuthorLabel(null, user.globalName, user.username)} (ID ${user.id})`)
-    .join(", ");
+  // Instructions only reference immutable Discord IDs: user-controlled labels (display names) never enter the system prompt, they stay in the conversation messages:
 
   // Ask IA for reply:
   const startedAt = Date.now();
@@ -102,8 +115,8 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
       ## Message cible
       - Le message marqué « ↑ » est celui auquel tu réponds, les précédents ne sont que du contexte
-      ${referencedMessage ? `- Ce message est une réponse directe au message de ${referencedLabel} (ID ${referencedMessage.author.id})` : ""}
-      ${mentionedUsers.length > 0 ? `- Ce message mentionne : ${mentionedList}` : ""}
+      ${referencedMessage ? `- Ce message est une réponse directe au message de l'auteur ID ${referencedMessage.author.id}` : ""}
+      ${mentionedUsers.length > 0 ? `- Ce message mentionne : ${mentionedUsers.map((user) => `ID ${user.id}`).join(", ")}` : ""}
 
       ## Style de réponse
       - Par défaut : ultra concis, 1-2 phrases max, ton de pote. Exemples : "pas là", "introuvable", "C'est good", "Fait". C'est le bon format pour la grande majorité des échanges
@@ -158,18 +171,15 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
   // Send reply if any:
   if (result.text.trim().length > 0) {
-    for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
-      const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
-      try {
-        await message.reply(chunk);
-      }
-      catch {
-        await message.channel.send(chunk);
-      }
-    }
+    await sendReplyChunks(message, result.text);
   }
 
-  stopTyping();
+  return result;
+};
+
+export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
+  // The typing indicator ALWAYS stops when the work completes, even if the error propagates:
+  const result = await withTypingIndicator(message.channel, async () => generateAndSendReply(message));
 
   // Usage tracking:
   await aiUsage.track("reply_to_message", result);
