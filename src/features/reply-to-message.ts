@@ -19,25 +19,27 @@ import { conversation } from "#/utils/conversation";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
+import { withTypingIndicator } from "#/utils/typing-indicator";
 import { stepCountIs, generateText } from "ai";
 import dedent from "dedent";
 
-const startTyping = async (message: OmitPartialGroupDMChannel<Message>) => {
-  await message.channel.sendTyping();
+// Low-level: send the reply text as direct replies to the message, split into chunks
+// respecting the Discord message length limit. Falls back to plain channel sends
+// when the direct reply is not possible (e.g. missing permissions):
+const sendReplyChunks = async (message: OmitPartialGroupDMChannel<Message>, text: string) => {
+  for (let i = 0; i < text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
+    const chunk = text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
 
-  const interval = setInterval(() => {
-    void message.channel.sendTyping();
-  }, 8000);
-
-  return {
-    stopTyping: () => clearInterval(interval),
-  };
+    try {
+      await message.reply(chunk);
+    }
+    catch {
+      await message.channel.send(chunk);
+    }
+  }
 };
 
-export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
-  // Start typing:
-  const { stopTyping } = await startTyping(message);
-
+const generateAndSendReply = async (message: OmitPartialGroupDMChannel<Message>) => {
   // Data:
   const guild = message.guild;
   const channel = message.channel;
@@ -158,18 +160,15 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
   // Send reply if any:
   if (result.text.trim().length > 0) {
-    for (let i = 0; i < result.text.length; i += DISCORD_MAX_MESSAGE_LENGTH) {
-      const chunk = result.text.slice(i, i + DISCORD_MAX_MESSAGE_LENGTH);
-      try {
-        await message.reply(chunk);
-      }
-      catch {
-        await message.channel.send(chunk);
-      }
-    }
+    await sendReplyChunks(message, result.text);
   }
 
-  stopTyping();
+  return result;
+};
+
+export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>) => {
+  // The typing indicator ALWAYS stops when the work completes, even if the error propagates:
+  const result = await withTypingIndicator(message.channel, async () => generateAndSendReply(message));
 
   // Usage tracking:
   await aiUsage.track("reply_to_message", result);
