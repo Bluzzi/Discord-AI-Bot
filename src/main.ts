@@ -15,4 +15,6 @@ await discordClientStart(async () => {
 });
 
 // Load others triggers:
+// The quota check runs first so every other trigger starts with an up-to-date flag:
+await import("#/triggers/openrouter-quota.cron");
 await import("#/triggers/discord-presence.cron");

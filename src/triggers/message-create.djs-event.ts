@@ -7,9 +7,13 @@ import { aiUsage } from "#/utils/ai-usage";
 import { conversation } from "#/utils/conversation";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
+import { openRouterQuota } from "#/utils/openrouter-quota";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
+
+// Reply used without any AI call while the OpenRouter quota is exhausted (funny, in Jean Pascal's tone):
+const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24h/24. Réveillez-moi quand le budget passe.";
 
 trigger.discordEvent("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -20,6 +24,12 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   // Always reply in DM:
   if (message.guildId === null) {
+    if (openRouterQuota.isExhausted()) {
+      logger.info(`Reply to ${message.author.username} in DM without AI (OpenRouter quota exhausted)`);
+      await message.reply(NO_QUOTA_REPLY);
+      return;
+    }
+
     logger.info(`Reply to ${message.author.username} in DM (100%)`);
     await replyToMessage(message);
     return;
@@ -27,14 +37,25 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   // Always reply on mention:
   if (message.mentions.has(botUser.id)) {
+    if (openRouterQuota.isExhausted()) {
+      logger.info(`Reply to ${message.author.displayName} on mention without AI (OpenRouter quota exhausted)`);
+      await message.reply(NO_QUOTA_REPLY);
+      return;
+    }
+
     logger.info(`Reply to ${message.author.displayName} based on mention (100%)`);
     await replyToMessage(message);
     return;
   }
 
-  // Check if the bot is good for the current subject. The context is fetched strictly BEFORE the
-  // trigger message (the trigger message is appended after), so messages posted in the meantime
-  // can never show up after the "← dernier message" marker:
+  // Check if the bot is good for the current subject:
+  if (openRouterQuota.isExhausted()) {
+    logger.info(`Skip reply decision for ${message.author.displayName} (OpenRouter quota exhausted)`);
+    return;
+  }
+
+  // The context is fetched strictly BEFORE the trigger message (the trigger message is appended
+  // after), so messages posted in the meantime can never show up after the "← dernier message" marker:
   const previousMessages = await message.channel.messages.fetch({ limit: 10, before: message.id });
   const channelMessages = [...previousMessages.values()];
 

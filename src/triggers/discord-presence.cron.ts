@@ -6,6 +6,7 @@ import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
+import { openRouterQuota } from "#/utils/openrouter-quota";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
@@ -16,6 +17,12 @@ await trigger.cron(
   "discord-presence",
   "0 * * * *",
   async () => {
+    // Skip the AI call when OpenRouter has no quota left (the CRON simply stops working):
+    if (openRouterQuota.isExhausted()) {
+      logger.info("Discord presence skipped: OpenRouter quota exhausted");
+      return;
+    }
+
     if (!discordClient.user) throw new Error("Discord bot user is not available");
 
     // Generate MOTD:

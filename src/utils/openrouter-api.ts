@@ -1,4 +1,5 @@
 import type { LanguageModelUsage } from "ai";
+import { env } from "#/utils/env";
 
 type OpenRouterModelPricing = {
   /** Price per input token, in USD */
@@ -23,7 +24,33 @@ type OpenRouterModelsResponse = {
   }[];
 };
 
+export type OpenRouterKeyData = {
+  label: string;
+  usage: number;
+  /** Credit limit of the key (USD), or null when the key is unlimited */
+  limit: number | null;
+  /** Remaining credit of the key (USD), or null when the key is unlimited */
+  limit_remaining: number | null;
+  is_free_tier: boolean;
+  /** Daily free models requests counter (undefined when the key does not expose it) */
+  free_model_daily_requests?: {
+    used: number;
+    limit: number;
+    remaining: number;
+  };
+};
+
+export type OpenRouterCreditsData = {
+  total_credits: number;
+  total_usage: number;
+};
+
+type OpenRouterKeyResponse = { data: OpenRouterKeyData };
+type OpenRouterCreditsResponse = { data: OpenRouterCreditsData };
+
 const openRouterModelsUrl = "https://openrouter.ai/api/v1/models";
+const openRouterKeyUrl = "https://openrouter.ai/api/v1/key";
+const openRouterCreditsUrl = "https://openrouter.ai/api/v1/credits";
 
 const pricingByModelId = new Map<string, OpenRouterModelPricing>();
 
@@ -61,7 +88,42 @@ const fetchModelPricing = async (): Promise<void> => {
   }
 };
 
+const fetchKey = async (): Promise<OpenRouterKeyData> => {
+  const response = await fetch(openRouterKeyUrl, {
+    headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter API error: ${String(response.status)} ${response.statusText}`);
+  }
+
+  const body = await response.json() as OpenRouterKeyResponse;
+
+  return body.data;
+};
+
+const fetchCredits = async (): Promise<OpenRouterCreditsData | undefined> => {
+  const response = await fetch(openRouterCreditsUrl, {
+    headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
+  });
+
+  // Endpoint reserved to management keys: undefined is expected when using a plain inference key:
+  if (response.status === 403) return undefined;
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter API error: ${String(response.status)} ${response.statusText}`);
+  }
+
+  const body = await response.json() as OpenRouterCreditsResponse;
+
+  return body.data;
+};
+
 export const openRouterApi = {
+  /** Fetch the current API key state (usage, credit limit, free models daily quota) from OpenRouter */
+  fetchKey,
+  /** Fetch the account credits balance (total credits and usage) from OpenRouter, or undefined when the key is not allowed to */
+  fetchCredits,
   /** Compute input and output prices (USD) from OpenRouter public pricing (fetched once and cached), or undefined when the model pricing is unknown */
   computeUsagePrices: async (modelId: string, usage: LanguageModelUsage): Promise<{ inputPrice: number | undefined; outputPrice: number | undefined }> => {
     if (pricingByModelId.size === 0) {
