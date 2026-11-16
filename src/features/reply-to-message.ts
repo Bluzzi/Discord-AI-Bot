@@ -79,11 +79,7 @@ const generateAndSendReply = async (message: OmitPartialGroupDMChannel<Message>)
 
   const mentionedUsers = [...message.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID);
 
-  const referencedLabel = referencedMessage ? conversation.resolveAuthorLabel(referencedMessage.member?.displayName, referencedMessage.author.globalName, referencedMessage.author.username) : "";
-
-  const mentionedList = mentionedUsers
-    .map((user) => `${conversation.resolveAuthorLabel(null, user.globalName, user.username)} (ID ${user.id})`)
-    .join(", ");
+  // Instructions only reference immutable Discord IDs: user-controlled labels (display names) never enter the system prompt, they stay in the conversation messages:
 
   // Ask IA for reply:
   const startedAt = Date.now();
@@ -119,8 +115,8 @@ const generateAndSendReply = async (message: OmitPartialGroupDMChannel<Message>)
 
       ## Message cible
       - Le message marqué « ↑ » est celui auquel tu réponds, les précédents ne sont que du contexte
-      ${referencedMessage ? `- Ce message est une réponse directe au message de ${referencedLabel} (ID ${referencedMessage.author.id})` : ""}
-      ${mentionedUsers.length > 0 ? `- Ce message mentionne : ${mentionedList}` : ""}
+      ${referencedMessage ? `- Ce message est une réponse directe au message de l'auteur ID ${referencedMessage.author.id}` : ""}
+      ${mentionedUsers.length > 0 ? `- Ce message mentionne : ${mentionedUsers.map((user) => `ID ${user.id}`).join(", ")}` : ""}
 
       ## Style de réponse
       - Par défaut : ultra concis, 1-2 phrases max, ton de pote. Exemples : "pas là", "introuvable", "C'est good", "Fait". C'est le bon format pour la grande majorité des échanges
