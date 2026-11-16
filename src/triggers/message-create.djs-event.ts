@@ -32,18 +32,32 @@ trigger.discordEvent("messageCreate", async (message) => {
     return;
   }
 
-  // Check if the bot is good for the current subject:
-  const recentMessages = await message.channel.messages.fetch({ limit: 10 });
-  const channelMessages = [...recentMessages.values()];
+  // Check if the bot is good for the current subject. The context is fetched strictly BEFORE the
+  // trigger message (the trigger message is appended after), so messages posted in the meantime
+  // can never show up after the "← dernier message" marker:
+  const previousMessages = await message.channel.messages.fetch({ limit: 10, before: message.id });
+  const channelMessages = [...previousMessages.values()];
 
-  const conversationMessages: ConversationMessage[] = channelMessages.map((msg) => ({
-    id: msg.id,
-    authorId: msg.author.id,
-    timestamp: msg.createdTimestamp,
-    label: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
-    content: msg.content,
-    isSelf: msg.author.id === botUser.id,
-  }));
+  const triggerConversationMessage: ConversationMessage = {
+    id: message.id,
+    authorId: message.author.id,
+    timestamp: message.createdTimestamp,
+    label: conversation.resolveAuthorLabel(message.member?.displayName, message.author.globalName, message.author.username),
+    content: message.content,
+    isSelf: message.author.id === botUser.id,
+  };
+
+  const conversationMessages: ConversationMessage[] = [
+    ...channelMessages.map((msg) => ({
+      id: msg.id,
+      authorId: msg.author.id,
+      timestamp: msg.createdTimestamp,
+      label: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
+      content: msg.content,
+      isSelf: msg.author.id === botUser.id,
+    })),
+    triggerConversationMessage,
+  ];
 
   const transcript = conversation.buildTranscript(conversationMessages, { highlightMessageId: message.id });
 

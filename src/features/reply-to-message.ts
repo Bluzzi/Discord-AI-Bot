@@ -44,20 +44,35 @@ export const replyToMessage = async (message: OmitPartialGroupDMChannel<Message>
 
   const isDM = !guild;
 
-  // Data: recent conversation, rendered for the AI:
-  const recentMessages = await message.channel.messages.fetch({ limit: 10 });
-  const channelMessages = [...recentMessages.values()];
+  // Data: conversation context, rendered for the AI. Fetched strictly BEFORE the trigger message,
+  // then the trigger message itself is appended: messages posted after it (while the bot was
+  // deciding or typing) must never leak into the conversation it is about to answer:
+  const previousMessages = await message.channel.messages.fetch({ limit: 10, before: message.id });
+  const channelMessages = [...previousMessages.values()];
 
-  const conversationMessages: ConversationMessage[] = channelMessages.map((msg) => ({
-    id: msg.id,
-    authorId: msg.author.id,
-    timestamp: msg.createdTimestamp,
-    label: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
-    content: msg.content,
-    isSelf: msg.author.id === env.DISCORD_BOT_ID,
-  }));
+  const triggerConversationMessage: ConversationMessage = {
+    id: message.id,
+    authorId: message.author.id,
+    timestamp: message.createdTimestamp,
+    label: conversation.resolveAuthorLabel(message.member?.displayName, message.author.globalName, message.author.username),
+    content: message.content,
+    isSelf: message.author.id === env.DISCORD_BOT_ID,
+  };
 
-  // Ground truth: message replied to + explicitly mentioned users:
+  const conversationMessages: ConversationMessage[] = [
+    ...channelMessages.map((msg) => ({
+      id: msg.id,
+      authorId: msg.author.id,
+      timestamp: msg.createdTimestamp,
+      label: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
+      content: msg.content,
+      isSelf: msg.author.id === env.DISCORD_BOT_ID,
+    })),
+    triggerConversationMessage,
+  ];
+
+  // Ground truth: message replied to + explicitly mentioned users. The referenced message resolves
+  // only when it falls inside the fetched window; the prompt simply omits it otherwise:
   const referencedMessage = message.reference?.messageId !== undefined ? channelMessages.find((msg) => msg.id === message.reference?.messageId) : undefined;
 
   const mentionedUsers = [...message.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID);
