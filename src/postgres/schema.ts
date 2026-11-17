@@ -9,6 +9,16 @@ export const tableDiscordUserMemory = pgTable("discord_user_memory", {
   updatedAt: columns.updatedAt,
 });
 
+export const tableDiscordSkill = pgTable("discord_skill", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  trigger: text("trigger").notNull(),
+  rule: text("rule").notNull(),
+  createdByUserID: text("created_by_user_id").notNull(),
+  usageCount: integer("usage_count").notNull().default(0),
+
+  createdAt: columns.createdAt,
+});
+
 export const aiCauseEnum = pgEnum("ai_cause", [
   "reply_to_message",
   "reply_decision",
