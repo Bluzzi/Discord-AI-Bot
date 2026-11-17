@@ -7,5 +7,7 @@ const updatedAt = timestamp("updated_at", { withTimezone: true })
   .notNull()
   .defaultNow()
   .$onUpdate(() => new Date());
+// Soft delete marker: defined = deleted:
+const deletedAt = timestamp("deleted_at", { withTimezone: true });
 
-export const columns = { createdAt, updatedAt };
+export const columns = { createdAt, updatedAt, deletedAt };
