@@ -29,6 +29,7 @@ const codeBlockPattern = /```[\s\S]*?```|`[^`\n]*`/gu;
 const isBotNamedIn = (content: string): boolean => botNamePattern?.test(content.replaceAll(codeBlockPattern, "")) ?? false;
 
 trigger.discordEvent("messageCreate", async (message) => {
+  if (message.author.id === "1444427058481467462") return;
   if (message.author.bot) return;
   if (!discordClient.user) return;
   if (!message.channel.isTextBased()) return;
