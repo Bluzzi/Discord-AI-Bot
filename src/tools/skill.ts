@@ -44,6 +44,8 @@ export const skillTools = {
 
       For durable information ABOUT a user (identity, preferences, hierarchy, personal facts), use the user memory instead: skills are for generic behavior rules, not personal facts.
 
+      Users will usually say "règle" (rule), "trigger" or "comportement" rather than "skill": whatever the wording, a request to put a durable behavior rule in place goes here.
+
       The skill is automatically attributed to the user who requested it (bound server-side, never chosen by you).
     `,
     inputSchema: z.object({

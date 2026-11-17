@@ -15,6 +15,8 @@ export const tableDiscordSkill = pgTable("discord_skill", {
   rule: text("rule").notNull(),
   createdByUserID: text("created_by_user_id").notNull(),
   usageCount: integer("usage_count").notNull().default(0),
+  // Soft delete: a defined deletedAt hides the skill from every consumer (deletion is irreversible for the AI, the row only stays for audit):
+  deletedAt: columns.deletedAt,
 
   createdAt: columns.createdAt,
 });
@@ -24,6 +26,7 @@ export const aiCauseEnum = pgEnum("ai_cause", [
   "reply_decision",
   "discord_presence",
   "consolidate_user_memory",
+  "clean_up_skills",
 ]);
 
 export const tableModelUsage = pgTable("model_usage", {

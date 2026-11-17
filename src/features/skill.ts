@@ -1,6 +1,6 @@
 import { postgres } from "#/postgres/client";
 import { tableDiscordSkill } from "#/postgres/schema";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 // Trigger budget: a trigger is a very short condition (a few tokens), rendered in every AI prompt:
 export const SKILL_TRIGGER_MAX_LENGTH = 120;
@@ -13,6 +13,7 @@ type Skill = {
   rule: string;
   createdByUserID: string;
   usageCount: number;
+  createdAt: Date;
 };
 
 type SkillTrigger = Pick<Skill, "id" | "trigger">;
@@ -52,9 +53,10 @@ export const createSkill = async ({ trigger, rule, authorId }: { trigger: string
 
   triggerCache = null;
 
-  return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount };
+  return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt };
 };
 
+// Deleted skills (deletedAt defined) are invisible everywhere: never listed in prompts, never openable:
 export const listSkillTriggers = async (): Promise<SkillTrigger[]> => {
   if (triggerCache !== null && Date.now() - triggerCache.fetchedAt < TRIGGER_CACHE_TTL_MS) {
     return triggerCache.triggers;
@@ -63,6 +65,7 @@ export const listSkillTriggers = async (): Promise<SkillTrigger[]> => {
   const triggers = await postgres
     .select({ id: tableDiscordSkill.id, trigger: tableDiscordSkill.trigger })
     .from(tableDiscordSkill)
+    .where(isNull(tableDiscordSkill.deletedAt))
     .orderBy(asc(tableDiscordSkill.createdAt));
 
   triggerCache = { triggers, fetchedAt: Date.now() };
@@ -76,7 +79,7 @@ export const openSkill = async ({ skillId }: { skillId: string }): Promise<Skill
   const rows = await postgres
     .update(tableDiscordSkill)
     .set({ usageCount: sql`${tableDiscordSkill.usageCount} + 1` })
-    .where(eq(tableDiscordSkill.id, skillId))
+    .where(and(eq(tableDiscordSkill.id, skillId), isNull(tableDiscordSkill.deletedAt)))
     .returning();
 
   const row = rows[0];
@@ -84,5 +87,31 @@ export const openSkill = async ({ skillId }: { skillId: string }): Promise<Skill
     throw new Error("Skill not found");
   }
 
-  return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount };
+  return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt };
+};
+
+// Full view of the active skills (trigger + rule), used by the daily cleanup to detect conflicting rules:
+export const listSkills = async (): Promise<Skill[]> => {
+  const rows = await postgres
+    .select()
+    .from(tableDiscordSkill)
+    .where(isNull(tableDiscordSkill.deletedAt))
+    .orderBy(asc(tableDiscordSkill.createdAt));
+
+  return rows.map((row) => ({ id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt }));
+};
+
+// Soft delete: deletedAt is defined, the row stays for audit. Deletion must be reflected in every
+// prompt immediately, so the trigger cache is invalidated:
+export const deleteSkills = async ({ skillIds }: { skillIds: string[] }): Promise<void> => {
+  if (skillIds.length === 0) {
+    return;
+  }
+
+  await postgres
+    .update(tableDiscordSkill)
+    .set({ deletedAt: new Date() })
+    .where(inArray(tableDiscordSkill.id, skillIds));
+
+  triggerCache = null;
 };
