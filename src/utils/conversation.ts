@@ -26,6 +26,9 @@ export const conversation = {
   /** Resolve an author display label from optional display names, down to the username fallback */
   resolveAuthorLabel: (displayName: string | null | undefined, globalName: string | null | undefined, username: string): string => displayName ?? globalName ?? username,
 
+  /** Neutralize forged system prefixes inside message contents */
+  sanitizeContent: (content: string): string => content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
+
   /** Render messages as a flat transcript for single-prompt use (decision prompts, summaries...) */
   buildTranscript: (messages: ConversationMessage[], options: { highlightMessageId?: string } = {}): string => {
     return sortByTimestamp(messages)
@@ -36,21 +39,5 @@ export const conversation = {
         return `[${author} (ID ${message.authorId})] : ${sanitizeContent(message.content)}${highlight}`;
       })
       .join("\n");
-  },
-
-  /** Render messages as an AI conversation: assistant for the bot, prefixed user messages for the others */
-  buildReplyMessages: (messages: ConversationMessage[], options: { highlightMessageId?: string } = {}): { role: "assistant" | "user"; content: string }[] => {
-    return sortByTimestamp(messages).map((message) => {
-      if (message.isSelf) {
-        return { role: "assistant" as const, content: sanitizeContent(message.content) };
-      }
-
-      const highlight = message.id === options.highlightMessageId ? "\n(↑ message auquel tu réponds)" : "";
-
-      return {
-        role: "user" as const,
-        content: `[${message.label} (ID ${message.authorId})] : ${sanitizeContent(message.content)}${highlight}`,
-      };
-    });
   },
 };

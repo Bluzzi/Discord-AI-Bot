@@ -88,6 +88,8 @@ export const memoryTools = {
 
       Pass ONLY the new durable facts (preferences, habits, personal facts, rules, memorable anecdotes, fun notes) in one or a few short sentences: never a rewritten memory, never transient small talk.
 
+      Priority order for what to store: structuring info first (identity, hierarchy, status, preferences), then durable facts (projects, anecdotes, habits), then fun (in-jokes, light notes). Adding should be easy and generous: users deliberately share fun facts with you.
+
       THIRD-PARTY FACTS: when \`userId\` is not the author of the current message, pass the raw facts exactly as they were stated: the system automatically attributes them to the actual speaker in the stored memory (e.g. "<@speakerID> indique que <@subjectID> ..."), so a third-party claim is never stored as an established fact about the subject. Do not add the attribution yourself.
 
       Self-corrections are welcome: when the subject updates or contradicts something about themselves (e.g. "je n'aime plus X"), append the updated fact and the curator reconciles the memory.

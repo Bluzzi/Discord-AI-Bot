@@ -13,7 +13,7 @@ It's important to distinguish between two key components:
 
 Code should remain as close as possible to a simple `TRIGGER` that launches `AI GENERATION`, allowing maximum autonomy to the AI. Algorithmic constraints should be minimized.
 
-When the AI generation code needs to be reused across multiple `TRIGGER` files or becomes lengthy (several hundred lines), it should be moved to `/src/features`, while keeping the `TRIGGER` logic in `/src/triggers`. The `/src/triggers/message-create.djs-event.ts` and `/src/features/reply-to-message.ts` files is a good example of this principle.
+When the AI generation code needs to be reused across multiple `TRIGGER` files or becomes lengthy (several hundred lines), it should be moved to `/src/features`, while keeping the `TRIGGER` logic in `/src/triggers`.
 
 Each `TRIGGER` type has a specific function for implementation, described below. These functions all handle errors globally according to the code in `/src/utils/trigger.ts`.
 

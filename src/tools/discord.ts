@@ -1,7 +1,7 @@
 import type { ToolSet } from "ai";
 import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
 import { createAudioPlayer, createAudioResource, getVoiceConnection, joinVoiceChannel, StreamType } from "@discordjs/voice";
-import { discordClient } from "#/services/discord";
+import { discordClient, sanitizeDiscordMessage, splitDiscordMessage } from "#/services/discord";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, ThreadAutoArchiveDuration } from "discord.js";
@@ -694,13 +694,19 @@ export const discordTools = {
   }),
 
   sendMessage: tool({
-    description: "Send a plain text message to a channel.",
+    description: dedent`
+      Send a plain text message to a channel. Long contents are split automatically across several messages.
+
+      Supports Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, > quotes, ### headings, - lists, [links](url), ||spoilers||. Tables are not supported.
+
+      Mass mentions (@everyone, @here) are automatically neutralized into @{everyone} / @{here}: mass-ping is impossible.
+    `,
     inputSchema: z.object({
       channelId: z.string().describe("The channel ID to send the message to"),
-      content: z.string().describe("The message content to send"),
+      content: z.string().min(1).describe("The message content to send"),
     }),
     outputSchema: z.object({
-      messageId: z.string().describe("Sent message ID"),
+      messageIds: z.array(z.string()).describe("Sent message IDs (one per chunk when the content was split)"),
     }),
     execute: async ({ channelId, content }) => {
       const channel = discordClient.channels.cache.get(channelId);
@@ -711,9 +717,14 @@ export const discordTools = {
         throw new Error("Channel does not support sending messages");
       }
 
-      const message = await channel.send(content);
+      const messageIds: string[] = [];
 
-      return { messageId: message.id };
+      for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
+        const message = await channel.send(chunk);
+        messageIds.push(message.id);
+      }
+
+      return { messageIds };
     },
   }),
 
@@ -791,19 +802,29 @@ export const discordTools = {
   }),
 
   sendDm: tool({
-    description: "Send a plain text direct message to a user.",
+    description: dedent`
+      Send a plain text direct message to a user. Long contents are split automatically across several messages.
+
+      Supports Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, > quotes, ### headings, - lists, [links](url), ||spoilers||. Tables are not supported.
+    `,
     inputSchema: z.object({
       userId: z.string().describe("The user ID to send the direct message to"),
-      content: z.string().describe("The message content to send"),
+      content: z.string().min(1).describe("The message content to send"),
     }),
     outputSchema: z.object({
-      messageId: z.string().describe("Sent message ID"),
+      messageIds: z.array(z.string()).describe("Sent message IDs (one per chunk when the content was split)"),
     }),
     execute: async ({ userId, content }) => {
       const user = await discordClient.users.fetch(userId);
-      const message = await user.send(content);
 
-      return { messageId: message.id };
+      const messageIds: string[] = [];
+
+      for (const chunk of splitDiscordMessage(content)) {
+        const message = await user.send(chunk);
+        messageIds.push(message.id);
+      }
+
+      return { messageIds };
     },
   }),
 
@@ -889,7 +910,7 @@ export const discordTools = {
       const fileName = name ?? (urlName !== "" ? urlName : "file");
 
       const message = await channel.send({
-        content,
+        content: content !== undefined ? sanitizeDiscordMessage(content) : undefined,
         files: [{ attachment: Buffer.from(await response.arrayBuffer()), name: fileName }],
       });
 
@@ -918,7 +939,7 @@ export const discordTools = {
         throw new Error("Only messages sent by the bot itself can be edited");
       }
 
-      await message.edit(newContent);
+      await message.edit(sanitizeDiscordMessage(newContent));
 
       return { messageId: message.id };
     },
@@ -948,15 +969,21 @@ export const discordTools = {
     },
   }),
 
-  replyToMessage: tool({
-    description: "Send a message as a direct reply to a specific message (shows the reply preview above the message).",
+  sendReply: tool({
+    description: dedent`
+      Send a message as a direct reply to a specific message (shows the reply preview above the message): the standard way to reply in a conversation. Long contents are split automatically across several messages. If it fails (e.g. missing permissions), fall back to sendMessage in the same channel.
+
+      Supports Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, > quotes, ### headings, - lists, [links](url), ||spoilers||. Tables are not supported.
+
+      Mass mentions (@everyone, @here) are automatically neutralized into @{everyone} / @{here}: mass-ping is impossible.
+    `,
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to send the reply to"),
+      channelId: z.string().describe("The channel ID where the target message is located"),
       messageId: z.string().describe("The message ID to reply to"),
-      content: z.string().describe("The reply content to send"),
+      content: z.string().min(1).describe("The reply content to send"),
     }),
     outputSchema: z.object({
-      messageId: z.string().describe("Sent message ID"),
+      messageIds: z.array(z.string()).describe("Sent message IDs (one per chunk when the content was split)"),
     }),
     execute: async ({ channelId, messageId, content }) => {
       const channel = discordClient.channels.cache.get(channelId);
@@ -967,9 +994,14 @@ export const discordTools = {
         throw new Error("Channel does not support sending messages");
       }
 
-      const message = await channel.send({ content, reply: { messageReference: messageId } });
+      const messageIds: string[] = [];
 
-      return { messageId: message.id };
+      for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
+        const message = await channel.send({ content: chunk, reply: { messageReference: messageId } });
+        messageIds.push(message.id);
+      }
+
+      return { messageIds };
     },
   }),
 
@@ -1535,7 +1567,7 @@ export const discordTools = {
     outputSchema: z.object({}),
     execute: async ({ webhookUrl, content, username, avatarUrl }) => {
       const payload: { content: string; username: string; avatar_url?: string } = {
-        content,
+        content: sanitizeDiscordMessage(content),
         username,
       };
 
