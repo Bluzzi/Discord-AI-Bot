@@ -1,5 +1,5 @@
 import { deleteSkills, listSkills } from "#/features/skill";
-import { aiModel } from "#/utils/ai-model";
+import { aiModel } from "#/integrations/openrouter";
 import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { generateText, Output, stepCountIs } from "ai";

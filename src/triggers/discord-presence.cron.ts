@@ -1,12 +1,11 @@
-import { discordClient } from "#/services/discord";
+import { discordClient } from "#/integrations/discord";
+import { aiModel, openRouterQuota } from "#/integrations/openrouter";
 import { holidaysTools } from "#/tools/holidays";
 import { newsTools } from "#/tools/news";
-import { aiModel } from "#/utils/ai-model";
 import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { openRouterQuota } from "#/utils/openrouter-quota";
 import { trigger } from "#/utils/trigger";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";

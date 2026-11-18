@@ -1,8 +1,8 @@
 import type { aiCauseEnum } from "#/postgres/schema";
 import type { LanguageModelUsage } from "ai";
+import { openRouterApi } from "#/integrations/openrouter";
 import { postgres } from "#/postgres/client";
 import { tableModelUsage } from "#/postgres/schema";
-import { openRouterApi } from "#/utils/openrouter-api";
 
 type AiCause = typeof aiCauseEnum.enumValues[number];
 

@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { githubFetch } from "#/utils/github-api";
+import { githubFetch } from "#/integrations/github";
 import { tool } from "ai";
 import { z } from "zod";
 

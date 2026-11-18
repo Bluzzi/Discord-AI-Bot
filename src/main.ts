@@ -1,4 +1,4 @@
-import { discordClientStart } from "#/services/discord";
+import { discordClientStart } from "#/integrations/discord";
 import { logger } from "#/utils/logger";
 
 // Uncaught exception handler:

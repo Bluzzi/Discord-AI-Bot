@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
-import { discordClient } from "#/services/discord";
-import { renderHtmlToPdf } from "#/utils/html-to-pdf";
+import { discordClient } from "#/integrations/discord";
+import { renderHtmlToPdf } from "#/integrations/pdf";
 import { tool } from "ai";
 import { z } from "zod";
 

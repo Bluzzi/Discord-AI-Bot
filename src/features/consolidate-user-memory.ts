@@ -1,4 +1,4 @@
-import { aiModel } from "#/utils/ai-model";
+import { aiModel } from "#/integrations/openrouter";
 import { aiUsage } from "#/utils/ai-usage";
 import { generateText, Output } from "ai";
 import dedent from "dedent";

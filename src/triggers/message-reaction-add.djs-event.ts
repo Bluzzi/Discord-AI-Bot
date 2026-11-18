@@ -1,8 +1,8 @@
-import type { ConversationMessage } from "#/utils/conversation";
+import type { ConversationMessage } from "#/integrations/discord";
 import type { MessageReaction, User } from "discord.js";
+import { conversation } from "#/integrations/discord";
 import { postgres } from "#/postgres/client";
 import { tableMessageFeedback } from "#/postgres/schema";
-import { conversation } from "#/utils/conversation";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";

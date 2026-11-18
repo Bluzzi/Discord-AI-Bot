@@ -1,6 +1,5 @@
 import type { ToolSet } from "ai";
-import { rssFeeds } from "#/utils/rss-feeds";
-import { rss } from "#/utils/rss-parser";
+import { fetchFeed } from "#/integrations/rss";
 import { tool } from "ai";
 import dedent from "dedent";
 import { z } from "zod";
@@ -30,7 +29,7 @@ export const newsTools = {
       contentSnippet: z.string().optional().describe("Content excerpt"),
     })).describe("Matching articles, most recent first"),
     execute: async ({ category, keywords, limit = 5 }) => {
-      const feed = await rss.parseURL(rssFeeds[category].url);
+      const feed = await fetchFeed(category);
 
       let items = feed.items;
       if (keywords !== undefined && keywords !== "") {

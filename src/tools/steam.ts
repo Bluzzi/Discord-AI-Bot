@@ -1,6 +1,6 @@
-import type { SteamDescription, SteamInventoryResponse, SteamOwnedGamesResponse, SteamPlayerAchievementsResponse, SteamVanityUrlResponse } from "#/utils/steam-api";
+import type { SteamDescription, SteamInventoryResponse, SteamOwnedGamesResponse, SteamPlayerAchievementsResponse, SteamVanityUrlResponse } from "#/integrations/steam";
 import type { ToolSet } from "ai";
-import { steamFetch } from "#/utils/steam-api";
+import { steamFetch } from "#/integrations/steam";
 import { tool } from "ai";
 import { z } from "zod";
 
