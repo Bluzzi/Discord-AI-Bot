@@ -1,4 +1,5 @@
 allowBuilds:
+  "@openrouter/sdk": true
   "@swc/core": true
   "esbuild": true
   "puppeteer": true
