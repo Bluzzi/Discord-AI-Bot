@@ -11,6 +11,11 @@ An AI bot for Discord designed to act freely using various tools.
 
 > The focus is on giving the AI tools to solve problems, not writing code to control the AI.
 
+## Agent approach
+- Be ultra-pragmatic: never over-engineer, never build anything that was not asked for, always prefer absolute simplicity.
+- Read the existing code before implementing: rely on the content of the files and folders mentioned in the request, and search the codebase for similar examples to follow their syntax, structure and logic.
+- If something extra genuinely deserves to be added (technical, security, optimization or clarity reasons) but is not part of the request and requires more code than asked: do not implement it, recommend it to the user instead and let them decide.
+
 ## Project Stack
 
 - **Node.js v24.11.0 (LTS)** is used as the runtime.
