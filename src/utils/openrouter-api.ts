@@ -1,5 +1,14 @@
+import type { GetCreditsData, GetCurrentKeyData } from "@openrouter/sdk/models/operations";
 import type { LanguageModelUsage } from "ai";
+import { OpenRouter } from "@openrouter/sdk";
+import { OpenRouterError } from "@openrouter/sdk/models/errors";
 import { env } from "#/utils/env";
+
+/** Current API key information (usage, credit limit, free models daily quota) */
+export type OpenRouterKeyData = GetCurrentKeyData;
+
+/** Account credits balance (total credits purchased and used) */
+export type OpenRouterCreditsData = GetCreditsData;
 
 type OpenRouterModelPricing = {
   /** Price per input token, in USD */
@@ -12,45 +21,11 @@ type OpenRouterModelPricing = {
   inputCacheWrite: number | undefined;
 };
 
-type OpenRouterModelsResponse = {
-  data: {
-    id: string;
-    pricing?: {
-      prompt?: string;
-      completion?: string;
-      input_cache_read?: string;
-      input_cache_write?: string;
-    };
-  }[];
-};
-
-export type OpenRouterKeyData = {
-  label: string;
-  usage: number;
-  /** Credit limit of the key (USD), or null when the key is unlimited */
-  limit: number | null;
-  /** Remaining credit of the key (USD), or null when the key is unlimited */
-  limit_remaining: number | null;
-  is_free_tier: boolean;
-  /** Daily free models requests counter (undefined when the key does not expose it) */
-  free_model_daily_requests?: {
-    used: number;
-    limit: number;
-    remaining: number;
-  };
-};
-
-export type OpenRouterCreditsData = {
-  total_credits: number;
-  total_usage: number;
-};
-
-type OpenRouterKeyResponse = { data: OpenRouterKeyData };
-type OpenRouterCreditsResponse = { data: OpenRouterCreditsData };
-
-const openRouterModelsUrl = "https://openrouter.ai/api/v1/models";
-const openRouterKeyUrl = "https://openrouter.ai/api/v1/key";
-const openRouterCreditsUrl = "https://openrouter.ai/api/v1/credits";
+// The quota CRON refreshes every minute: the SDK default retry policy (5XX with exponential backoff, up to 1h) must stay disabled to fail fast.
+const openRouter = new OpenRouter({
+  apiKey: env.OPENROUTER_API_KEY,
+  retryConfig: { strategy: "none" },
+});
 
 const pricingByModelId = new Map<string, OpenRouterModelPricing>();
 
@@ -63,60 +38,45 @@ const parsePrice = (value: string | undefined): number | undefined => {
 };
 
 const fetchModelPricing = async (): Promise<void> => {
-  const response = await fetch(openRouterModelsUrl);
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter API error: ${String(response.status)} ${response.statusText}`);
-  }
-
-  const body = await response.json() as OpenRouterModelsResponse;
+  const pages = await openRouter.models.list();
 
   pricingByModelId.clear();
 
-  for (const model of body.data) {
-    const prompt = parsePrice(model.pricing?.prompt);
-    const completion = parsePrice(model.pricing?.completion);
+  for await (const page of pages) {
+    for (const model of page.result.data) {
+      const prompt = parsePrice(model.pricing.prompt);
+      const completion = parsePrice(model.pricing.completion);
 
-    if (prompt === undefined || completion === undefined) continue;
+      if (prompt === undefined || completion === undefined) continue;
 
-    pricingByModelId.set(model.id, {
-      prompt,
-      completion,
-      inputCacheRead: parsePrice(model.pricing?.input_cache_read),
-      inputCacheWrite: parsePrice(model.pricing?.input_cache_write),
-    });
+      pricingByModelId.set(model.id, {
+        prompt,
+        completion,
+        inputCacheRead: parsePrice(model.pricing.inputCacheRead),
+        inputCacheWrite: parsePrice(model.pricing.inputCacheWrite),
+      });
+    }
   }
 };
 
 const fetchKey = async (): Promise<OpenRouterKeyData> => {
-  const response = await fetch(openRouterKeyUrl, {
-    headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
-  });
+  const response = await openRouter.apiKeys.getCurrentKeyMetadata();
 
-  if (!response.ok) {
-    throw new Error(`OpenRouter API error: ${String(response.status)} ${response.statusText}`);
-  }
-
-  const body = await response.json() as OpenRouterKeyResponse;
-
-  return body.data;
+  return response.data;
 };
 
 const fetchCredits = async (): Promise<OpenRouterCreditsData | undefined> => {
-  const response = await fetch(openRouterCreditsUrl, {
-    headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
-  });
+  try {
+    const response = await openRouter.credits.getCredits();
 
-  // Endpoint reserved to management keys: undefined is expected when using a plain inference key:
-  if (response.status === 403) return undefined;
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter API error: ${String(response.status)} ${response.statusText}`);
+    return response.data;
   }
+  catch (error) {
+    // Endpoint reserved to management keys: undefined is expected when using a plain inference key:
+    if (error instanceof OpenRouterError && error.statusCode === 403) return undefined;
 
-  const body = await response.json() as OpenRouterCreditsResponse;
-
-  return body.data;
+    throw error;
+  }
 };
 
 export const openRouterApi = {

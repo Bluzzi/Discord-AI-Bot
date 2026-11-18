@@ -12,6 +12,7 @@
     "@ai-sdk/openai": "^4.0.113",
     "@discordjs/voice": "^0.19.2",
     "@openrouter/ai-sdk-provider": "^3.1.0",
+    "@openrouter/sdk": "^1.5.110",
     "ai": "^7.0.168",
     "croner": "^11.0.0",
     "dayjs": "^1.11.23",

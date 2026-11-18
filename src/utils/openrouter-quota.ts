@@ -40,9 +40,9 @@ const isExhausted = (): boolean => {
 };
 
 const formatQuotaDetails = (keyData: OpenRouterKeyData, creditsData: OpenRouterCreditsData | undefined): string => dedent`
-  - [KEY] ${keyData.label} | limit remaining: ${keyData.limit_remaining === null ? "unlimited" : String(keyData.limit_remaining)}
-  - [FREE DAILY] ${keyData.free_model_daily_requests === undefined ? "unknown" : `${String(keyData.free_model_daily_requests.used)}/${String(keyData.free_model_daily_requests.limit)} requests (resets at UTC midnight)`}
-  - [ACCOUNT] ${creditsData === undefined ? "balance unknown (management key required)" : `${String(creditsData.total_usage)}/${String(creditsData.total_credits)} credits used`}
+  - [KEY] ${keyData.label} | limit remaining: ${keyData.limitRemaining === null ? "unlimited" : String(keyData.limitRemaining)}
+  - [FREE DAILY] ${String(keyData.freeModelDailyRequests.used)}/${String(keyData.freeModelDailyRequests.limit)} requests (resets at UTC midnight)
+  - [ACCOUNT] ${creditsData === undefined ? "balance unknown (management key required)" : `${String(creditsData.totalUsage)}/${String(creditsData.totalCredits)} credits used`}
 `;
 
 const refresh = async (): Promise<void> => {
@@ -53,14 +53,14 @@ const refresh = async (): Promise<void> => {
     openRouterApi.fetchCredits(),
   ]);
 
-  // Key credit limit reached (limit_remaining is null when the key has no limit):
-  const keyLimitReached = keyData.limit_remaining !== null && keyData.limit_remaining <= 0;
+  // Key credit limit reached (limitRemaining is null when the key has no limit):
+  const keyLimitReached = keyData.limitRemaining !== null && keyData.limitRemaining <= 0;
 
-  // Account balance empty (total_credits > 0: a never-funded account has nothing to exhaust, its free models still work):
-  const accountBalanceEmpty = creditsData !== undefined && creditsData.total_credits > 0 && creditsData.total_usage >= creditsData.total_credits;
+  // Account balance empty (totalCredits > 0: a never-funded account has nothing to exhaust, its free models still work):
+  const accountBalanceEmpty = creditsData !== undefined && creditsData.totalCredits > 0 && creditsData.totalUsage >= creditsData.totalCredits;
 
   // Free models daily quota reached (resets at UTC midnight):
-  const freeDailyLimitReached = keyData.free_model_daily_requests !== undefined && keyData.free_model_daily_requests.remaining <= 0;
+  const freeDailyLimitReached = keyData.freeModelDailyRequests.remaining <= 0;
 
   state.creditsExhausted = keyLimitReached || accountBalanceEmpty;
   state.freeDailyExhausted = freeDailyLimitReached;
