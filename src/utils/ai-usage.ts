@@ -1,10 +1,4 @@
-import type { aiCauseEnum } from "#/postgres/schema";
 import type { LanguageModelUsage } from "ai";
-import { openRouterApi } from "#/integrations/openrouter";
-import { postgres } from "#/postgres/client";
-import { tableModelUsage } from "#/postgres/schema";
-
-type AiCause = typeof aiCauseEnum.enumValues[number];
 
 type AiToolCall = {
   toolName: string;
@@ -13,11 +7,6 @@ type AiToolCall = {
 type AiContentPart = {
   type: string;
   toolName?: string;
-};
-
-type AiUsageResult = {
-  usage: LanguageModelUsage;
-  steps: readonly { model: { modelId: string } }[];
 };
 
 const formatToolNameCounts = (toolNames: readonly string[]): string => {
@@ -63,25 +52,5 @@ export const aiUsage = {
     if (reasoningTokens !== undefined && reasoningTokens > 0) outputDetails.push(`${String(reasoningTokens)} reasoning`);
 
     return `${formatTokenCount(usage.inputTokens, inputDetails)} input tokens | ${formatTokenCount(usage.outputTokens, outputDetails)} output tokens`;
-  },
-
-  /** Track a completed generation in the model_usage table */
-  track: async (cause: AiCause, result: AiUsageResult): Promise<void> => {
-    const modelUsed = result.steps.at(-1)?.model.modelId;
-
-    if (modelUsed === undefined) {
-      throw new Error("Cannot resolve the used model: no step available");
-    }
-
-    const prices = await openRouterApi.computeUsagePrices(modelUsed, result.usage);
-
-    await postgres.insert(tableModelUsage).values({
-      cause,
-      inputTokenCount: result.usage.inputTokens ?? 0,
-      outputTokenCount: result.usage.outputTokens ?? 0,
-      inputPrice: prices.inputPrice,
-      outputPrice: prices.outputPrice,
-      modelUsed,
-    });
   },
 };

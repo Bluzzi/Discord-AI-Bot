@@ -1,3 +1,4 @@
+import { modelUsageRepository } from "#/database/model-usage-repository";
 import { discordClient } from "#/integrations/discord";
 import { aiModel, openRouterQuota } from "#/integrations/openrouter";
 import { holidaysTools } from "#/tools/holidays";
@@ -96,7 +97,7 @@ await trigger.cron(
     });
 
     // Usage tracking:
-    await aiUsage.track("discord_presence", motd);
+    await modelUsageRepository.track("discord_presence", motd);
   },
   {
     triggerAtStartup: true,

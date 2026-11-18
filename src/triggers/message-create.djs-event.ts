@@ -1,5 +1,6 @@
 import type { Message } from "discord.js";
 import type { OmitPartialGroupDMChannel } from "discord.js";
+import { modelUsageRepository } from "#/database/model-usage-repository";
 import { discordClient } from "#/integrations/discord";
 import { aiModel, openRouterQuota } from "#/integrations/openrouter";
 import { discordTools } from "#/tools/discord";
@@ -192,5 +193,5 @@ trigger.discordEvent("messageCreate", async (message) => {
   const result = await generateReply(message, isExplicitlyMentioned);
 
   // Usage tracking:
-  await aiUsage.track("reply_to_message", result);
+  await modelUsageRepository.track("reply_to_message", result);
 });

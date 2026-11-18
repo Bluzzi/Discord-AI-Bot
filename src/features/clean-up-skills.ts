@@ -1,6 +1,6 @@
-import { deleteSkills, listSkills } from "#/features/skill";
+import { modelUsageRepository } from "#/database/model-usage-repository";
+import { deleteSkills, listSkills } from "#/database/skill-repository";
 import { aiModel } from "#/integrations/openrouter";
-import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { generateText, Output, stepCountIs } from "ai";
 import dedent from "dedent";
@@ -79,7 +79,7 @@ export const cleanUpSkills = async (): Promise<CleanUpSkillsResult> => {
   });
 
   // Usage tracking (placed before validation: tokens are consumed even if the output is rejected afterwards):
-  await aiUsage.track("clean_up_skills", result);
+  await modelUsageRepository.track("clean_up_skills", result);
 
   const output = result.output;
 

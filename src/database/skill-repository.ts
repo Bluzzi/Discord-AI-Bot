@@ -1,5 +1,5 @@
-import { postgres } from "#/postgres/client";
-import { tableDiscordSkill } from "#/postgres/schema";
+import { postgres } from "#/database/client";
+import { tableDiscordSkill } from "#/database/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 // Trigger budget: a trigger is a very short condition (a few tokens), rendered in every AI prompt:
