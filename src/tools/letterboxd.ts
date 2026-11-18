@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { rss } from "#/utils/rss-parser";
+import { parseFeed } from "#/integrations/rss";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -20,7 +20,7 @@ export const letterboxdTools = {
     }),
     outputSchema: letterboxdReviewSchema,
     execute: async ({ username }) => {
-      const feed = await rss.parseURL(`https://letterboxd.com/${encodeURIComponent(username)}/rss/`);
+      const feed = await parseFeed(`https://letterboxd.com/${encodeURIComponent(username)}/rss/`);
 
       if (feed.items.length === 0) {
         throw new Error("No reviews found for this user");
@@ -60,7 +60,7 @@ export const letterboxdTools = {
       creator: z.string().optional().describe("Reviewer username"),
     }),
     execute: async ({ username, filmTitle }) => {
-      const feed = await rss.parseURL(`https://letterboxd.com/${encodeURIComponent(username)}/rss/`);
+      const feed = await parseFeed(`https://letterboxd.com/${encodeURIComponent(username)}/rss/`);
 
       if (feed.items.length === 0) {
         return { found: false };

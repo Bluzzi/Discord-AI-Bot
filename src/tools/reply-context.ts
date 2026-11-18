@@ -1,7 +1,6 @@
 import type { ToolSet } from "ai";
 import type { Message } from "discord.js";
-import { discordClient } from "#/services/discord";
-import { conversation } from "#/utils/conversation";
+import { discordClient, conversation } from "#/integrations/discord";
 import { env } from "#/utils/env";
 import { tool } from "ai";
 import dedent from "dedent";

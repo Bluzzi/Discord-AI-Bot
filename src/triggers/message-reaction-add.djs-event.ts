@@ -1,8 +1,7 @@
-import type { ConversationMessage } from "#/utils/conversation";
+import type { ConversationMessage } from "#/integrations/discord";
 import type { MessageReaction, User } from "discord.js";
-import { postgres } from "#/postgres/client";
-import { tableMessageFeedback } from "#/postgres/schema";
-import { conversation } from "#/utils/conversation";
+import { messageFeedbackRepository } from "#/database/message-feedback-repository";
+import { conversation } from "#/integrations/discord";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
@@ -40,7 +39,7 @@ trigger.discordEvent("messageReactionAdd", async (rawReaction, rawReactor) => {
   const transcript = conversation.buildTranscript(conversationMessages);
 
   // Store the feedback:
-  await postgres.insert(tableMessageFeedback).values({
+  await messageFeedbackRepository.create({
     messageContent: message.content,
     previousMessages: transcript,
     reaction: feedbackReaction,

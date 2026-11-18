@@ -1,10 +1,8 @@
 import type { ToolSet } from "ai";
+import { userMemoryRepository } from "#/database/user-memory-repository";
 import { consolidateUserMemory, MEMORY_MAX_LENGTH } from "#/features/consolidate-user-memory";
-import { postgres } from "#/postgres/client";
-import { tableDiscordUserMemory } from "#/postgres/schema";
 import { tool } from "ai";
 import dedent from "dedent";
-import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 // ToolSet is applied via "satisfies": a ": ToolSet" annotation would erase the inferred schema types (input, output, context) and break toolsContext inference at call sites:
@@ -32,21 +30,12 @@ export const memoryTools = {
       updatedAt: z.string().nullable().describe("Last update date (ISO), null if no memory exists yet"),
     }),
     execute: async ({ userId }) => {
-      const rows = await postgres
-        .select()
-        .from(tableDiscordUserMemory)
-        .where(eq(tableDiscordUserMemory.userID, userId))
-        .limit(1);
-
-      const row = rows[0];
-      if (!row) {
-        return { userId, memoryText: null, updatedAt: null };
-      }
+      const memory = await userMemoryRepository.get(userId);
 
       return {
-        userId: row.userID,
-        memoryText: row.memoryText,
-        updatedAt: row.updatedAt.toISOString(),
+        userId,
+        memoryText: memory?.memoryText ?? null,
+        updatedAt: memory?.updatedAt.toISOString() ?? null,
       };
     },
   }),
@@ -66,17 +55,13 @@ export const memoryTools = {
       })).describe("The 10 most recently updated memories, newest first"),
     }),
     execute: async () => {
-      const rows = await postgres
-        .select()
-        .from(tableDiscordUserMemory)
-        .orderBy(desc(tableDiscordUserMemory.updatedAt))
-        .limit(10);
+      const memories = await userMemoryRepository.listRecent(10);
 
       return {
-        memories: rows.map((row) => ({
-          userId: row.userID,
-          memoryText: row.memoryText,
-          updatedAt: row.updatedAt.toISOString(),
+        memories: memories.map((memory) => ({
+          userId: memory.userId,
+          memoryText: memory.memoryText,
+          updatedAt: memory.updatedAt.toISOString(),
         })),
       };
     },
@@ -110,47 +95,31 @@ export const memoryTools = {
       updatedAt: z.string().nullable().describe("Last update date (ISO), null if no memory exists"),
     }),
     execute: async ({ userId, facts }, { context }) => {
-      const authorId = context.authorId;
+      const currentMemory = await userMemoryRepository.get(userId);
 
-      const rows = await postgres
-        .select()
-        .from(tableDiscordUserMemory)
-        .where(eq(tableDiscordUserMemory.userID, userId))
-        .limit(1);
-
-      const currentMemoryText = rows[0]?.memoryText ?? null;
-      const currentUpdatedAt = rows[0]?.updatedAt ?? null;
-
-      const consolidation = await consolidateUserMemory({ subjectId: userId, authorId, facts, currentMemoryText });
+      const consolidation = await consolidateUserMemory({
+        subjectId: userId,
+        authorId: context.authorId,
+        facts,
+        currentMemoryText: currentMemory?.memoryText ?? null,
+      });
 
       if (!consolidation.appended) {
         return {
           userId,
           appended: false,
-          memoryText: currentMemoryText,
-          updatedAt: currentUpdatedAt ? currentUpdatedAt.toISOString() : null,
+          memoryText: currentMemory?.memoryText ?? null,
+          updatedAt: currentMemory?.updatedAt.toISOString() ?? null,
         };
       }
 
-      const savedRows = await postgres
-        .insert(tableDiscordUserMemory)
-        .values({ userID: userId, memoryText: consolidation.memoryText })
-        .onConflictDoUpdate({
-          target: tableDiscordUserMemory.userID,
-          set: { memoryText: consolidation.memoryText, updatedAt: new Date() },
-        })
-        .returning();
-
-      const savedRow = savedRows[0];
-      if (!savedRow) {
-        throw new Error("Memory append failed");
-      }
+      const savedMemory = await userMemoryRepository.save({ userId, memoryText: consolidation.memoryText });
 
       return {
         userId,
         appended: true,
-        memoryText: savedRow.memoryText,
-        updatedAt: savedRow.updatedAt.toISOString(),
+        memoryText: savedMemory.memoryText,
+        updatedAt: savedMemory.updatedAt.toISOString(),
       };
     },
   }),

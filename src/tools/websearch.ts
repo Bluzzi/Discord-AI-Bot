@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { webSearch } from "#/utils/web-search";
+import { webSearch } from "#/integrations/web-search";
 import { tool } from "ai";
 import { z } from "zod";
 

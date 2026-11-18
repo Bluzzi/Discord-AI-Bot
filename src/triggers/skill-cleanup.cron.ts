@@ -1,6 +1,6 @@
 import { cleanUpSkills } from "#/features/clean-up-skills";
+import { openRouterQuota } from "#/integrations/openrouter";
 import { logger } from "#/utils/logger";
-import { openRouterQuota } from "#/utils/openrouter-quota";
 import { trigger } from "#/utils/trigger";
 import dedent from "dedent";
 

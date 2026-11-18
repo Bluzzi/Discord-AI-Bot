@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { SKILL_RULE_MAX_LENGTH, SKILL_TRIGGER_MAX_LENGTH, createSkill, listSkillTriggers, openSkill } from "#/features/skill";
+import { SKILL_RULE_MAX_LENGTH, SKILL_TRIGGER_MAX_LENGTH, createSkill, listSkillTriggers, openSkill } from "#/database/skill-repository";
 import { tool } from "ai";
 import dedent from "dedent";
 import { z } from "zod";
