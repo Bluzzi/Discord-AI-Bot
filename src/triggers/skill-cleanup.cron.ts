@@ -6,7 +6,7 @@ import dedent from "dedent";
 
 await trigger.cron(
   "skill-cleanup",
-  "0 6 * * *",
+  "0 * * * *", // every hour
   async () => {
     // Skip the AI call when OpenRouter has no quota left (the CRON simply stops working):
     if (openRouterQuota.isExhausted()) {
