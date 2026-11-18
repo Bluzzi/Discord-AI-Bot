@@ -20,7 +20,6 @@ import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { openRouterQuota } from "#/utils/openrouter-quota";
 import { trigger } from "#/utils/trigger";
-import { withTypingIndicator } from "#/utils/typing-indicator";
 import { generateText, hasToolCall, stepCountIs } from "ai";
 import dedent from "dedent";
 
@@ -191,8 +190,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   logger.info(`Reply evaluation for ${message.author.displayName} (${isExplicitlyMentioned ? "explicit mention" : "ambient"})`);
 
-  // The typing indicator ALWAYS stops when the work completes, even if the error propagates:
-  const result = await withTypingIndicator(message.channel, async () => generateReply(message, isExplicitlyMentioned));
+  const result = await generateReply(message, isExplicitlyMentioned);
 
   // Usage tracking:
   await aiUsage.track("reply_to_message", result);

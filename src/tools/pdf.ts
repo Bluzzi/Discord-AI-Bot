@@ -44,6 +44,8 @@ export const pdfTools = {
       }
 
       const pdfFilename = `${filename.replace(/[^a-zA-Z0-9-_]/gu, "-")}.pdf`;
+      await channel.sendTyping();
+
       const message = await channel.send({ files: [{ name: pdfFilename, attachment: pdf }] });
 
       return {

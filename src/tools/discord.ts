@@ -717,6 +717,8 @@ export const discordTools = {
         throw new Error("Channel does not support sending messages");
       }
 
+      await channel.sendTyping();
+
       const messageIds: string[] = [];
 
       for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
@@ -790,12 +792,17 @@ export const discordTools = {
           throw new Error("Channel does not support sending messages");
         }
 
+        await channel.sendTyping();
+
         const message = await channel.send(payload);
         return { messageId: message.id };
       }
 
       const user = await discordClient.users.fetch(userId!);
-      const message = await user.send(payload);
+      const dmChannel = await user.createDM();
+      await dmChannel.sendTyping();
+
+      const message = await dmChannel.send(payload);
 
       return { messageId: message.id };
     },
@@ -816,11 +823,13 @@ export const discordTools = {
     }),
     execute: async ({ userId, content }) => {
       const user = await discordClient.users.fetch(userId);
+      const dmChannel = await user.createDM();
+      await dmChannel.sendTyping();
 
       const messageIds: string[] = [];
 
       for (const chunk of splitDiscordMessage(content)) {
-        const message = await user.send(chunk);
+        const message = await dmChannel.send(chunk);
         messageIds.push(message.id);
       }
 
@@ -868,6 +877,8 @@ export const discordTools = {
         throw new Error("Channel does not support sending messages");
       }
 
+      await channel.sendTyping();
+
       await channel.send({
         poll: {
           question: { text: question },
@@ -900,6 +911,8 @@ export const discordTools = {
       if (!("send" in channel)) {
         throw new Error("Channel does not support sending messages");
       }
+
+      await channel.sendTyping();
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -993,6 +1006,8 @@ export const discordTools = {
       if (!("send" in channel)) {
         throw new Error("Channel does not support sending messages");
       }
+
+      await channel.sendTyping();
 
       const messageIds: string[] = [];
 
