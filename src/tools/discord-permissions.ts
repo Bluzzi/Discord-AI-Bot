@@ -1,12 +1,12 @@
-import type { ToolSet } from "ai";
+import type { DiscordToolName as ToolName } from "#/tools/discord";
+import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
 import { discordClient, findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord";
-import { discordTools } from "#/tools/discord";
+import { discordTools, discordToolsRequiringApproval, getDiscordToolInputSchema } from "#/tools/discord";
 import { ChannelType, GuildScheduledEventEntityType, PermissionFlagsBits as permissionFlags } from "discord.js";
 import { z } from "zod";
 
 type Input = Record<string, unknown>;
-type ToolName = keyof typeof discordTools;
 type ChannelSelector = (input: Input, member: GuildMember) => unknown;
 type Scope = { permission: bigint; resolve?: ChannelSelector; threadPermission?: bigint };
 type Check = (input: Input, member: GuildMember) => void | Promise<void>;
@@ -433,8 +433,53 @@ const filterChannelResults = (name: ToolName, result: unknown, member: GuildMemb
   return result;
 };
 
+const tools: ToolSet = discordTools;
+
+const parseToolArguments = (input: unknown) => {
+  const args = object.parse(input);
+  for (const [key, value] of Object.entries(args)) {
+    if (key.endsWith("Id") && value !== undefined) id.parse(value);
+  }
+  return args;
+};
+
+const requireGuildToolPermission = async (args: Input, requester: GuildMember | null, rule: Rule) => {
+  if (requester === null || !hasGuildPermission(requester, rule.guild ?? 0n)) throw denied();
+  if (args.guildId !== undefined && args.guildId !== requester.guild.id) throw denied();
+  const scope = rule.channel;
+  if (scope?.resolve !== undefined) {
+    const target = await targetChannel(requester, scope.resolve(args, requester));
+    if (target === null) throw denied();
+    await requireDiscordChannelPermissions(requester, target, permissionIn(target, scope));
+  }
+  await rule.check?.(args, requester);
+  return requester;
+};
+
+export const validateDiscordApprovalAction = async (name: string, input: unknown, requester: GuildMember) => {
+  if (!Object.hasOwn(discordTools, name) || !Object.hasOwn(rules, name)) throw denied();
+  const toolName = name as ToolName;
+  const rule = rules[toolName];
+  if (!discordToolsRequiringApproval.has(toolName) || rule === undefined) throw denied();
+
+  const args = parseToolArguments(getDiscordToolInputSchema(toolName).parse(input));
+  await requireGuildToolPermission(args, requester, rule);
+  return args;
+};
+
+export const executeApprovedDiscordAction = async (
+  name: string,
+  input: unknown,
+  requester: GuildMember,
+  toolCallId: string,
+) => {
+  const args = await validateDiscordApprovalAction(name, input, requester);
+  const execute = tools[name]?.execute as ToolExecuteFunction<Input, unknown, undefined> | undefined;
+  if (execute === undefined) throw new Error(`Discord tool ${name} cannot be executed`);
+  await execute(args, { toolCallId, messages: [], context: undefined });
+};
+
 export const getDiscordToolsForMessage = (message: Message) => {
-  const tools: ToolSet = discordTools;
   const isDm = message.guildId === null;
   const member = message.member;
   const visibleChannels = member?.guild.channels.cache.map((target) => ({
@@ -448,10 +493,7 @@ export const getDiscordToolsForMessage = (message: Message) => {
     return {
       ...definition,
       execute: async (input, options) => {
-        const args = object.parse(input);
-        for (const [key, value] of Object.entries(args)) {
-          if (key.endsWith("Id") && value !== undefined) id.parse(value);
-        }
+        const args = parseToolArguments(input);
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
         const isConversationReply = (name === "sendMessage" || name === "sendReply") && args.channelId === message.channelId;
         if (isDm || isConversationReply) {
@@ -460,16 +502,7 @@ export const getDiscordToolsForMessage = (message: Message) => {
           return result;
         }
 
-        const requester = message.member;
-        if (requester === null || !hasGuildPermission(requester, rule.guild ?? 0n)) throw denied();
-        if (args.guildId !== undefined && args.guildId !== requester.guild.id) throw denied();
-        const scope = rule.channel;
-        if (scope?.resolve !== undefined) {
-          const target = await targetChannel(requester, scope.resolve(args, requester));
-          if (target === null) throw denied();
-          await requireDiscordChannelPermissions(requester, target, permissionIn(target, scope));
-        }
-        await rule.check?.(args, requester);
+        const requester = await requireGuildToolPermission(args, message.member, rule);
         const result: unknown = await execute(input, options);
         return filterChannelResults(name, result, requester);
       },
@@ -477,6 +510,7 @@ export const getDiscordToolsForMessage = (message: Message) => {
   };
 
   const available: Partial<Record<ToolName, ToolSet[string]>> = {};
+  const approvalToolNames: ToolName[] = [];
   for (const [name, rule] of Object.entries(rules) as [ToolName, Rule][]) {
     if (isDm) {
       if (!dmTools.has(name)) continue;
@@ -486,12 +520,19 @@ export const getDiscordToolsForMessage = (message: Message) => {
       const scope = rule.channel;
       if (scope !== undefined && !visibleChannels.some(({ target, permissions }) => permissions.has(permissionIn(target, scope)))) continue;
     }
+    if (discordToolsRequiringApproval.has(name)) {
+      if (!isDm) approvalToolNames.push(name);
+      continue;
+    }
     available[name] = wrap(name, rule);
   }
 
   return {
-    ...available,
-    sendMessage: wrap("sendMessage", channel(permissionFlags.SendMessages)),
-    sendReply: wrap("sendReply", {}),
+    tools: {
+      ...available,
+      sendMessage: wrap("sendMessage", channel(permissionFlags.SendMessages)),
+      sendReply: wrap("sendReply", {}),
+    },
+    approvalToolNames,
   };
 };

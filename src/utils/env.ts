@@ -7,7 +7,7 @@ const schema = z.object({
 
   DISCORD_BOT_ID: z.string(),
   DISCORD_BOT_TOKEN: z.string(),
-  DISCORD_BOT_NAME: z.string().default("Jean Pascal"),
+  DISCORD_BOT_NAME: z.string(),
 
   OPENROUTER_API_KEY: z.string(),
   OPENROUTER_MODEL: z.string().default("deepseek/deepseek-v4.1-flash-1017"),

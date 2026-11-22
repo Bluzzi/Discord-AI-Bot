@@ -1,6 +1,9 @@
+import type { ToolSet } from "ai";
+import { requestDiscordApproval } from "./message-reaction-add.djs-event";
 import { discordClient, startDiscordTyping } from "#/integrations/discord";
 import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
 import { tableModelUsage } from "#/tables/model-usage";
+import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { replyContextTools } from "#/tools/reply-context";
 import { websearchTools } from "#/tools/websearch";
@@ -45,6 +48,12 @@ trigger.discordEvent("messageCreate", async (message) => {
   // Stream the reply and report tool activity as it happens.
   const channelId = channel.id;
   const guild = message.guild;
+  const member = message.member;
+  const { tools, approvalToolNames } = getDiscordToolsForMessage(message);
+  const approvalTools: ToolSet = {};
+  if (member !== null && approvalToolNames.length > 0) {
+    approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions) => requestDiscordApproval(channel, member, actions));
+  }
   const startedAt = Date.now();
 
   logger.info(`${logPrefix} Reply started for message ${message.id} from ${message.author.username}`);
@@ -55,6 +64,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     instructions: dedent`
       Tu es ${env.DISCORD_BOT_NAME}, un assistant Discord sympa dans « Le Royaume », une communauté de gamers, de développeurs, de designers et de personnes de tous horizons.
       Aide les membres avec des réponses claires, brèves et adaptées à leur demande.
+      Si proposeDiscordActions est disponible et que la demande nécessite des modifications, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente du ✅ du demandeur. Continue les tâches indépendantes et précise dans ta réponse quelles actions restent à approuver.
       Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
     `,
     prompt: dedent`
@@ -76,7 +86,8 @@ trigger.discordEvent("messageCreate", async (message) => {
       return { toolChoice: "required" };
     },
     tools: {
-      ...getDiscordToolsForMessage(message),
+      ...tools,
+      ...approvalTools,
       ...replyContextTools,
       ...websearchTools,
     },
@@ -84,6 +95,10 @@ trigger.discordEvent("messageCreate", async (message) => {
       getReplyContext: { channelId, messageId: message.id },
     },
     onToolExecutionStart: ({ toolCall }) => {
+      if (toolCall.toolName === "proposeDiscordActions") {
+        logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
+        return;
+      }
       logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(toolCall.input))}`);
     },
     onStepEnd: ({ stepNumber, text }) => {

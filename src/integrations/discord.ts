@@ -27,12 +27,15 @@ export const discordClient = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildScheduledEvents,
   ],
   partials: [
     Partials.Channel,
+    Partials.Message,
+    Partials.Reaction,
   ],
 });
 
