@@ -1,9 +1,9 @@
 import type { AudioResource, VoiceConnection } from "@discordjs/voice";
-import type { SendableChannels } from "discord.js";
+import type { Guild, GuildBasedChannel, GuildMember, SendableChannels } from "discord.js";
 import { createAudioPlayer, getVoiceConnection } from "@discordjs/voice";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { ChannelType, Client, DiscordAPIError, GatewayIntentBits, Partials, PermissionFlagsBits, PermissionsBitField, RESTJSONErrorCodes } from "discord.js";
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
@@ -42,6 +42,42 @@ export const fetchDiscordChannel = async (channelId: string) => {
     throw new Error("Channel not found");
   }
   return channel;
+};
+
+export const getDiscordChannelPermissions = (member: GuildMember, channel: GuildBasedChannel) => {
+  const effective = new PermissionsBitField(channel.permissionsFor(member.id)?.bitfield);
+  const { ViewChannel, ReadMessageHistory, SendMessages, SendMessagesInThreads, ManageThreads, Connect, SetVoiceChannelStatus } = PermissionFlagsBits;
+  if (member.isCommunicationDisabled()) effective.remove(effective.bitfield & ~(ViewChannel | ReadMessageHistory));
+  if (channel.isVoiceBased() && !effective.has(Connect)) {
+    const retained = ViewChannel | (member.voice.channelId === channel.id ? SetVoiceChannelStatus : 0n);
+    effective.remove(effective.bitfield & ~retained);
+  }
+  if (channel.isThread()) {
+    effective.remove(SendMessages);
+    if (effective.has(SendMessagesInThreads) && (channel.locked !== true || effective.has(ManageThreads))) effective.add(SendMessages);
+  }
+  return effective;
+};
+
+export const requireDiscordChannelPermissions = async (member: GuildMember, channel: GuildBasedChannel, permission: bigint) => {
+  if (channel.guildId !== member.guild.id) throw new Error("This Discord channel is outside the requesting member's guild");
+  const permissions = getDiscordChannelPermissions(member, channel);
+  if (!permissions.has(PermissionFlagsBits.ViewChannel | permission)) {
+    throw new Error("The requesting member does not have permission in this Discord channel");
+  }
+  if (channel.type === ChannelType.PrivateThread && !permissions.has(PermissionFlagsBits.ManageThreads)) {
+    await channel.members.fetch({ member: member.id, force: true, cache: false });
+  }
+};
+
+export const findDiscordGuildMember = async (guild: Guild, userId: string) => {
+  try {
+    return await guild.members.fetch(userId);
+  }
+  catch (error) {
+    if (error instanceof DiscordAPIError && error.code === RESTJSONErrorCodes.UnknownMember) return null;
+    throw error;
+  }
 };
 
 export const fetchDiscordTextChannel = async (channelId: string) => {

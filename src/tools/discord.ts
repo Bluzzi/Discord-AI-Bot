@@ -1,9 +1,9 @@
 import type { ToolSet } from "ai";
-import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable, RouteLike } from "discord.js";
+import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
 import { createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
 import { discordClient, fetchDiscordChannel, fetchDiscordTextChannel, fetchDiscordSendableChannel, fetchDiscordVoiceConnection, getDiscordAudioPlayer, replaceDiscordAudio, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
 import { tool } from "ai";
-import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, MessageFlags, MessagePayload, parseEmoji, RequestMethod, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
+import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
 import { Readable } from "node:stream";
 import { z } from "zod";
 
@@ -23,53 +23,13 @@ const mediaUrl = z.url({ protocol: /^https?$/u });
 const webhookFields = z.object({ name: text, avatar: text.nullable(), channel_id: id }).partial();
 const entityType = integer.min(1).max(3);
 
-type ActionOptions = {
-  query?: z.ZodObject;
-  body?: z.ZodType;
-  audit?: boolean;
+const decodeDiscordRestResult = (result: unknown) => {
+  if (result instanceof ArrayBuffer) {
+    return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+  }
+  return result ?? {};
 };
 
-const action = (description: string, method: RequestMethod, path: RouteLike, { query, body, audit }: ActionOptions = {}) => {
-  const segments = Array.from(path.matchAll(/:([a-z]\w*)/gu), ([, key]) => key!);
-  const params = z.object(Object.fromEntries(segments.map((key) => [key, key.endsWith("Id") && key !== "instanceId" ? id : pathSegment])));
-  const inputSchema = params.extend({
-    ...(query === undefined ? {} : { query: query.safeParse({}).success ? query.optional() : query }),
-    ...(body === undefined ? {} : { body }),
-    ...(audit === true ? { reason } : {}),
-  });
-
-  return tool({
-    description,
-    inputSchema,
-    execute: async (input) => {
-      const route = path.replace(/:([a-z]\w*)/gu, (_match, key: string) => encodeURIComponent(params.shape[key]!.parse(input[key]))) as RouteLike;
-      const searchParams = new URLSearchParams();
-      for (const [key, value] of Object.entries(query?.parse(input.query ?? {}) ?? {})) {
-        if (value !== undefined) {
-          const items = Array.isArray(value) && key !== "include_roles" ? value : [value];
-          for (const item of items) {
-            searchParams.append(key, String(item));
-          }
-        }
-      }
-
-      const result = await discordClient.rest.request({
-        method,
-        fullRoute: route,
-        body: body?.parse(input.body),
-        query: searchParams,
-        reason: audit === true ? reason.parse(input.reason) : undefined,
-      });
-
-      if (result instanceof ArrayBuffer) {
-        return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      }
-      return result ?? {};
-    },
-  });
-};
-
-const { Get, Post, Patch, Put, Delete } = RequestMethod;
 const memberSearch = z.object({ query: text.min(1), limit });
 const permissionOverwrite = z.object({
   id,
@@ -157,129 +117,231 @@ const webhookSummary = (webhook: { id: string; name: string | null; channelId: s
 
 export const discordTools = {
   // Guilds And Members
-  getBotGuilds: action("List guilds the bot belongs to.", Get, "/users/@me/guilds", {
-    query: page.extend({ limit: integer.min(1).max(200).optional(), with_counts: flag.optional() }),
+  getBotGuilds: tool({
+    description: "List guilds the bot belongs to.",
+    inputSchema: z.object({ query: page.extend({ limit: integer.min(1).max(200).optional(), with_counts: flag.optional() }).optional() }),
+    execute: async ({ query }) => decodeDiscordRestResult(await discordClient.rest.get("/users/@me/guilds", {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  getGuildDetails: action("Get full guild settings and features.", Get, "/guilds/:guildId", { query: z.object({ with_counts: flag.optional() }) }),
-  editGuild: action("Edit guild settings.", Patch, "/guilds/:guildId", {
-    audit: true,
-    body: z.object({
-      name: text.min(2).max(100),
-      description: text.max(120).nullable(),
-      verification_level: integer.min(0).max(4),
-      default_message_notifications: integer.min(0).max(1),
-      explicit_content_filter: integer.min(0).max(2),
-      afk_channel_id: id.nullable(),
-      afk_timeout: integer,
-      icon: image.nullable(),
-      splash: image.nullable(),
-      discovery_splash: image.nullable(),
-      banner: image.nullable(),
-      system_channel_id: id.nullable(),
-      system_channel_flags: integer,
-      rules_channel_id: id.nullable(),
-      public_updates_channel_id: id.nullable(),
-      safety_alerts_channel_id: id.nullable(),
-      preferred_locale: text,
-      features: z.array(text),
-      premium_progress_bar_enabled: flag,
-    }).partial(),
+  getGuildDetails: tool({
+    description: "Get full guild settings and features.",
+    inputSchema: z.object({ guildId: id, query: z.object({ with_counts: flag.optional() }).optional() }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  leaveGuild: action("Make the bot leave a guild.", Delete, "/users/@me/guilds/:guildId"),
-  listGuildMembers: action("List guild members by user ID page.", Get, "/guilds/:guildId/members", {
-    query: z.object({ limit: integer.min(1).max(1000).optional(), after: id.optional() }),
+  editGuild: tool({
+    description: "Edit guild settings.",
+    inputSchema: z.object({
+      guildId: id,
+      reason,
+      body: z.object({
+        name: text.min(2).max(100),
+        description: text.max(120).nullable(),
+        verification_level: integer.min(0).max(4),
+        default_message_notifications: integer.min(0).max(1),
+        explicit_content_filter: integer.min(0).max(2),
+        afk_channel_id: id.nullable(),
+        afk_timeout: integer,
+        icon: image.nullable(),
+        splash: image.nullable(),
+        discovery_splash: image.nullable(),
+        banner: image.nullable(),
+        system_channel_id: id.nullable(),
+        system_channel_flags: integer,
+        rules_channel_id: id.nullable(),
+        public_updates_channel_id: id.nullable(),
+        safety_alerts_channel_id: id.nullable(),
+        preferred_locale: text,
+        features: z.array(text),
+        premium_progress_bar_enabled: flag,
+      }).partial(),
+    }),
+    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}`, { reason, body })),
   }),
-  searchGuildMembers: action("Find guild members by username or nickname prefix.", Get, "/guilds/:guildId/members/search", {
-    query: memberSearch.extend({ limit: integer.min(1).max(1000).optional() }),
+  leaveGuild: tool({
+    description: "Make the bot leave a guild.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/users/@me/guilds/${guildId}`)),
   }),
-  getGuildMember: action("Get a guild member, including assigned role IDs.", Get, "/guilds/:guildId/members/:userId"),
-  getGuildMemberPermissions: action("Get a member's computed guild permissions.", Get, "/guilds/:guildId/permissions/member/:userId"),
-  getGuildRolePermissions: action("Get a role's computed guild permissions.", Get, "/guilds/:guildId/permissions/role/:roleId"),
-  setMemberRoles: action("Replace a guild member's complete list of roles.", Patch, "/guilds/:guildId/members/:userId", {
-    audit: true,
-    body: z.object({ roles: ids }),
+  listGuildMembers: tool({
+    description: "List guild members by user ID page.",
+    inputSchema: z.object({ guildId: id, query: z.object({ limit: integer.min(1).max(1000).optional(), after: id.optional() }).optional() }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/members`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  removeMemberTimeout: action("Remove a guild member's timeout.", Patch, "/guilds/:guildId/members/:userId", {
-    audit: true,
-    body: z.object({ communication_disabled_until: z.null().default(null) }).default({ communication_disabled_until: null }),
+  searchGuildMembers: tool({
+    description: "Find guild members by username or nickname prefix.",
+    inputSchema: z.object({ guildId: id, query: memberSearch.extend({ limit: integer.min(1).max(1000).optional() }) }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/members/search`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  kickMember: action("Remove a member from a guild.", Delete, "/guilds/:guildId/members/:userId", { audit: true }),
-  getGuildBans: action("List guild bans.", Get, "/guilds/:guildId/bans", { query: page.extend({ limit: integer.min(1).max(1000).optional() }) }),
-  getGuildBan: action("Get a guild ban.", Get, "/guilds/:guildId/bans/:userId"),
-  banMember: action("Ban a user from a guild.", Put, "/guilds/:guildId/bans/:userId", {
-    audit: true,
-    body: z.object({ delete_message_seconds: integer.min(0).max(604800).optional() }).default({}),
+  getGuildMember: tool({
+    description: "Get a guild member, including assigned role IDs.",
+    inputSchema: z.object({ guildId: id, userId: id }),
+    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/members/${userId}`)),
   }),
-  bulkBanMembers: action("Ban up to 200 users from a guild.", Post, "/guilds/:guildId/bulk-ban", {
-    audit: true,
-    body: z.object({ user_ids: ids.min(1).max(200), delete_message_seconds: integer.min(0).max(604800).optional() }),
+  getGuildMemberPermissions: tool({
+    description: "Get a member's computed guild permissions.",
+    inputSchema: z.object({ guildId: id, userId: id }),
+    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/permissions/member/${userId}`)),
   }),
-  unbanMember: action("Remove a user's guild ban.", Delete, "/guilds/:guildId/bans/:userId", { audit: true }),
-  getPruneCount: action("Count inactive members a prune would remove.", Get, "/guilds/:guildId/prune", {
-    query: z.object({ days: integer.min(1).max(30).optional(), include_roles: ids.optional().describe("Role IDs as an array") }),
+  getGuildRolePermissions: tool({
+    description: "Get a role's computed guild permissions.",
+    inputSchema: z.object({ guildId: id, roleId: id }),
+    execute: async ({ guildId, roleId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/permissions/role/${roleId}`)),
   }),
-  pruneMembers: action("Remove inactive guild members.", Post, "/guilds/:guildId/prune", {
-    audit: true,
-    body: z.object({ days: integer.min(1).max(30), compute_prune_count: flag.optional(), include_roles: ids.optional() }),
+  setMemberRoles: tool({
+    description: "Replace a guild member's complete list of roles.",
+    inputSchema: z.object({ guildId: id, userId: id, reason, body: z.object({ roles: ids }) }),
+    execute: async ({ guildId, userId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/members/${userId}`, { reason, body })),
   }),
-  editGuildIncidentActions: action("Temporarily pause guild invites or DMs. Null resumes them.", Put, "/guilds/:guildId/incident-actions", {
-    body: z.object({ invites_disabled_until: date.nullable(), dms_disabled_until: date.nullable() }).partial(),
+  removeMemberTimeout: tool({
+    description: "Remove a guild member's timeout.",
+    inputSchema: z.object({ guildId: id, userId: id, reason, body: z.object({ communication_disabled_until: z.null().default(null) }).default({ communication_disabled_until: null }) }),
+    execute: async ({ guildId, userId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/members/${userId}`, { reason, body })),
+  }),
+  kickMember: tool({
+    description: "Remove a member from a guild.",
+    inputSchema: z.object({ guildId: id, userId: id, reason }),
+    execute: async ({ guildId, userId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/members/${userId}`, { reason })),
+  }),
+  getGuildBans: tool({
+    description: "List guild bans.",
+    inputSchema: z.object({ guildId: id, query: page.extend({ limit: integer.min(1).max(1000).optional() }).optional() }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/bans`, {
+      query: makeURLSearchParams(query),
+    })),
+  }),
+  getGuildBan: tool({
+    description: "Get a guild ban.",
+    inputSchema: z.object({ guildId: id, userId: id }),
+    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/bans/${userId}`)),
+  }),
+  banMember: tool({
+    description: "Ban a user from a guild.",
+    inputSchema: z.object({ guildId: id, userId: id, reason, body: z.object({ delete_message_seconds: integer.min(0).max(604800).optional() }).default({}) }),
+    execute: async ({ guildId, userId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/guilds/${guildId}/bans/${userId}`, { reason, body })),
+  }),
+  bulkBanMembers: tool({
+    description: "Ban up to 200 users from a guild.",
+    inputSchema: z.object({ guildId: id, reason, body: z.object({ user_ids: ids.min(1).max(200), delete_message_seconds: integer.min(0).max(604800).optional() }) }),
+    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/guilds/${guildId}/bulk-ban`, { reason, body })),
+  }),
+  unbanMember: tool({
+    description: "Remove a user's guild ban.",
+    inputSchema: z.object({ guildId: id, userId: id, reason }),
+    execute: async ({ guildId, userId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/bans/${userId}`, { reason })),
+  }),
+  getPruneCount: tool({
+    description: "Count inactive members a prune would remove.",
+    inputSchema: z.object({ guildId: id, query: z.object({ days: integer.min(1).max(30).optional(), include_roles: ids.optional().describe("Role IDs as an array") }).optional() }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/prune`, {
+      query: makeURLSearchParams({ ...query, include_roles: query?.include_roles?.join(",") }),
+    })),
+  }),
+  pruneMembers: tool({
+    description: "Remove inactive guild members.",
+    inputSchema: z.object({ guildId: id, reason, body: z.object({ days: integer.min(1).max(30), compute_prune_count: flag.optional(), include_roles: ids.optional() }) }),
+    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/guilds/${guildId}/prune`, { reason, body })),
+  }),
+  editGuildIncidentActions: tool({
+    description: "Temporarily pause guild invites or DMs. Null resumes them.",
+    inputSchema: z.object({ guildId: id, body: z.object({ invites_disabled_until: date.nullable(), dms_disabled_until: date.nullable() }).partial() }),
+    execute: async ({ guildId, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/guilds/${guildId}/incident-actions`, { body })),
   }),
 
   // Channels And Threads
-  getChannelDetails: action("Get full channel settings and permission overwrites.", Get, "/channels/:channelId"),
-  editChannel: action("Edit a channel or thread.", Patch, "/channels/:channelId", {
-    audit: true,
-    body: z.object({
-      name: text.min(1).max(100),
-      type: integer,
-      position: integer.nonnegative(),
-      topic: text.max(4096).nullable(),
-      nsfw: flag,
-      rate_limit_per_user: integer.min(0).max(21600),
-      bitrate: integer,
-      user_limit: integer,
-      permission_overwrites: z.array(permissionOverwrite),
-      parent_id: id.nullable(),
-      rtc_region: text.nullable(),
-      video_quality_mode: integer.min(1).max(2),
-      default_auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]),
-      flags: integer.nonnegative(),
-      available_tags: z.array(forumTag),
-      applied_tags: ids,
-      default_reaction_emoji: z.object({ emoji_id: id.nullable().optional(), emoji_name: text.nullable().optional() }).nullable(),
-      default_thread_rate_limit_per_user: integer.min(0).max(21600),
-      default_sort_order: integer.min(0).max(1).nullable(),
-      default_forum_layout: integer.min(0).max(2),
-      archived: flag,
-      auto_archive_duration: integer,
-      locked: flag,
-      invitable: flag,
-    }).partial(),
+  getChannelDetails: tool({
+    description: "Get full channel settings and permission overwrites.",
+    inputSchema: z.object({ channelId: id }),
+    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}`)),
   }),
-  deleteChannel: action("Delete a guild channel or close a DM.", Delete, "/channels/:channelId", { audit: true }),
-  reorderChannels: action("Reorder or move guild channels.", Patch, "/guilds/:guildId/channels", {
-    audit: true,
-    body: z.array(z.object({ id, position: integer.nonnegative().nullable().optional(), lock_permissions: flag.nullable().optional(), parent_id: id.nullable().optional() })).min(1),
+  editChannel: tool({
+    description: "Edit a channel or thread.",
+    inputSchema: z.object({
+      channelId: id,
+      reason,
+      body: z.object({
+        name: text.min(1).max(100),
+        type: integer,
+        position: integer.nonnegative(),
+        topic: text.max(4096).nullable(),
+        nsfw: flag,
+        rate_limit_per_user: integer.min(0).max(21600),
+        bitrate: integer,
+        user_limit: integer,
+        permission_overwrites: z.array(permissionOverwrite),
+        parent_id: id.nullable(),
+        rtc_region: text.nullable(),
+        video_quality_mode: integer.min(1).max(2),
+        default_auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]),
+        flags: integer.nonnegative(),
+        available_tags: z.array(forumTag),
+        applied_tags: ids,
+        default_reaction_emoji: z.object({ emoji_id: id.nullable().optional(), emoji_name: text.nullable().optional() }).nullable(),
+        default_thread_rate_limit_per_user: integer.min(0).max(21600),
+        default_sort_order: integer.min(0).max(1).nullable(),
+        default_forum_layout: integer.min(0).max(2),
+        archived: flag,
+        auto_archive_duration: integer,
+        locked: flag,
+        invitable: flag,
+      }).partial(),
+    }),
+    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/channels/${channelId}`, { reason, body })),
   }),
-  setChannelPermission: action("Set a channel permission overwrite. Allow and deny are decimal bitsets.", Put, "/channels/:channelId/permissions/:overwriteId", {
-    audit: true,
-    body: permissionOverwrite.omit({ id: true }),
+  deleteChannel: tool({
+    description: "Delete a guild channel or close a DM.",
+    inputSchema: z.object({ channelId: id, reason }),
+    execute: async ({ channelId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}`, { reason })),
   }),
-  deleteChannelPermission: action("Delete a channel permission overwrite.", Delete, "/channels/:channelId/permissions/:overwriteId", { audit: true }),
-  getChannelMemberPermissions: action("Get a member's computed permissions in a channel.", Get, "/channels/:channelId/permissions/member/:userId", {
-    query: z.object({ implicit: flag.optional() }),
+  reorderChannels: tool({
+    description: "Reorder or move guild channels.",
+    inputSchema: z.object({ guildId: id, reason, body: z.array(z.object({ id, position: integer.nonnegative().nullable().optional(), lock_permissions: flag.nullable().optional(), parent_id: id.nullable().optional() })).min(1) }),
+    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/channels`, { reason, body })),
   }),
-  getChannelRolePermissions: action("Get a role's computed permissions in a channel.", Get, "/channels/:channelId/permissions/role/:roleId", {
-    query: z.object({ implicit: flag.optional() }),
+  setChannelPermission: tool({
+    description: "Set a channel permission overwrite. Allow and deny are decimal bitsets.",
+    inputSchema: z.object({ channelId: id, overwriteId: id, reason, body: permissionOverwrite.omit({ id: true }) }),
+    execute: async ({ channelId, overwriteId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${channelId}/permissions/${overwriteId}`, { reason, body })),
   }),
-  followAnnouncementChannel: action("Forward announcements to a destination channel.", Post, "/channels/:channelId/followers", {
-    body: z.object({ webhook_channel_id: id }),
+  deleteChannelPermission: tool({
+    description: "Delete a channel permission overwrite.",
+    inputSchema: z.object({ channelId: id, overwriteId: id, reason }),
+    execute: async ({ channelId, overwriteId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}/permissions/${overwriteId}`, { reason })),
   }),
-  triggerTyping: action("Show the bot's typing indicator in a channel.", Post, "/channels/:channelId/typing"),
-  createPrivateThread: action("Create a private thread in a guild text channel.", Post, "/channels/:channelId/threads", {
-    audit: true,
-    body: threadFields.extend({ type: z.literal(12).default(12), invitable: flag.optional() }),
+  getChannelMemberPermissions: tool({
+    description: "Get a member's computed permissions in a channel.",
+    inputSchema: z.object({ channelId: id, userId: id, query: z.object({ implicit: flag.optional() }).optional() }),
+    execute: async ({ channelId, userId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/permissions/member/${userId}`, {
+      query: makeURLSearchParams(query),
+    })),
+  }),
+  getChannelRolePermissions: tool({
+    description: "Get a role's computed permissions in a channel.",
+    inputSchema: z.object({ channelId: id, roleId: id, query: z.object({ implicit: flag.optional() }).optional() }),
+    execute: async ({ channelId, roleId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/permissions/role/${roleId}`, {
+      query: makeURLSearchParams(query),
+    })),
+  }),
+  followAnnouncementChannel: tool({
+    description: "Forward announcements to a destination channel.",
+    inputSchema: z.object({ channelId: id, body: z.object({ webhook_channel_id: id }) }),
+    execute: async ({ channelId, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/followers`, { body })),
+  }),
+  triggerTyping: tool({
+    description: "Show the bot's typing indicator in a channel.",
+    inputSchema: z.object({ channelId: id }),
+    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/typing`)),
+  }),
+  createPrivateThread: tool({
+    description: "Create a private thread in a guild text channel.",
+    inputSchema: z.object({ channelId: id, reason, body: threadFields.extend({ type: z.literal(12).default(12), invitable: flag.optional() }) }),
+    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/threads`, { reason, body })),
   }),
   createForumPost: tool({
     description: "Create a post in a forum or media channel.",
@@ -289,56 +351,107 @@ export const discordTools = {
       reason,
     }),
   }),
-  getActiveThreads: action("List active guild threads visible to the bot.", Get, "/guilds/:guildId/threads/active"),
-  getPublicArchivedThreads: action("List archived public threads in a channel.", Get, "/channels/:channelId/threads/archived/public", {
-    query: z.object({ limit, before: date.optional() }),
+  getActiveThreads: tool({
+    description: "List active guild threads visible to the bot.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/threads/active`)),
   }),
-  getPrivateArchivedThreads: action("List archived private threads in a channel.", Get, "/channels/:channelId/threads/archived/private", {
-    query: z.object({ limit, before: date.optional() }),
+  getPublicArchivedThreads: tool({
+    description: "List archived public threads in a channel.",
+    inputSchema: z.object({ channelId: id, query: z.object({ limit, before: date.optional() }).optional() }),
+    execute: async ({ channelId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/threads/archived/public`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  getJoinedArchivedThreads: action("List archived private threads the bot joined.", Get, "/channels/:channelId/users/@me/threads/archived/private", {
-    query: z.object({ limit, before: id.optional() }),
+  getPrivateArchivedThreads: tool({
+    description: "List archived private threads in a channel.",
+    inputSchema: z.object({ channelId: id, query: z.object({ limit, before: date.optional() }).optional() }),
+    execute: async ({ channelId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/threads/archived/private`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  joinThread: action("Join a thread.", Put, "/channels/:threadId/thread-members/@me"),
-  leaveThread: action("Leave a thread.", Delete, "/channels/:threadId/thread-members/@me"),
-  addThreadMember: action("Add a guild member to a thread.", Put, "/channels/:threadId/thread-members/:userId"),
-  removeThreadMember: action("Remove a member from a thread.", Delete, "/channels/:threadId/thread-members/:userId"),
-  getThreadMember: action("Get a thread member.", Get, "/channels/:threadId/thread-members/:userId", {
-    query: z.object({ with_member: flag.optional() }),
+  getJoinedArchivedThreads: tool({
+    description: "List archived private threads the bot joined.",
+    inputSchema: z.object({ channelId: id, query: z.object({ limit, before: id.optional() }).optional() }),
+    execute: async ({ channelId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/users/@me/threads/archived/private`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  getThreadMembers: action("List thread members.", Get, "/channels/:threadId/thread-members", {
-    query: z.object({ with_member: flag.optional(), after: id.optional(), limit }),
+  joinThread: tool({
+    description: "Join a thread.",
+    inputSchema: z.object({ threadId: id }),
+    execute: async ({ threadId }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${threadId}/thread-members/@me`)),
+  }),
+  leaveThread: tool({
+    description: "Leave a thread.",
+    inputSchema: z.object({ threadId: id }),
+    execute: async ({ threadId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${threadId}/thread-members/@me`)),
+  }),
+  addThreadMember: tool({
+    description: "Add a guild member to a thread.",
+    inputSchema: z.object({ threadId: id, userId: id }),
+    execute: async ({ threadId, userId }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${threadId}/thread-members/${userId}`)),
+  }),
+  removeThreadMember: tool({
+    description: "Remove a member from a thread.",
+    inputSchema: z.object({ threadId: id, userId: id }),
+    execute: async ({ threadId, userId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${threadId}/thread-members/${userId}`)),
+  }),
+  getThreadMember: tool({
+    description: "Get a thread member.",
+    inputSchema: z.object({ threadId: id, userId: id, query: z.object({ with_member: flag.optional() }).optional() }),
+    execute: async ({ threadId, userId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${threadId}/thread-members/${userId}`, {
+      query: makeURLSearchParams(query),
+    })),
+  }),
+  getThreadMembers: tool({
+    description: "List thread members.",
+    inputSchema: z.object({ threadId: id, query: z.object({ with_member: flag.optional(), after: id.optional(), limit }).optional() }),
+    execute: async ({ threadId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${threadId}/thread-members`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
 
   // Messages And Polls
-  getMessage: action("Get a message by ID.", Get, "/channels/:channelId/messages/:messageId"),
-  searchGuildMessages: action("Search indexed guild messages.", Get, "/guilds/:guildId/messages/search", {
-    query: z.object({
-      content: text.max(1024),
-      channel_id: ids.max(500),
-      author_id: ids.max(100),
-      author_type: z.array(text),
-      mentions: ids.max(100),
-      mentions_role_id: ids.max(100),
-      mention_everyone: flag,
-      pinned: flag,
-      has: z.array(text),
-      embed_type: z.array(text),
-      embed_provider: z.array(text).max(100),
-      link_hostname: z.array(text).max(100),
-      attachment_filename: z.array(text).max(100),
-      attachment_extension: z.array(text).max(100),
-      replied_to_user_id: ids.max(100),
-      replied_to_message_id: ids.max(100),
-      include_nsfw: flag,
-      sort_by: z.enum(["timestamp", "relevance"]),
-      sort_order: z.enum(["asc", "desc"]),
-      slop: integer.min(0).max(100),
-      limit: integer.min(1).max(25),
-      offset: integer.min(0).max(9975),
-      min_id: id,
-      max_id: id,
-    }).partial(),
+  getMessage: tool({
+    description: "Get a message by ID.",
+    inputSchema: z.object({ channelId: id, messageId: id }),
+    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/messages/${messageId}`)),
+  }),
+  searchGuildMessages: tool({
+    description: "Search indexed messages within the specified guild channels.",
+    inputSchema: z.object({
+      guildId: id,
+      query: z.object({
+        content: text.max(1024),
+        channel_id: ids.min(1).max(500),
+        author_id: ids.max(100),
+        author_type: z.array(text),
+        mentions: ids.max(100),
+        mentions_role_id: ids.max(100),
+        mention_everyone: flag,
+        pinned: flag,
+        has: z.array(text),
+        embed_type: z.array(text),
+        embed_provider: z.array(text).max(100),
+        link_hostname: z.array(text).max(100),
+        attachment_filename: z.array(text).max(100),
+        attachment_extension: z.array(text).max(100),
+        replied_to_user_id: ids.max(100),
+        replied_to_message_id: ids.max(100),
+        include_nsfw: flag,
+        sort_by: z.enum(["timestamp", "relevance"]),
+        sort_order: z.enum(["asc", "desc"]),
+        slop: integer.min(0).max(100),
+        limit: integer.min(1).max(25),
+        offset: integer.min(0).max(9975),
+        min_id: id,
+        max_id: id,
+      }).partial().required({ channel_id: true }),
+    }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/messages/search`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
   sendRichMessage: tool({
     description: "Send a Discord message with embeds, components, stickers, TTS or files.",
@@ -389,12 +502,21 @@ export const discordTools = {
       body: { message_reference: { type: 1, channel_id: channelId, message_id: messageId, guild_id: guildId }, allowed_mentions: { parse: [] } },
     }),
   }),
-  crosspostMessage: action("Publish an announcement message to following channels.", Post, "/channels/:channelId/messages/:messageId/crosspost"),
-  bulkDeleteMessages: action("Delete 2–100 guild messages less than two weeks old.", Post, "/channels/:channelId/messages/bulk-delete", {
-    audit: true,
-    body: z.object({ messages: ids.min(2).max(100) }),
+  crosspostMessage: tool({
+    description: "Publish an announcement message to following channels.",
+    inputSchema: z.object({ channelId: id, messageId: id }),
+    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/messages/${messageId}/crosspost`)),
   }),
-  unpinMessage: action("Unpin a message.", Delete, "/channels/:channelId/messages/pins/:messageId", { audit: true }),
+  bulkDeleteMessages: tool({
+    description: "Delete 2–100 guild messages less than two weeks old.",
+    inputSchema: z.object({ channelId: id, reason, body: z.object({ messages: ids.min(2).max(100) }) }),
+    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/messages/bulk-delete`, { reason, body })),
+  }),
+  unpinMessage: tool({
+    description: "Unpin a message.",
+    inputSchema: z.object({ channelId: id, messageId: id, reason }),
+    execute: async ({ channelId, messageId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}/messages/pins/${messageId}`, { reason })),
+  }),
   getReactionUsers: tool({
     description: "List users who used an emoji reaction.",
     inputSchema: reactionTarget.extend({ after: id.optional(), limit, type: z.union([z.literal(0), z.literal(1)]).optional().describe("0 normal, 1 super reaction") }),
@@ -424,32 +546,75 @@ export const discordTools = {
       return {};
     },
   }),
-  clearMessageReactions: action("Remove all reactions from a message.", Delete, "/channels/:channelId/messages/:messageId/reactions"),
-  endPoll: action("End a poll created by the bot.", Post, "/channels/:channelId/polls/:messageId/expire"),
-  getPollVoters: action("List voters for a specific poll answer.", Get, "/channels/:channelId/polls/:messageId/answers/:answer", {
-    query: z.object({ after: id.optional(), limit }),
+  clearMessageReactions: tool({
+    description: "Remove all reactions from a message.",
+    inputSchema: z.object({ channelId: id, messageId: id }),
+    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}/messages/${messageId}/reactions`)),
+  }),
+  endPoll: tool({
+    description: "End a poll created by the bot.",
+    inputSchema: z.object({ channelId: id, messageId: id }),
+    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/polls/${messageId}/expire`)),
+  }),
+  getPollVoters: tool({
+    description: "List voters for a specific poll answer.",
+    inputSchema: z.object({ channelId: id, messageId: id, answer: pathSegment, query: z.object({ after: id.optional(), limit }).optional() }),
+    execute: async ({ channelId, messageId, answer, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/polls/${messageId}/answers/${encodeURIComponent(answer)}`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
 
   // Roles And Auto Mod
-  getRole: action("Get a guild role and its permissions.", Get, "/guilds/:guildId/roles/:roleId"),
-  editRole: action("Edit a guild role.", Patch, "/guilds/:guildId/roles/:roleId", { audit: true, body: roleFields }),
-  deleteRole: action("Delete a guild role.", Delete, "/guilds/:guildId/roles/:roleId", { audit: true }),
-  reorderRoles: action("Reorder guild roles.", Patch, "/guilds/:guildId/roles", {
-    audit: true,
-    body: z.array(z.object({ id, position: integer.min(1) })).min(1),
+  getRole: tool({
+    description: "Get a guild role and its permissions.",
+    inputSchema: z.object({ guildId: id, roleId: id }),
+    execute: async ({ guildId, roleId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/roles/${roleId}`)),
   }),
-  getRoleMemberCounts: action("Get member counts by role in a guild.", Get, "/guilds/:guildId/roles/member-counts"),
-  listAutoModerationRules: action("List guild AutoMod rules.", Get, "/guilds/:guildId/auto-moderation/rules"),
-  getAutoModerationRule: action("Get an AutoMod rule.", Get, "/guilds/:guildId/auto-moderation/rules/:ruleId"),
-  createAutoModerationRule: action("Create an AutoMod rule.", Post, "/guilds/:guildId/auto-moderation/rules", {
-    audit: true,
-    body: autoModFields.partial().required({ name: true, event_type: true, actions: true }).extend({ trigger_type: integer }),
+  editRole: tool({
+    description: "Edit a guild role.",
+    inputSchema: z.object({ guildId: id, roleId: id, reason, body: roleFields }),
+    execute: async ({ guildId, roleId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/roles/${roleId}`, { reason, body })),
   }),
-  editAutoModerationRule: action("Edit an AutoMod rule.", Patch, "/guilds/:guildId/auto-moderation/rules/:ruleId", {
-    audit: true,
-    body: autoModFields.partial(),
+  deleteRole: tool({
+    description: "Delete a guild role.",
+    inputSchema: z.object({ guildId: id, roleId: id, reason }),
+    execute: async ({ guildId, roleId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/roles/${roleId}`, { reason })),
   }),
-  deleteAutoModerationRule: action("Delete an AutoMod rule.", Delete, "/guilds/:guildId/auto-moderation/rules/:ruleId", { audit: true }),
+  reorderRoles: tool({
+    description: "Reorder guild roles.",
+    inputSchema: z.object({ guildId: id, reason, body: z.array(z.object({ id, position: integer.min(1) })).min(1) }),
+    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/roles`, { reason, body })),
+  }),
+  getRoleMemberCounts: tool({
+    description: "Get member counts by role in a guild.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/roles/member-counts`)),
+  }),
+  listAutoModerationRules: tool({
+    description: "List guild AutoMod rules.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/auto-moderation/rules`)),
+  }),
+  getAutoModerationRule: tool({
+    description: "Get an AutoMod rule.",
+    inputSchema: z.object({ guildId: id, ruleId: id }),
+    execute: async ({ guildId, ruleId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`)),
+  }),
+  createAutoModerationRule: tool({
+    description: "Create an AutoMod rule.",
+    inputSchema: z.object({ guildId: id, reason, body: autoModFields.partial().required({ name: true, event_type: true, actions: true }).extend({ trigger_type: integer }) }),
+    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/guilds/${guildId}/auto-moderation/rules`, { reason, body })),
+  }),
+  editAutoModerationRule: tool({
+    description: "Edit an AutoMod rule.",
+    inputSchema: z.object({ guildId: id, ruleId: id, reason, body: autoModFields.partial() }),
+    execute: async ({ guildId, ruleId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`, { reason, body })),
+  }),
+  deleteAutoModerationRule: tool({
+    description: "Delete an AutoMod rule.",
+    inputSchema: z.object({ guildId: id, ruleId: id, reason }),
+    execute: async ({ guildId, ruleId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`, { reason })),
+  }),
 
   // Voice And Stage
   controlVoiceAudio: tool({
@@ -479,38 +644,94 @@ export const discordTools = {
       return {};
     },
   }),
-  getBotVoiceState: action("Get the bot's voice state in a guild.", Get, "/guilds/:guildId/voice-states/@me"),
-  getMemberVoiceState: action("Get a member's voice state.", Get, "/guilds/:guildId/voice-states/:userId"),
-  editBotStageVoiceState: action("Suppress the bot on stage or request to speak.", Patch, "/guilds/:guildId/voice-states/@me", {
-    body: z.object({ channel_id: id, suppress: flag.optional(), request_to_speak_timestamp: date.nullable().optional() }),
+  getBotVoiceState: tool({
+    description: "Get the bot's voice state in a guild.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/voice-states/@me`)),
   }),
-  setStageMemberSuppressed: action("Set whether a stage member is suppressed.", Patch, "/guilds/:guildId/voice-states/:userId", {
-    body: z.object({ channel_id: id, suppress: flag }),
+  getMemberVoiceState: tool({
+    description: "Get a member's voice state.",
+    inputSchema: z.object({ guildId: id, userId: id }),
+    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/voice-states/${userId}`)),
   }),
-  setVoiceChannelStatus: action("Set or clear a voice channel status.", Put, "/channels/:channelId/voice-status", {
-    audit: true,
-    body: z.object({ status: text.max(500).nullable() }),
+  editBotStageVoiceState: tool({
+    description: "Suppress the bot on stage or request to speak.",
+    inputSchema: z.object({ guildId: id, body: z.object({ channel_id: id, suppress: flag.optional(), request_to_speak_timestamp: date.nullable().optional() }) }),
+    execute: async ({ guildId, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/voice-states/@me`, { body })),
   }),
-  createStageInstance: action("Open a stage with a topic.", Post, "/stage-instances", {
-    audit: true,
-    body: stageFields.extend({ channel_id: id, send_start_notification: flag.optional(), guild_scheduled_event_id: id.optional() }),
+  setStageMemberSuppressed: tool({
+    description: "Set whether a stage member is suppressed.",
+    inputSchema: z.object({ guildId: id, userId: id, body: z.object({ channel_id: id, suppress: flag }) }),
+    execute: async ({ guildId, userId, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/voice-states/${userId}`, { body })),
   }),
-  getStageInstance: action("Get the active stage in a channel.", Get, "/stage-instances/:channelId"),
-  editStageInstance: action("Edit a stage instance.", Patch, "/stage-instances/:channelId", { audit: true, body: stageFields.partial() }),
-  deleteStageInstance: action("Close a stage instance.", Delete, "/stage-instances/:channelId", { audit: true }),
-  sendSoundboardSound: action("Play a soundboard sound in the bot's voice channel.", Post, "/channels/:channelId/send-soundboard-sound", {
-    body: z.object({ sound_id: id, source_guild_id: id.optional() }),
+  setVoiceChannelStatus: tool({
+    description: "Set or clear a voice channel status.",
+    inputSchema: z.object({ channelId: id, reason, body: z.object({ status: text.max(500).nullable() }) }),
+    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${channelId}/voice-status`, { reason, body })),
   }),
-  getDefaultSoundboardSounds: action("List default Discord soundboard sounds.", Get, "/soundboard-default-sounds"),
-  getGuildSoundboardSounds: action("List guild soundboard sounds.", Get, "/guilds/:guildId/soundboard-sounds"),
-  getGuildSoundboardSound: action("Get a guild soundboard sound.", Get, "/guilds/:guildId/soundboard-sounds/:soundId"),
+  createStageInstance: tool({
+    description: "Open a stage with a topic.",
+    inputSchema: z.object({ reason, body: stageFields.extend({ channel_id: id, send_start_notification: flag.optional(), guild_scheduled_event_id: id.optional() }) }),
+    execute: async ({ reason, body }) => decodeDiscordRestResult(await discordClient.rest.post("/stage-instances", { reason, body })),
+  }),
+  getStageInstance: tool({
+    description: "Get the active stage in a channel.",
+    inputSchema: z.object({ channelId: id }),
+    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.get(`/stage-instances/${channelId}`)),
+  }),
+  editStageInstance: tool({
+    description: "Edit a stage instance.",
+    inputSchema: z.object({ channelId: id, reason, body: stageFields.partial() }),
+    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/stage-instances/${channelId}`, { reason, body })),
+  }),
+  deleteStageInstance: tool({
+    description: "Close a stage instance.",
+    inputSchema: z.object({ channelId: id, reason }),
+    execute: async ({ channelId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/stage-instances/${channelId}`, { reason })),
+  }),
+  sendSoundboardSound: tool({
+    description: "Play a soundboard sound in the bot's voice channel.",
+    inputSchema: z.object({ channelId: id, body: z.object({ sound_id: id, source_guild_id: id.optional() }) }),
+    execute: async ({ channelId, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/send-soundboard-sound`, { body })),
+  }),
+  getDefaultSoundboardSounds: tool({
+    description: "List default Discord soundboard sounds.",
+    inputSchema: z.object({}),
+    execute: async () => decodeDiscordRestResult(await discordClient.rest.get("/soundboard-default-sounds")),
+  }),
+  getGuildSoundboardSounds: tool({
+    description: "List guild soundboard sounds.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds`)),
+  }),
+  getGuildSoundboardSound: tool({
+    description: "Get a guild soundboard sound.",
+    inputSchema: z.object({ guildId: id, soundId: id }),
+    execute: async ({ guildId, soundId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds/${soundId}`)),
+  }),
   // Invites And Webhooks
-  getInvite: action("Get an invite by code.", Get, "/invites/:code", {
-    query: z.object({ with_counts: flag.optional(), with_expiration: flag.optional(), guild_scheduled_event_id: id.optional() }),
+  getInvite: tool({
+    description: "Get an invite by code.",
+    inputSchema: z.object({ code: pathSegment, query: z.object({ with_counts: flag.optional(), with_expiration: flag.optional(), guild_scheduled_event_id: id.optional() }).optional() }),
+    execute: async ({ code, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/invites/${encodeURIComponent(code)}`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  getChannelInvites: action("List channel invites.", Get, "/channels/:channelId/invites"),
-  getGuildInvites: action("List guild invites.", Get, "/guilds/:guildId/invites"),
-  deleteInvite: action("Revoke an invite.", Delete, "/invites/:code", { audit: true }),
+  getChannelInvites: tool({
+    description: "List channel invites.",
+    inputSchema: z.object({ channelId: id }),
+    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/invites`)),
+  }),
+  getGuildInvites: tool({
+    description: "List guild invites.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/invites`)),
+  }),
+  deleteInvite: tool({
+    description: "Revoke an invite.",
+    inputSchema: z.object({ code: pathSegment, reason }),
+    execute: async ({ code, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/invites/${encodeURIComponent(code)}`, { reason })),
+  }),
   getGuildWebhooks: tool({
     description: "List guild webhooks.",
     inputSchema: guildWebhooks,
@@ -532,7 +753,11 @@ export const discordTools = {
       return webhookSummary(await webhook.edit({ name: body.name, avatar: body.avatar, channel: body.channel_id, reason }));
     },
   }),
-  deleteWebhook: action("Delete a webhook.", Delete, "/webhooks/:webhookId", { audit: true }),
+  deleteWebhook: tool({
+    description: "Delete a webhook.",
+    inputSchema: z.object({ webhookId: id, reason }),
+    execute: async ({ webhookId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/webhooks/${webhookId}`, { reason })),
+  }),
   getWebhookMessage: tool({
     description: "Get a message sent by a webhook.",
     inputSchema: webhookMessage,
@@ -562,17 +787,46 @@ export const discordTools = {
   }),
 
   // Expressions and events
-  getGuildEmoji: action("Get a custom guild emoji.", Get, "/guilds/:guildId/emojis/:emojiId"),
-  editEmoji: action("Edit a guild emoji's name or allowed roles.", Patch, "/guilds/:guildId/emojis/:emojiId", {
-    audit: true,
-    body: z.object({ name: text.min(2).max(32), roles: ids.nullable() }).partial(),
+  getGuildEmoji: tool({
+    description: "Get a custom guild emoji.",
+    inputSchema: z.object({ guildId: id, emojiId: id }),
+    execute: async ({ guildId, emojiId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/emojis/${emojiId}`)),
   }),
-  deleteEmoji: action("Delete a custom guild emoji.", Delete, "/guilds/:guildId/emojis/:emojiId", { audit: true }),
-  getApplicationEmojis: action("List emojis owned by the application.", Get, "/applications/:applicationId/emojis"),
-  getApplicationEmoji: action("Get an application emoji.", Get, "/applications/:applicationId/emojis/:emojiId"),
-  getSticker: action("Get a sticker by ID.", Get, "/stickers/:stickerId"),
-  getGuildStickers: action("List custom guild stickers.", Get, "/guilds/:guildId/stickers"),
-  getGuildSticker: action("Get a custom guild sticker.", Get, "/guilds/:guildId/stickers/:stickerId"),
+  editEmoji: tool({
+    description: "Edit a guild emoji's name or allowed roles.",
+    inputSchema: z.object({ guildId: id, emojiId: id, reason, body: z.object({ name: text.min(2).max(32), roles: ids.nullable() }).partial() }),
+    execute: async ({ guildId, emojiId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/emojis/${emojiId}`, { reason, body })),
+  }),
+  deleteEmoji: tool({
+    description: "Delete a custom guild emoji.",
+    inputSchema: z.object({ guildId: id, emojiId: id, reason }),
+    execute: async ({ guildId, emojiId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/emojis/${emojiId}`, { reason })),
+  }),
+  getApplicationEmojis: tool({
+    description: "List emojis owned by the application.",
+    inputSchema: z.object({ applicationId: id }),
+    execute: async ({ applicationId }) => decodeDiscordRestResult(await discordClient.rest.get(`/applications/${applicationId}/emojis`)),
+  }),
+  getApplicationEmoji: tool({
+    description: "Get an application emoji.",
+    inputSchema: z.object({ applicationId: id, emojiId: id }),
+    execute: async ({ applicationId, emojiId }) => decodeDiscordRestResult(await discordClient.rest.get(`/applications/${applicationId}/emojis/${emojiId}`)),
+  }),
+  getSticker: tool({
+    description: "Get a sticker by ID.",
+    inputSchema: z.object({ stickerId: id }),
+    execute: async ({ stickerId }) => decodeDiscordRestResult(await discordClient.rest.get(`/stickers/${stickerId}`)),
+  }),
+  getGuildStickers: tool({
+    description: "List custom guild stickers.",
+    inputSchema: z.object({ guildId: id }),
+    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/stickers`)),
+  }),
+  getGuildSticker: tool({
+    description: "Get a custom guild sticker.",
+    inputSchema: z.object({ guildId: id, stickerId: id }),
+    execute: async ({ guildId, stickerId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/stickers/${stickerId}`)),
+  }),
   createSticker: tool({
     description: "Create a guild sticker from a PNG, APNG, GIF or Lottie URL.",
     inputSchema: z.object({ guildId: id, url: mediaUrl, name: text.min(2).max(30), tags: text.max(200), description: text.max(100).optional(), reason }),
@@ -582,24 +836,53 @@ export const discordTools = {
       return { id: sticker.id, name: sticker.name, url: sticker.url };
     },
   }),
-  editSticker: action("Edit a custom guild sticker.", Patch, "/guilds/:guildId/stickers/:stickerId", { audit: true, body: stickerFields.partial() }),
-  deleteSticker: action("Delete a custom guild sticker.", Delete, "/guilds/:guildId/stickers/:stickerId", { audit: true }),
-  getGuildEvents: action("List scheduled guild events.", Get, "/guilds/:guildId/scheduled-events", {
-    query: z.object({ with_user_count: flag.optional() }),
+  editSticker: tool({
+    description: "Edit a custom guild sticker.",
+    inputSchema: z.object({ guildId: id, stickerId: id, reason, body: stickerFields.partial() }),
+    execute: async ({ guildId, stickerId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/stickers/${stickerId}`, { reason, body })),
   }),
-  getGuildEvent: action("Get a scheduled guild event.", Get, "/guilds/:guildId/scheduled-events/:eventId", {
-    query: z.object({ with_user_count: flag.optional() }),
+  deleteSticker: tool({
+    description: "Delete a custom guild sticker.",
+    inputSchema: z.object({ guildId: id, stickerId: id, reason }),
+    execute: async ({ guildId, stickerId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/stickers/${stickerId}`, { reason })),
   }),
-  editGuildEvent: action("Edit an event or change its status (1 scheduled, 2 active, 3 completed, 4 canceled).", Patch, "/guilds/:guildId/scheduled-events/:eventId", {
-    audit: true,
-    body: eventFields,
+  getGuildEvents: tool({
+    description: "List scheduled guild events.",
+    inputSchema: z.object({ guildId: id, query: z.object({ with_user_count: flag.optional() }).optional() }),
+    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/scheduled-events`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
-  deleteGuildEvent: action("Delete a scheduled guild event.", Delete, "/guilds/:guildId/scheduled-events/:eventId", { audit: true }),
-  getGuildEventSubscribers: action("List users interested in a scheduled guild event.", Get, "/guilds/:guildId/scheduled-events/:eventId/users", {
-    query: page.extend({ with_member: flag.optional() }),
+  getGuildEvent: tool({
+    description: "Get a scheduled guild event.",
+    inputSchema: z.object({ guildId: id, eventId: id, query: z.object({ with_user_count: flag.optional() }).optional() }),
+    execute: async ({ guildId, eventId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/scheduled-events/${eventId}`, {
+      query: makeURLSearchParams(query),
+    })),
+  }),
+  editGuildEvent: tool({
+    description: "Edit an event or change its status (1 scheduled, 2 active, 3 completed, 4 canceled).",
+    inputSchema: z.object({ guildId: id, eventId: id, reason, body: eventFields }),
+    execute: async ({ guildId, eventId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/scheduled-events/${eventId}`, { reason, body })),
+  }),
+  deleteGuildEvent: tool({
+    description: "Delete a scheduled guild event.",
+    inputSchema: z.object({ guildId: id, eventId: id, reason }),
+    execute: async ({ guildId, eventId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/scheduled-events/${eventId}`, { reason })),
+  }),
+  getGuildEventSubscribers: tool({
+    description: "List users interested in a scheduled guild event.",
+    inputSchema: z.object({ guildId: id, eventId: id, query: page.extend({ with_member: flag.optional() }).optional() }),
+    execute: async ({ guildId, eventId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/scheduled-events/${eventId}/users`, {
+      query: makeURLSearchParams(query),
+    })),
   }),
   // Direct messages
-  openDm: action("Open a direct message channel with a user.", Post, "/users/@me/channels", { body: z.object({ recipient_id: id }) }),
+  openDm: tool({
+    description: "Open a direct message channel with a user.",
+    inputSchema: z.object({ body: z.object({ recipient_id: id }) }),
+    execute: async ({ body }) => decodeDiscordRestResult(await discordClient.rest.post("/users/@me/channels", { body })),
+  }),
 
   // Guilds:
 

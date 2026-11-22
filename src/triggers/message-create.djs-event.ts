@@ -1,7 +1,7 @@
 import { discordClient, startDiscordTyping } from "#/integrations/discord";
 import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
 import { tableModelUsage } from "#/tables/model-usage";
-import { discordTools } from "#/tools/discord";
+import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { replyContextTools } from "#/tools/reply-context";
 import { websearchTools } from "#/tools/websearch";
 import { aiUsage } from "#/utils/ai-usage";
@@ -76,7 +76,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       return { toolChoice: "required" };
     },
     tools: {
-      ...discordTools,
+      ...getDiscordToolsForMessage(message),
       ...replyContextTools,
       ...websearchTools,
     },
