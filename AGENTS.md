@@ -33,19 +33,17 @@ An AI bot for Discord designed to act freely using various tools.
 
 Flat layout under `/src`: only folders, only `.ts` files inside them, one `main.ts` at the root.
 
-- `src/database` — Drizzle schema and one repository file per table. The ONLY place allowed to run SQL.
-- `src/features` — AI generation flows: prompts, `generateText` orchestration, response processing.
+- `src/tables` — Drizzle schema, one file per table.
 - `src/integrations` — One file per external system (Discord, OpenRouter, GitHub, Steam, RSS, web search, PDF): clients, SDK singletons and low-level helpers.
 - `src/tools` — Toolsets the AI can call (`satisfies ToolSet`). Thin: describe the tool, delegate the work.
-- `src/triggers` — Entry points (Discord events, CRON, webhooks). Thin: decide whether to invoke the AI, then delegate.
-- `src/utils` — Domain-free helpers: `env`, `logger`, `day`, the `trigger` framework, usage formatters.
+- `src/triggers` — Entry points (Discord events, CRON, webhooks), AI generation flows and their usage tracking.
+- `src/utils` — Shared helpers, including `postgres` for the Drizzle client, migrations and reusable columns.
 
 Where a new file goes:
-- Entry point (event / cron / webhook) → `triggers` · AI call with a prompt → `features` · `tool()` callable by the AI → `tools`
-- External API or SDK call → `integrations` · SQL query → `database` · anything generic and domain-free → `utils`
+- Entry point or AI generation flow → `triggers` · `tool()` callable by the AI → `tools`
+- External API or SDK call → `integrations` · Drizzle table definition → `tables` · shared helper → `utils`
 
-Dependencies flow one way: `triggers → tools → features → database / integrations → utils`.
-A feature may import toolsets to compose a generation; a tool may delegate to a feature. No file-level import cycles.
+Dependencies flow one way: `triggers → tools / tables / integrations → utils`. No file-level import cycles.
 
 ## Global Guidelines
 

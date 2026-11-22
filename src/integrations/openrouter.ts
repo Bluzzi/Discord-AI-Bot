@@ -126,10 +126,12 @@ const INSUFFICIENT_CREDITS_DELAY_MS = 60 * 60 * 1000;
 // Delay applied when OpenRouter returns 429 without any reset information (short retry window):
 const UNKNOWN_RATE_LIMIT_DELAY_MS = 2 * 60 * 1000;
 
+const usesFreeModel = env.OPENROUTER_MODEL.endsWith(":free") || env.OPENROUTER_MODEL === "openrouter/free";
+
 const quotaState = {
   /** Recomputed at each refresh: no usable credit left for the key or the account */
   creditsExhausted: false,
-  /** Recomputed at each refresh: free models daily quota reached (resets at UTC midnight) */
+  /** Recomputed at each refresh: the configured model is subject to the exhausted free daily quota */
   freeDailyExhausted: false,
   /** Timestamp until which OpenRouter rate-limited (429) real AI calls */
   rateLimitedUntilTimestamp: 0,
@@ -154,11 +156,16 @@ const isExhausted = (): boolean => {
     || quotaState.insufficientCreditsUntilTimestamp > now;
 };
 
-const formatQuotaDetails = (keyData: OpenRouterKeyData, creditsData: OpenRouterCreditsData | undefined): string => dedent`
-  - [KEY] ${keyData.label} | limit remaining: ${keyData.limitRemaining === null ? "unlimited" : String(keyData.limitRemaining)}
-  - [FREE DAILY] ${String(keyData.freeModelDailyRequests.used)}/${String(keyData.freeModelDailyRequests.limit)} requests (resets at UTC midnight)
-  - [ACCOUNT] ${creditsData === undefined ? "balance unknown (management key required)" : `${String(creditsData.totalUsage)}/${String(creditsData.totalCredits)} credits used`}
-`;
+const formatQuotaDetails = (keyData: OpenRouterKeyData, creditsData: OpenRouterCreditsData | undefined): string => {
+  const keyCredits = keyData.limitRemaining === null ? "no key credit limit" : `${String(keyData.limitRemaining)} credits remaining under the key limit`;
+  const accountCredits = creditsData === undefined ? "credit balance unknown (management key required)" : `${(creditsData.totalCredits - creditsData.totalUsage).toFixed(9)} credits remaining (${String(creditsData.totalUsage)}/${String(creditsData.totalCredits)} credits used)`;
+
+  return dedent`
+    - [KEY] ${keyData.label} | ${keyCredits}
+    - [ACCOUNT] ${accountCredits}
+    - [FREE DAILY] ${String(keyData.freeModelDailyRequests.used)}/${String(keyData.freeModelDailyRequests.limit)} requests (resets at UTC midnight)
+  `;
+};
 
 const refresh = async (): Promise<void> => {
   const wasExhausted = isExhausted();
@@ -174,11 +181,8 @@ const refresh = async (): Promise<void> => {
   // Account balance empty (totalCredits > 0: a never-funded account has nothing to exhaust, its free models still work):
   const accountBalanceEmpty = creditsData !== undefined && creditsData.totalCredits > 0 && creditsData.totalUsage >= creditsData.totalCredits;
 
-  // Free models daily quota reached (resets at UTC midnight):
-  const freeDailyLimitReached = keyData.freeModelDailyRequests.remaining <= 0;
-
   quotaState.creditsExhausted = keyLimitReached || accountBalanceEmpty;
-  quotaState.freeDailyExhausted = freeDailyLimitReached;
+  quotaState.freeDailyExhausted = usesFreeModel && keyData.freeModelDailyRequests.remaining <= 0;
 
   const nowExhausted = isExhausted();
 
@@ -215,7 +219,7 @@ const reportFailure = (statusCode: number, rateLimitResetHeader: string | null):
 };
 
 export const openRouterQuota = {
-  /** True when OpenRouter cannot serve AI calls anymore (no credits or free models daily quota reached) */
+  /** True when the configured model is blocked by a credit or rate limit */
   isExhausted,
   /** Re-check the quota state from OpenRouter management endpoints (no model call involved, safe to run every minute) */
   refresh,
@@ -223,8 +227,7 @@ export const openRouterQuota = {
   reportFailure,
 };
 
-// ── Models ────────────────────────────────────────────────────────────────────────────────────────
-// AI SDK providers used by every generation flow:
+// ── Model ─────────────────────────────────────────────────────────────────────────────────────────
 
 // Wrap fetch to report quota failures (429/402) raised by real AI calls, without consuming any extra request:
 const quotaAwareFetch: typeof fetch = async (input, init) => {
@@ -242,7 +245,4 @@ const openRouterProvider = createOpenRouter({
   fetch: quotaAwareFetch,
 });
 
-export const aiModel = {
-  fast: openRouterProvider(env.OPENROUTER_MODEL_FAST),
-  large: openRouterProvider(env.OPENROUTER_MODEL_LARGE),
-};
+export const aiModel = openRouterProvider(env.OPENROUTER_MODEL);

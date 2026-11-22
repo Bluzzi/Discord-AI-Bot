@@ -26,7 +26,7 @@ const formatTokenCount = (tokens: number | undefined, details: readonly string[]
 };
 
 export const aiUsage = {
-  /** Format the number of calls per tool across all steps: "getUserMemory ×2, sendMessage" */
+  /** Format the number of calls per tool across all steps: "getReplyContext, sendMessage" */
   formatToolCalls: (toolCalls: readonly AiToolCall[]): string => {
     return formatToolNameCounts(toolCalls.map((toolCall) => toolCall.toolName));
   },
