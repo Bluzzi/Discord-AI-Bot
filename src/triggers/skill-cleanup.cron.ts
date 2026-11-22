@@ -14,16 +14,20 @@ await trigger.cron(
       return;
     }
 
-    const { deletedSkillCount, decisions } = await cleanUpSkills();
+    const decisions = await cleanUpSkills();
 
     if (decisions.length === 0) {
-      logger.info("Skill cleanup: no duplicate skills detected");
+      logger.info("Skill cleanup: no skills consolidated");
       return;
     }
 
+    const deletedSkillCount = decisions.reduce((count, decision) => count + decision.deletedSkillIds.length, 0);
     logger.info(dedent`
-      Skill cleanup: ${String(deletedSkillCount)} skill(s) deleted:
-      ${decisions.map((decision) => `- kept ${decision.keptSkillId}, deleted [${decision.deletedSkillIds.join(", ")}]: ${decision.reason}`).join("\n")}
+      Skill cleanup: ${String(deletedSkillCount)} skill(s) deactivated:
+      ${decisions.map((decision) => {
+        const action = decision.mergedRule === null ? `kept ${decision.activeSkillId}` : `created ${decision.activeSkillId} (merged rule: ${decision.mergedRule})`;
+        return `- ${action}, deactivated [${decision.deletedSkillIds.join(", ")}]: ${decision.reason}`;
+      }).join("\n")}
     `);
   },
   {
