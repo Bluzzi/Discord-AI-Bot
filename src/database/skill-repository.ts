@@ -1,5 +1,6 @@
 import { postgres } from "#/database/client";
 import { tableDiscordSkill } from "#/database/schema";
+import { env } from "#/utils/env";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 // Trigger budget: a trigger is a very short condition (a few tokens), rendered in every AI prompt:
@@ -7,7 +8,7 @@ export const SKILL_TRIGGER_MAX_LENGTH = 120;
 // Rule budget: the rule is the whole behavior to follow once the skill is opened:
 export const SKILL_RULE_MAX_LENGTH = 600;
 
-type Skill = {
+export type Skill = {
   id: string;
   trigger: string;
   rule: string;
@@ -29,6 +30,18 @@ let triggerCache: { triggers: SkillTrigger[]; fetchedAt: number } | null = null;
 // collapsed into a single space:
 const toSingleLine = (value: string): string => value.replaceAll(/\s+/gu, " ").trim();
 
+const insertSkill = async (
+  database: Pick<typeof postgres, "insert">,
+  values: Pick<typeof tableDiscordSkill.$inferInsert, "trigger" | "rule" | "createdByUserID">,
+): Promise<Skill> => {
+  const [row] = await database.insert(tableDiscordSkill).values(values).returning();
+  if (!row) {
+    throw new Error("Skill creation failed");
+  }
+
+  return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt };
+};
+
 export const createSkill = async ({ trigger, rule, authorId }: { trigger: string; rule: string; authorId: string }): Promise<Skill> => {
   const cleanTrigger = toSingleLine(trigger);
   const cleanRule = toSingleLine(rule);
@@ -41,19 +54,9 @@ export const createSkill = async ({ trigger, rule, authorId }: { trigger: string
     throw new Error(`Skill rule must be a single sentence of 3 to ${String(SKILL_RULE_MAX_LENGTH)} characters (got ${String(cleanRule.length)})`);
   }
 
-  const rows = await postgres
-    .insert(tableDiscordSkill)
-    .values({ trigger: cleanTrigger, rule: cleanRule, createdByUserID: authorId })
-    .returning();
-
-  const row = rows[0];
-  if (!row) {
-    throw new Error("Skill creation failed");
-  }
-
+  const skill = await insertSkill(postgres, { trigger: cleanTrigger, rule: cleanRule, createdByUserID: authorId });
   triggerCache = null;
-
-  return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt };
+  return skill;
 };
 
 // Deleted skills (deletedAt defined) are invisible everywhere: never listed in prompts, never openable:
@@ -90,7 +93,7 @@ export const openSkill = async ({ skillId }: { skillId: string }): Promise<Skill
   return { id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt };
 };
 
-// Full view of the active skills (trigger + rule), used by the daily cleanup to detect conflicting rules:
+// Full view of the active skills (trigger + rule), used by the cleanup to detect conflicting rules:
 export const listSkills = async (): Promise<Skill[]> => {
   const rows = await postgres
     .select()
@@ -101,17 +104,48 @@ export const listSkills = async (): Promise<Skill[]> => {
   return rows.map((row) => ({ id: row.id, trigger: row.trigger, rule: row.rule, createdByUserID: row.createdByUserID, usageCount: row.usageCount, createdAt: row.createdAt }));
 };
 
-// Soft delete: deletedAt is defined, the row stays for audit. Deletion must be reflected in every
-// prompt immediately, so the trigger cache is invalidated:
-export const deleteSkills = async ({ skillIds }: { skillIds: string[] }): Promise<void> => {
-  if (skillIds.length === 0) {
-    return;
+export const applySkillCleanup = async ({
+  keptSkill,
+  removedSkills,
+  replacementRule,
+}: {
+  keptSkill: Skill;
+  removedSkills: Skill[];
+  replacementRule: string | null;
+}): Promise<{ skill: Skill; deletedSkillIds: string[] } | undefined> => {
+  const rule = replacementRule === null ? null : toSingleLine(replacementRule);
+  if (rule !== null && (rule.length < 3 || rule.length > SKILL_RULE_MAX_LENGTH)) {
+    throw new Error("Invalid replacement skill rule length");
   }
 
-  await postgres
-    .update(tableDiscordSkill)
-    .set({ deletedAt: new Date() })
-    .where(inArray(tableDiscordSkill.id, skillIds));
+  const skills = [keptSkill, ...removedSkills];
+  const deletedSkillIds = (rule === null ? removedSkills : skills).map((skill) => skill.id);
+  const skill = await postgres.transaction(async (transaction) => {
+    // Another cleanup may have deactivated a source since the model read it.
+    const activeSkills = await transaction
+      .select({ id: tableDiscordSkill.id, trigger: tableDiscordSkill.trigger, rule: tableDiscordSkill.rule })
+      .from(tableDiscordSkill)
+      .where(and(inArray(tableDiscordSkill.id, skills.map((skill) => skill.id)), isNull(tableDiscordSkill.deletedAt)))
+      .orderBy(asc(tableDiscordSkill.id))
+      .for("update");
+    const activeById = new Map(activeSkills.map((skill) => [skill.id, skill]));
+    if (!skills.every((skill) => {
+      const active = activeById.get(skill.id);
+      return active?.trigger === skill.trigger && active.rule === skill.rule;
+    })) {
+      return undefined;
+    }
 
+    await transaction
+      .update(tableDiscordSkill)
+      .set({ deletedAt: new Date() })
+      .where(inArray(tableDiscordSkill.id, deletedSkillIds));
+
+    if (rule === null) return keptSkill;
+    return insertSkill(transaction, { trigger: keptSkill.trigger, rule, createdByUserID: env.DISCORD_BOT_ID });
+  });
+
+  if (skill === undefined) return undefined;
   triggerCache = null;
+  return { skill, deletedSkillIds };
 };
