@@ -1,5 +1,6 @@
 import { discordClientStart } from "#/integrations/discord";
 import { logger } from "#/utils/logger";
+import { migratePostgres } from "#/utils/postgres";
 
 // Uncaught exception handler:
 process.on("uncaughtException", (error, origin) => {
@@ -8,14 +9,10 @@ process.on("uncaughtException", (error, origin) => {
 });
 
 // Start services and related triggers:
+await migratePostgres();
+
 await discordClientStart(async () => {
   await import("#/triggers/message-create.djs-event");
-  await import("#/triggers/message-reaction-add.djs-event");
-  await import("#/triggers/voice-state-update.djs-event");
 });
 
-// Load others triggers:
-// The quota check runs first so every other trigger starts with an up-to-date flag:
 await import("#/triggers/openrouter-quota.cron");
-await import("#/triggers/discord-presence.cron");
-await import("#/triggers/skill-cleanup.cron");
