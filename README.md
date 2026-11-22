@@ -1,6 +1,6 @@
-# Discord AI Bot – Tool-Driven
+# Discord Agent
 
-An AI bot for Discord designed to act freely using various tools.  
+An agent bot for Discord designed to act freely using various tools.  
 
 ## Key Patterns
 
