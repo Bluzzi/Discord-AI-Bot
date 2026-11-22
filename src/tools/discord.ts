@@ -1,28 +1,620 @@
 import type { ToolSet } from "ai";
-import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
-import { createAudioPlayer, createAudioResource, getVoiceConnection, joinVoiceChannel, StreamType } from "@discordjs/voice";
-import { discordClient, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
+import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable, RouteLike } from "discord.js";
+import { createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
+import { discordClient, fetchDiscordChannel, fetchDiscordTextChannel, fetchDiscordSendableChannel, fetchDiscordVoiceConnection, getDiscordAudioPlayer, replaceDiscordAudio, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
 import { tool } from "ai";
-import dedent from "dedent";
-import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, ThreadAutoArchiveDuration } from "discord.js";
+import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, MessageFlags, MessagePayload, parseEmoji, RequestMethod, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
 import { Readable } from "node:stream";
 import { z } from "zod";
 
+const id = z.string().regex(/^\d{1,20}$/u);
+const pathSegment = z.string().min(1).regex(/^[\w-]+$/u);
+const text = z.string();
+const integer = z.number().int();
+const flag = z.boolean();
+const date = z.iso.datetime({ offset: true });
+const jsonObject = z.record(z.string(), z.json());
+const ids = z.array(id);
+const limit = integer.min(1).max(100).optional();
+const page = z.object({ limit, before: id.optional(), after: id.optional() });
+const reason = text.max(512).optional();
+const image = z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u);
+const mediaUrl = z.url({ protocol: /^https?$/u });
+const webhookFields = z.object({ name: text, avatar: text.nullable(), channel_id: id }).partial();
+const entityType = integer.min(1).max(3);
+
+type ActionOptions = {
+  query?: z.ZodObject;
+  body?: z.ZodType;
+  audit?: boolean;
+};
+
+const action = (description: string, method: RequestMethod, path: RouteLike, { query, body, audit }: ActionOptions = {}) => {
+  const segments = Array.from(path.matchAll(/:([a-z]\w*)/gu), ([, key]) => key!);
+  const params = z.object(Object.fromEntries(segments.map((key) => [key, key.endsWith("Id") && key !== "instanceId" ? id : pathSegment])));
+  const inputSchema = params.extend({
+    ...(query === undefined ? {} : { query: query.safeParse({}).success ? query.optional() : query }),
+    ...(body === undefined ? {} : { body }),
+    ...(audit === true ? { reason } : {}),
+  });
+
+  return tool({
+    description,
+    inputSchema,
+    execute: async (input) => {
+      const route = path.replace(/:([a-z]\w*)/gu, (_match, key: string) => encodeURIComponent(params.shape[key]!.parse(input[key]))) as RouteLike;
+      const searchParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(query?.parse(input.query ?? {}) ?? {})) {
+        if (value !== undefined) {
+          const items = Array.isArray(value) && key !== "include_roles" ? value : [value];
+          for (const item of items) {
+            searchParams.append(key, String(item));
+          }
+        }
+      }
+
+      const result = await discordClient.rest.request({
+        method,
+        fullRoute: route,
+        body: body?.parse(input.body),
+        query: searchParams,
+        reason: audit === true ? reason.parse(input.reason) : undefined,
+      });
+
+      if (result instanceof ArrayBuffer) {
+        return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      }
+      return result ?? {};
+    },
+  });
+};
+
+const { Get, Post, Patch, Put, Delete } = RequestMethod;
+const memberSearch = z.object({ query: text.min(1), limit });
+const permissionOverwrite = z.object({
+  id,
+  type: z.union([z.literal(0), z.literal(1)]),
+  allow: z.string().regex(/^\d+$/u).optional(),
+  deny: z.string().regex(/^\d+$/u).optional(),
+});
+const forumTag = z.object({
+  id: id.optional(),
+  name: text.min(1).max(20),
+  moderated: flag.optional(),
+  emoji_id: id.nullable().optional(),
+  emoji_name: text.nullable().optional(),
+});
+const roleFields = z.object({
+  name: text.max(100),
+  permissions: z.string().regex(/^\d+$/u),
+  colors: z.object({ primary_color: integer, secondary_color: integer.optional(), tertiary_color: integer.optional() }),
+  hoist: flag,
+  mentionable: flag,
+  icon: image.nullable(),
+  unicode_emoji: text.nullable(),
+}).partial();
+const stageFields = z.object({
+  topic: text.min(1).max(120),
+  privacy_level: z.literal(2).optional(),
+});
+const autoModFields = z.object({
+  name: text.min(1),
+  event_type: integer,
+  trigger_metadata: jsonObject,
+  actions: z.array(z.object({ type: integer, metadata: jsonObject.optional() })),
+  enabled: flag,
+  exempt_roles: ids,
+  exempt_channels: ids,
+});
+const eventFields = z.object({
+  name: text.min(1).max(100),
+  description: text.max(1000).nullable(),
+  scheduled_start_time: date,
+  scheduled_end_time: date.nullable(),
+  channel_id: id.nullable(),
+  entity_type: entityType,
+  entity_metadata: z.object({ location: text.max(100) }).nullable(),
+  privacy_level: z.literal(2),
+  status: integer.min(1).max(4),
+  image: image.nullable(),
+  recurrence_rule: jsonObject.nullable(),
+}).partial();
+const stickerFields = z.object({ name: text.min(2).max(30), description: text.max(100).nullable(), tags: text.max(200) });
+const guildWebhooks = z.object({ guildId: id });
+const webhookId = z.object({ webhookId: id });
+const webhookMessage = webhookId.extend({ messageId: id, threadId: id.optional() });
+const messageTarget = z.object({ channelId: id, messageId: id });
+const reactionTarget = messageTarget.extend({ emoji: text.min(1).describe("Unicode emoji, name:id or custom emoji markup") });
+const threadFields = z.object({
+  name: text.min(1).max(100),
+  auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]).optional(),
+  rate_limit_per_user: integer.min(0).max(21600).optional(),
+});
+const messageFields = z.object({
+  content: text.max(2000),
+  embeds: z.array(jsonObject).max(10),
+  components: z.array(jsonObject),
+  sticker_ids: ids.max(3),
+  flags: integer.nonnegative(),
+}).partial();
+const allowedMentions = { parse: ["users", "roles"] };
+
+const reactionIdentifier = (emoji: string) => {
+  const resolved = parseEmoji(emoji);
+  if (resolved === null) {
+    throw new Error("Invalid emoji");
+  }
+  return encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
+};
+
+const webhookSummary = (webhook: { id: string; name: string | null; channelId: string; type: number; avatarURL: () => string | null }) => ({
+  id: webhook.id,
+  name: webhook.name,
+  channelId: webhook.channelId,
+  type: webhook.type,
+  avatarUrl: webhook.avatarURL(),
+});
+
 export const discordTools = {
+  // Guilds And Members
+  getBotGuilds: action("List guilds the bot belongs to.", Get, "/users/@me/guilds", {
+    query: page.extend({ limit: integer.min(1).max(200).optional(), with_counts: flag.optional() }),
+  }),
+  getGuildDetails: action("Get full guild settings and features.", Get, "/guilds/:guildId", { query: z.object({ with_counts: flag.optional() }) }),
+  editGuild: action("Edit guild settings.", Patch, "/guilds/:guildId", {
+    audit: true,
+    body: z.object({
+      name: text.min(2).max(100),
+      description: text.max(120).nullable(),
+      verification_level: integer.min(0).max(4),
+      default_message_notifications: integer.min(0).max(1),
+      explicit_content_filter: integer.min(0).max(2),
+      afk_channel_id: id.nullable(),
+      afk_timeout: integer,
+      icon: image.nullable(),
+      splash: image.nullable(),
+      discovery_splash: image.nullable(),
+      banner: image.nullable(),
+      system_channel_id: id.nullable(),
+      system_channel_flags: integer,
+      rules_channel_id: id.nullable(),
+      public_updates_channel_id: id.nullable(),
+      safety_alerts_channel_id: id.nullable(),
+      preferred_locale: text,
+      features: z.array(text),
+      premium_progress_bar_enabled: flag,
+    }).partial(),
+  }),
+  leaveGuild: action("Make the bot leave a guild.", Delete, "/users/@me/guilds/:guildId"),
+  listGuildMembers: action("List guild members by user ID page.", Get, "/guilds/:guildId/members", {
+    query: z.object({ limit: integer.min(1).max(1000).optional(), after: id.optional() }),
+  }),
+  searchGuildMembers: action("Find guild members by username or nickname prefix.", Get, "/guilds/:guildId/members/search", {
+    query: memberSearch.extend({ limit: integer.min(1).max(1000).optional() }),
+  }),
+  getGuildMember: action("Get a guild member, including assigned role IDs.", Get, "/guilds/:guildId/members/:userId"),
+  getGuildMemberPermissions: action("Get a member's computed guild permissions.", Get, "/guilds/:guildId/permissions/member/:userId"),
+  getGuildRolePermissions: action("Get a role's computed guild permissions.", Get, "/guilds/:guildId/permissions/role/:roleId"),
+  setMemberRoles: action("Replace a guild member's complete list of roles.", Patch, "/guilds/:guildId/members/:userId", {
+    audit: true,
+    body: z.object({ roles: ids }),
+  }),
+  removeMemberTimeout: action("Remove a guild member's timeout.", Patch, "/guilds/:guildId/members/:userId", {
+    audit: true,
+    body: z.object({ communication_disabled_until: z.null().default(null) }).default({ communication_disabled_until: null }),
+  }),
+  kickMember: action("Remove a member from a guild.", Delete, "/guilds/:guildId/members/:userId", { audit: true }),
+  getGuildBans: action("List guild bans.", Get, "/guilds/:guildId/bans", { query: page.extend({ limit: integer.min(1).max(1000).optional() }) }),
+  getGuildBan: action("Get a guild ban.", Get, "/guilds/:guildId/bans/:userId"),
+  banMember: action("Ban a user from a guild.", Put, "/guilds/:guildId/bans/:userId", {
+    audit: true,
+    body: z.object({ delete_message_seconds: integer.min(0).max(604800).optional() }).default({}),
+  }),
+  bulkBanMembers: action("Ban up to 200 users from a guild.", Post, "/guilds/:guildId/bulk-ban", {
+    audit: true,
+    body: z.object({ user_ids: ids.min(1).max(200), delete_message_seconds: integer.min(0).max(604800).optional() }),
+  }),
+  unbanMember: action("Remove a user's guild ban.", Delete, "/guilds/:guildId/bans/:userId", { audit: true }),
+  getPruneCount: action("Count inactive members a prune would remove.", Get, "/guilds/:guildId/prune", {
+    query: z.object({ days: integer.min(1).max(30).optional(), include_roles: ids.optional().describe("Role IDs as an array") }),
+  }),
+  pruneMembers: action("Remove inactive guild members.", Post, "/guilds/:guildId/prune", {
+    audit: true,
+    body: z.object({ days: integer.min(1).max(30), compute_prune_count: flag.optional(), include_roles: ids.optional() }),
+  }),
+  editGuildIncidentActions: action("Temporarily pause guild invites or DMs. Null resumes them.", Put, "/guilds/:guildId/incident-actions", {
+    body: z.object({ invites_disabled_until: date.nullable(), dms_disabled_until: date.nullable() }).partial(),
+  }),
+
+  // Channels And Threads
+  getChannelDetails: action("Get full channel settings and permission overwrites.", Get, "/channels/:channelId"),
+  editChannel: action("Edit a channel or thread.", Patch, "/channels/:channelId", {
+    audit: true,
+    body: z.object({
+      name: text.min(1).max(100),
+      type: integer,
+      position: integer.nonnegative(),
+      topic: text.max(4096).nullable(),
+      nsfw: flag,
+      rate_limit_per_user: integer.min(0).max(21600),
+      bitrate: integer,
+      user_limit: integer,
+      permission_overwrites: z.array(permissionOverwrite),
+      parent_id: id.nullable(),
+      rtc_region: text.nullable(),
+      video_quality_mode: integer.min(1).max(2),
+      default_auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]),
+      flags: integer.nonnegative(),
+      available_tags: z.array(forumTag),
+      applied_tags: ids,
+      default_reaction_emoji: z.object({ emoji_id: id.nullable().optional(), emoji_name: text.nullable().optional() }).nullable(),
+      default_thread_rate_limit_per_user: integer.min(0).max(21600),
+      default_sort_order: integer.min(0).max(1).nullable(),
+      default_forum_layout: integer.min(0).max(2),
+      archived: flag,
+      auto_archive_duration: integer,
+      locked: flag,
+      invitable: flag,
+    }).partial(),
+  }),
+  deleteChannel: action("Delete a guild channel or close a DM.", Delete, "/channels/:channelId", { audit: true }),
+  reorderChannels: action("Reorder or move guild channels.", Patch, "/guilds/:guildId/channels", {
+    audit: true,
+    body: z.array(z.object({ id, position: integer.nonnegative().nullable().optional(), lock_permissions: flag.nullable().optional(), parent_id: id.nullable().optional() })).min(1),
+  }),
+  setChannelPermission: action("Set a channel permission overwrite. Allow and deny are decimal bitsets.", Put, "/channels/:channelId/permissions/:overwriteId", {
+    audit: true,
+    body: permissionOverwrite.omit({ id: true }),
+  }),
+  deleteChannelPermission: action("Delete a channel permission overwrite.", Delete, "/channels/:channelId/permissions/:overwriteId", { audit: true }),
+  getChannelMemberPermissions: action("Get a member's computed permissions in a channel.", Get, "/channels/:channelId/permissions/member/:userId", {
+    query: z.object({ implicit: flag.optional() }),
+  }),
+  getChannelRolePermissions: action("Get a role's computed permissions in a channel.", Get, "/channels/:channelId/permissions/role/:roleId", {
+    query: z.object({ implicit: flag.optional() }),
+  }),
+  followAnnouncementChannel: action("Forward announcements to a destination channel.", Post, "/channels/:channelId/followers", {
+    body: z.object({ webhook_channel_id: id }),
+  }),
+  triggerTyping: action("Show the bot's typing indicator in a channel.", Post, "/channels/:channelId/typing"),
+  createPrivateThread: action("Create a private thread in a guild text channel.", Post, "/channels/:channelId/threads", {
+    audit: true,
+    body: threadFields.extend({ type: z.literal(12).default(12), invitable: flag.optional() }),
+  }),
+  createForumPost: tool({
+    description: "Create a post in a forum or media channel.",
+    inputSchema: z.object({ channelId: id, body: threadFields.extend({ message: messageFields, applied_tags: ids.max(5).optional() }), reason }),
+    execute: async ({ channelId, body, reason }) => discordClient.rest.post(Routes.threads(channelId), {
+      body: { ...body, message: { ...body.message, allowed_mentions: allowedMentions } },
+      reason,
+    }),
+  }),
+  getActiveThreads: action("List active guild threads visible to the bot.", Get, "/guilds/:guildId/threads/active"),
+  getPublicArchivedThreads: action("List archived public threads in a channel.", Get, "/channels/:channelId/threads/archived/public", {
+    query: z.object({ limit, before: date.optional() }),
+  }),
+  getPrivateArchivedThreads: action("List archived private threads in a channel.", Get, "/channels/:channelId/threads/archived/private", {
+    query: z.object({ limit, before: date.optional() }),
+  }),
+  getJoinedArchivedThreads: action("List archived private threads the bot joined.", Get, "/channels/:channelId/users/@me/threads/archived/private", {
+    query: z.object({ limit, before: id.optional() }),
+  }),
+  joinThread: action("Join a thread.", Put, "/channels/:threadId/thread-members/@me"),
+  leaveThread: action("Leave a thread.", Delete, "/channels/:threadId/thread-members/@me"),
+  addThreadMember: action("Add a guild member to a thread.", Put, "/channels/:threadId/thread-members/:userId"),
+  removeThreadMember: action("Remove a member from a thread.", Delete, "/channels/:threadId/thread-members/:userId"),
+  getThreadMember: action("Get a thread member.", Get, "/channels/:threadId/thread-members/:userId", {
+    query: z.object({ with_member: flag.optional() }),
+  }),
+  getThreadMembers: action("List thread members.", Get, "/channels/:threadId/thread-members", {
+    query: z.object({ with_member: flag.optional(), after: id.optional(), limit }),
+  }),
+
+  // Messages And Polls
+  getMessage: action("Get a message by ID.", Get, "/channels/:channelId/messages/:messageId"),
+  searchGuildMessages: action("Search indexed guild messages.", Get, "/guilds/:guildId/messages/search", {
+    query: z.object({
+      content: text.max(1024),
+      channel_id: ids.max(500),
+      author_id: ids.max(100),
+      author_type: z.array(text),
+      mentions: ids.max(100),
+      mentions_role_id: ids.max(100),
+      mention_everyone: flag,
+      pinned: flag,
+      has: z.array(text),
+      embed_type: z.array(text),
+      embed_provider: z.array(text).max(100),
+      link_hostname: z.array(text).max(100),
+      attachment_filename: z.array(text).max(100),
+      attachment_extension: z.array(text).max(100),
+      replied_to_user_id: ids.max(100),
+      replied_to_message_id: ids.max(100),
+      include_nsfw: flag,
+      sort_by: z.enum(["timestamp", "relevance"]),
+      sort_order: z.enum(["asc", "desc"]),
+      slop: integer.min(0).max(100),
+      limit: integer.min(1).max(25),
+      offset: integer.min(0).max(9975),
+      min_id: id,
+      max_id: id,
+    }).partial(),
+  }),
+  sendRichMessage: tool({
+    description: "Send a Discord message with embeds, components, stickers, TTS or files.",
+    inputSchema: z.object({
+      channelId: id,
+      body: messageFields.extend({ tts: flag.optional(), files: z.array(z.object({ url: mediaUrl, name: text.min(1) })).max(10).optional() }),
+    }),
+    execute: async ({ channelId, body: { files, ...body } }) => {
+      return discordClient.rest.post(Routes.channelMessages(channelId), {
+        body: { ...body, attachments: files?.map(({ name }, index) => ({ id: index, filename: name })), allowed_mentions: allowedMentions },
+        files: files === undefined ? undefined : await Promise.all(files.map(async ({ url, name }) => MessagePayload.resolveFile({ attachment: url, name }))),
+      });
+    },
+  }),
+  editRichMessage: tool({
+    description: "Edit the text, embeds, components or retained attachments of the bot's message.",
+    inputSchema: messageTarget.extend({
+      body: messageFields.omit({ sticker_ids: true }).extend({
+        content: text.max(2000).nullable().optional(),
+        attachments: z.array(z.object({ id, description: text.max(1024).optional() })).optional(),
+      }),
+    }),
+    execute: async ({ channelId, messageId, body }) => discordClient.rest.patch(Routes.channelMessage(channelId, messageId), {
+      body: { ...body, allowed_mentions: allowedMentions },
+    }),
+  }),
+  sendVoiceMessage: tool({
+    description: "Send a voice message using an Ogg Opus audio URL and its waveform.",
+    inputSchema: z.object({ channelId: id, url: mediaUrl, durationSeconds: z.number().positive(), waveform: text.min(1).max(344) }),
+    execute: async ({ channelId, url, durationSeconds, waveform }) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Could not download the voice message (HTTP ${String(response.status)})`);
+      }
+      return discordClient.rest.post(Routes.channelMessages(channelId), {
+        files: [{ data: Buffer.from(await response.arrayBuffer()), name: "voice-message.ogg", contentType: "audio/ogg" }],
+        body: {
+          flags: MessageFlags.IsVoiceMessage,
+          attachments: [{ id: 0, filename: "voice-message.ogg", duration_secs: durationSeconds, waveform }],
+        },
+      });
+    },
+  }),
+  forwardMessage: tool({
+    description: "Forward an existing message to another channel.",
+    inputSchema: messageTarget.extend({ toChannelId: id, guildId: id.optional() }),
+    execute: async ({ channelId, messageId, toChannelId, guildId }) => discordClient.rest.post(Routes.channelMessages(toChannelId), {
+      body: { message_reference: { type: 1, channel_id: channelId, message_id: messageId, guild_id: guildId }, allowed_mentions: { parse: [] } },
+    }),
+  }),
+  crosspostMessage: action("Publish an announcement message to following channels.", Post, "/channels/:channelId/messages/:messageId/crosspost"),
+  bulkDeleteMessages: action("Delete 2–100 guild messages less than two weeks old.", Post, "/channels/:channelId/messages/bulk-delete", {
+    audit: true,
+    body: z.object({ messages: ids.min(2).max(100) }),
+  }),
+  unpinMessage: action("Unpin a message.", Delete, "/channels/:channelId/messages/pins/:messageId", { audit: true }),
+  getReactionUsers: tool({
+    description: "List users who used an emoji reaction.",
+    inputSchema: reactionTarget.extend({ after: id.optional(), limit, type: z.union([z.literal(0), z.literal(1)]).optional().describe("0 normal, 1 super reaction") }),
+    execute: async ({ channelId, messageId, emoji, after, limit, type }) => {
+      const query = new URLSearchParams();
+      if (after !== undefined) query.set("after", after);
+      if (limit !== undefined) query.set("limit", String(limit));
+      if (type !== undefined) query.set("type", String(type));
+      return discordClient.rest.get(Routes.channelMessageReaction(channelId, messageId, reactionIdentifier(emoji)), { query });
+    },
+  }),
+  removeReaction: tool({
+    description: "Remove the bot's reaction or a specified user's reaction.",
+    inputSchema: reactionTarget.extend({ userId: id.optional() }),
+    execute: async ({ channelId, messageId, emoji, userId }) => {
+      const reaction = reactionIdentifier(emoji);
+      const route = userId === undefined ? Routes.channelMessageOwnReaction(channelId, messageId, reaction) : Routes.channelMessageUserReaction(channelId, messageId, reaction, userId);
+      await discordClient.rest.delete(route);
+      return {};
+    },
+  }),
+  clearEmojiReactions: tool({
+    description: "Remove all reactions with one emoji from a message.",
+    inputSchema: reactionTarget,
+    execute: async ({ channelId, messageId, emoji }) => {
+      await discordClient.rest.delete(Routes.channelMessageReaction(channelId, messageId, reactionIdentifier(emoji)));
+      return {};
+    },
+  }),
+  clearMessageReactions: action("Remove all reactions from a message.", Delete, "/channels/:channelId/messages/:messageId/reactions"),
+  endPoll: action("End a poll created by the bot.", Post, "/channels/:channelId/polls/:messageId/expire"),
+  getPollVoters: action("List voters for a specific poll answer.", Get, "/channels/:channelId/polls/:messageId/answers/:answer", {
+    query: z.object({ after: id.optional(), limit }),
+  }),
+
+  // Roles And Auto Mod
+  getRole: action("Get a guild role and its permissions.", Get, "/guilds/:guildId/roles/:roleId"),
+  editRole: action("Edit a guild role.", Patch, "/guilds/:guildId/roles/:roleId", { audit: true, body: roleFields }),
+  deleteRole: action("Delete a guild role.", Delete, "/guilds/:guildId/roles/:roleId", { audit: true }),
+  reorderRoles: action("Reorder guild roles.", Patch, "/guilds/:guildId/roles", {
+    audit: true,
+    body: z.array(z.object({ id, position: integer.min(1) })).min(1),
+  }),
+  getRoleMemberCounts: action("Get member counts by role in a guild.", Get, "/guilds/:guildId/roles/member-counts"),
+  listAutoModerationRules: action("List guild AutoMod rules.", Get, "/guilds/:guildId/auto-moderation/rules"),
+  getAutoModerationRule: action("Get an AutoMod rule.", Get, "/guilds/:guildId/auto-moderation/rules/:ruleId"),
+  createAutoModerationRule: action("Create an AutoMod rule.", Post, "/guilds/:guildId/auto-moderation/rules", {
+    audit: true,
+    body: autoModFields.partial().required({ name: true, event_type: true, actions: true }).extend({ trigger_type: integer }),
+  }),
+  editAutoModerationRule: action("Edit an AutoMod rule.", Patch, "/guilds/:guildId/auto-moderation/rules/:ruleId", {
+    audit: true,
+    body: autoModFields.partial(),
+  }),
+  deleteAutoModerationRule: action("Delete an AutoMod rule.", Delete, "/guilds/:guildId/auto-moderation/rules/:ruleId", { audit: true }),
+
+  // Voice And Stage
+  controlVoiceAudio: tool({
+    description: "Pause, resume or stop the bot's audio.",
+    inputSchema: z.object({ guildId: id, operation: z.enum(["pause", "resume", "stop"]) }),
+    execute: ({ guildId, operation }) => {
+      const player = getDiscordAudioPlayer(fetchDiscordVoiceConnection(guildId));
+      if (player === undefined) {
+        throw new Error("No audio player in this guild");
+      }
+      const changed = operation === "pause" ? player.pause() : operation === "resume" ? player.unpause() : player.stop(true);
+      return { changed };
+    },
+  }),
+  setBotVoiceMute: tool({
+    description: "Set the bot's own mute or deafen state in voice.",
+    inputSchema: z.object({ guildId: id, mute: flag.optional(), deaf: flag.optional() }),
+    execute: ({ guildId, mute, deaf }) => {
+      const connection = fetchDiscordVoiceConnection(guildId);
+      if (!connection.rejoin({
+        channelId: connection.joinConfig.channelId,
+        selfMute: mute ?? connection.joinConfig.selfMute,
+        selfDeaf: deaf ?? connection.joinConfig.selfDeaf,
+      })) {
+        throw new Error("Voice state update failed");
+      }
+      return {};
+    },
+  }),
+  getBotVoiceState: action("Get the bot's voice state in a guild.", Get, "/guilds/:guildId/voice-states/@me"),
+  getMemberVoiceState: action("Get a member's voice state.", Get, "/guilds/:guildId/voice-states/:userId"),
+  editBotStageVoiceState: action("Suppress the bot on stage or request to speak.", Patch, "/guilds/:guildId/voice-states/@me", {
+    body: z.object({ channel_id: id, suppress: flag.optional(), request_to_speak_timestamp: date.nullable().optional() }),
+  }),
+  setStageMemberSuppressed: action("Set whether a stage member is suppressed.", Patch, "/guilds/:guildId/voice-states/:userId", {
+    body: z.object({ channel_id: id, suppress: flag }),
+  }),
+  setVoiceChannelStatus: action("Set or clear a voice channel status.", Put, "/channels/:channelId/voice-status", {
+    audit: true,
+    body: z.object({ status: text.max(500).nullable() }),
+  }),
+  createStageInstance: action("Open a stage with a topic.", Post, "/stage-instances", {
+    audit: true,
+    body: stageFields.extend({ channel_id: id, send_start_notification: flag.optional(), guild_scheduled_event_id: id.optional() }),
+  }),
+  getStageInstance: action("Get the active stage in a channel.", Get, "/stage-instances/:channelId"),
+  editStageInstance: action("Edit a stage instance.", Patch, "/stage-instances/:channelId", { audit: true, body: stageFields.partial() }),
+  deleteStageInstance: action("Close a stage instance.", Delete, "/stage-instances/:channelId", { audit: true }),
+  sendSoundboardSound: action("Play a soundboard sound in the bot's voice channel.", Post, "/channels/:channelId/send-soundboard-sound", {
+    body: z.object({ sound_id: id, source_guild_id: id.optional() }),
+  }),
+  getDefaultSoundboardSounds: action("List default Discord soundboard sounds.", Get, "/soundboard-default-sounds"),
+  getGuildSoundboardSounds: action("List guild soundboard sounds.", Get, "/guilds/:guildId/soundboard-sounds"),
+  getGuildSoundboardSound: action("Get a guild soundboard sound.", Get, "/guilds/:guildId/soundboard-sounds/:soundId"),
+  // Invites And Webhooks
+  getInvite: action("Get an invite by code.", Get, "/invites/:code", {
+    query: z.object({ with_counts: flag.optional(), with_expiration: flag.optional(), guild_scheduled_event_id: id.optional() }),
+  }),
+  getChannelInvites: action("List channel invites.", Get, "/channels/:channelId/invites"),
+  getGuildInvites: action("List guild invites.", Get, "/guilds/:guildId/invites"),
+  deleteInvite: action("Revoke an invite.", Delete, "/invites/:code", { audit: true }),
+  getGuildWebhooks: tool({
+    description: "List guild webhooks.",
+    inputSchema: guildWebhooks,
+    execute: async ({ guildId }) => {
+      const guild = await discordClient.guilds.fetch(guildId);
+      return (await guild.fetchWebhooks()).map(webhookSummary);
+    },
+  }),
+  getWebhook: tool({
+    description: "Get webhook details.",
+    inputSchema: webhookId,
+    execute: async ({ webhookId }) => webhookSummary(await discordClient.fetchWebhook(webhookId)),
+  }),
+  editWebhook: tool({
+    description: "Edit a webhook's name, avatar or channel.",
+    inputSchema: webhookId.extend({ body: webhookFields, reason }),
+    execute: async ({ webhookId, body, reason }) => {
+      const webhook = await discordClient.fetchWebhook(webhookId);
+      return webhookSummary(await webhook.edit({ name: body.name, avatar: body.avatar, channel: body.channel_id, reason }));
+    },
+  }),
+  deleteWebhook: action("Delete a webhook.", Delete, "/webhooks/:webhookId", { audit: true }),
+  getWebhookMessage: tool({
+    description: "Get a message sent by a webhook.",
+    inputSchema: webhookMessage,
+    execute: async ({ webhookId, messageId, threadId }) => {
+      const webhook = await discordClient.fetchWebhook(webhookId);
+      const message = await webhook.fetchMessage(messageId, { threadId });
+      return { id: message.id, content: message.content, channelId: message.channelId, createdAt: message.createdAt.toISOString() };
+    },
+  }),
+  editWebhookMessage: tool({
+    description: "Edit the text of a webhook message.",
+    inputSchema: webhookMessage.extend({ content: text.max(2000).nullable() }),
+    execute: async ({ webhookId, messageId, threadId, content }) => {
+      const webhook = await discordClient.fetchWebhook(webhookId);
+      const message = await webhook.editMessage(messageId, { content, threadId, allowedMentions: { parse: ["users", "roles"] } });
+      return { messageId: message.id };
+    },
+  }),
+  deleteWebhookMessage: tool({
+    description: "Delete a message sent by a webhook.",
+    inputSchema: webhookMessage,
+    execute: async ({ webhookId, messageId, threadId }) => {
+      const webhook = await discordClient.fetchWebhook(webhookId);
+      await webhook.deleteMessage(messageId, threadId);
+      return {};
+    },
+  }),
+
+  // Expressions and events
+  getGuildEmoji: action("Get a custom guild emoji.", Get, "/guilds/:guildId/emojis/:emojiId"),
+  editEmoji: action("Edit a guild emoji's name or allowed roles.", Patch, "/guilds/:guildId/emojis/:emojiId", {
+    audit: true,
+    body: z.object({ name: text.min(2).max(32), roles: ids.nullable() }).partial(),
+  }),
+  deleteEmoji: action("Delete a custom guild emoji.", Delete, "/guilds/:guildId/emojis/:emojiId", { audit: true }),
+  getApplicationEmojis: action("List emojis owned by the application.", Get, "/applications/:applicationId/emojis"),
+  getApplicationEmoji: action("Get an application emoji.", Get, "/applications/:applicationId/emojis/:emojiId"),
+  getSticker: action("Get a sticker by ID.", Get, "/stickers/:stickerId"),
+  getGuildStickers: action("List custom guild stickers.", Get, "/guilds/:guildId/stickers"),
+  getGuildSticker: action("Get a custom guild sticker.", Get, "/guilds/:guildId/stickers/:stickerId"),
+  createSticker: tool({
+    description: "Create a guild sticker from a PNG, APNG, GIF or Lottie URL.",
+    inputSchema: z.object({ guildId: id, url: mediaUrl, name: text.min(2).max(30), tags: text.max(200), description: text.max(100).optional(), reason }),
+    execute: async ({ guildId, url, name, tags, description, reason }) => {
+      const guild = await discordClient.guilds.fetch(guildId);
+      const sticker = await guild.stickers.create({ file: url, name, tags, description, reason });
+      return { id: sticker.id, name: sticker.name, url: sticker.url };
+    },
+  }),
+  editSticker: action("Edit a custom guild sticker.", Patch, "/guilds/:guildId/stickers/:stickerId", { audit: true, body: stickerFields.partial() }),
+  deleteSticker: action("Delete a custom guild sticker.", Delete, "/guilds/:guildId/stickers/:stickerId", { audit: true }),
+  getGuildEvents: action("List scheduled guild events.", Get, "/guilds/:guildId/scheduled-events", {
+    query: z.object({ with_user_count: flag.optional() }),
+  }),
+  getGuildEvent: action("Get a scheduled guild event.", Get, "/guilds/:guildId/scheduled-events/:eventId", {
+    query: z.object({ with_user_count: flag.optional() }),
+  }),
+  editGuildEvent: action("Edit an event or change its status (1 scheduled, 2 active, 3 completed, 4 canceled).", Patch, "/guilds/:guildId/scheduled-events/:eventId", {
+    audit: true,
+    body: eventFields,
+  }),
+  deleteGuildEvent: action("Delete a scheduled guild event.", Delete, "/guilds/:guildId/scheduled-events/:eventId", { audit: true }),
+  getGuildEventSubscribers: action("List users interested in a scheduled guild event.", Get, "/guilds/:guildId/scheduled-events/:eventId/users", {
+    query: page.extend({ with_member: flag.optional() }),
+  }),
+  // Direct messages
+  openDm: action("Open a direct message channel with a user.", Post, "/users/@me/channels", { body: z.object({ recipient_id: id }) }),
+
   // Guilds:
 
   getGuildInfo: tool({
-    description: "Get detailed information about a guild: name, member count, owner, icon and creation date.",
+    description: "Get a guild summary.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
     }),
     outputSchema: z.object({
-      id: z.string().describe("Guild ID"),
-      name: z.string().describe("Guild name"),
-      memberCount: z.number().describe("Member count"),
-      ownerId: z.string().describe("Owner user ID"),
-      iconUrl: z.string().nullable().describe("Guild icon URL"),
-      createdAt: z.string().describe("Guild creation date (ISO)"),
+      id: z.string(),
+      name: z.string(),
+      memberCount: z.number(),
+      ownerId: z.string(),
+      iconUrl: z.string().nullable(),
+      createdAt: z.string(),
     }),
     execute: async ({ guildId }) => {
       const guild = await discordClient.guilds.fetch(guildId);
@@ -39,28 +631,29 @@ export const discordTools = {
   }),
 
   getAuditLog: tool({
-    description: "Get the latest entries of the guild audit log: who did what (role changes, kicks, message deletions, channel updates...). Useful to investigate what happened in the server.",
+    description: "List recent guild audit log entries.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       limit: z.number().int().min(1).max(100).optional().describe("Number of entries to fetch (default: 10)"),
+      actionType: z.enum(AuditLogEvent).optional(),
+      userId: z.string().optional(),
+      before: z.string().optional(),
+      after: z.string().optional(),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Audit log entry ID"),
-      action: z.string().describe("Action performed (e.g. MemberRoleUpdate, MessageDelete, ChannelUpdate)"),
-      actionType: z.string().describe("Action category (Create, Update or Delete)"),
-      executorId: z.string().nullable().describe("User ID of the member who performed the action"),
-      executorUsername: z.string().nullable().describe("Username of the member who performed the action"),
-      targetId: z.string().nullable().describe("ID of the targeted entity"),
-      reason: z.string().nullable().describe("Reason given for the action"),
-      createdAt: z.string().describe("Entry date (ISO)"),
-    })).describe("Audit log entries, newest first"),
-    execute: async ({ guildId, limit = 10 }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      id: z.string(),
+      action: z.string(),
+      actionType: z.string(),
+      executorId: z.string().nullable(),
+      executorUsername: z.string().nullable(),
+      targetId: z.string().nullable(),
+      reason: z.string().nullable(),
+      createdAt: z.string(),
+    })),
+    execute: async ({ guildId, limit = 10, actionType, userId, before, after }) => {
+      const guild = await discordClient.guilds.fetch(guildId);
 
-      const auditLogs = await guild.fetchAuditLogs({ limit });
+      const auditLogs = await guild.fetchAuditLogs({ limit, type: actionType, user: userId, before, after });
 
       return auditLogs.entries.map((entry) => ({
         id: entry.id,
@@ -78,23 +671,20 @@ export const discordTools = {
   // Channels:
 
   getChannels: tool({
-    description: "List the channels of a guild (text, voice and categories), optionally filtered by name.",
+    description: "List guild channels, optionally filtered by name.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       nameFilter: z.string().optional().describe("Filter channels by name (case-insensitive, spaces ignored)"),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Channel ID"),
-      name: z.string().describe("Channel name"),
-      type: z.string().describe("Discord channel type (e.g. GuildText, GuildVoice, GuildCategory)"),
-    })).describe("Channels of the guild"),
-    execute: ({ guildId, nameFilter }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      id: z.string(),
+      name: z.string(),
+      type: z.string(),
+    })),
+    execute: async ({ guildId, nameFilter }) => {
+      const guild = await discordClient.guilds.fetch(guildId);
 
-      let channels = guild.channels.cache.map((channel) => ({
+      let channels = (await guild.channels.fetch()).filter((channel) => channel !== null).map((channel) => ({
         id: channel.id,
         name: channel.name,
         type: ChannelType[channel.type],
@@ -104,7 +694,7 @@ export const discordTools = {
         const filter = nameFilter.toLowerCase().replace(/\s+/gu, "");
         channels = channels.filter((channel) => {
           const channelName = channel.name.toLowerCase().replace(/\s+/gu, "");
-          return channelName.includes(filter) || filter.includes(channelName);
+          return channelName.includes(filter);
         });
       }
 
@@ -113,24 +703,21 @@ export const discordTools = {
   }),
 
   getChannelInfo: tool({
-    description: "Get detailed information about a channel: name, type, guild, category, topic and NSFW flag.",
+    description: "Get a channel summary.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to fetch"),
+      channelId: z.string(),
     }),
     outputSchema: z.object({
-      id: z.string().describe("Channel ID"),
-      name: z.string().nullable().describe("Channel name if available"),
-      type: z.string().describe("Discord channel type (e.g. GuildText, GuildVoice, GuildCategory)"),
-      guildId: z.string().nullable().describe("Guild ID if the channel belongs to a guild"),
-      parentId: z.string().nullable().describe("Category (parent) ID if any"),
-      nsfw: z.boolean().optional().describe("Whether the channel is marked NSFW"),
-      topic: z.string().nullable().describe("Channel topic for text channels"),
+      id: z.string(),
+      name: z.string().nullable(),
+      type: z.string(),
+      guildId: z.string().nullable(),
+      parentId: z.string().nullable(),
+      nsfw: z.boolean().optional(),
+      topic: z.string().nullable(),
     }),
     execute: async ({ channelId }) => {
-      const channel = await discordClient.channels.fetch(channelId);
-      if (!channel) {
-        throw new Error("Channel not found");
-      }
+      const channel = await fetchDiscordChannel(channelId);
 
       return {
         id: channel.id,
@@ -145,28 +732,29 @@ export const discordTools = {
   }),
 
   createChannel: tool({
-    description: "Create a channel (text, voice or category) in a guild.",
+    description: "Create a guild channel.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       name: z.string().describe("The name for the new channel"),
-      type: z.enum(["text", "voice", "category"]).describe("The type of channel to create"),
+      type: z.enum(["text", "voice", "category", "announcement", "stage", "forum", "media"]),
       categoryId: z.string().optional().describe("Category ID to place the channel under"),
     }),
     outputSchema: z.object({
-      channelId: z.string().describe("ID of the created channel"),
-      channelName: z.string().describe("Name of the created channel"),
-      channelType: z.string().describe("Type of the created channel"),
+      channelId: z.string(),
+      channelName: z.string(),
+      channelType: z.string(),
     }),
     execute: async ({ guildId, name, type, categoryId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const channelTypes = {
         text: ChannelType.GuildText,
         voice: ChannelType.GuildVoice,
         category: ChannelType.GuildCategory,
+        announcement: ChannelType.GuildAnnouncement,
+        stage: ChannelType.GuildStageVoice,
+        forum: ChannelType.GuildForum,
+        media: ChannelType.GuildMedia,
       } as const;
 
       const channel = await guild.channels.create({
@@ -186,19 +774,16 @@ export const discordTools = {
   renameChannel: tool({
     description: "Rename a channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to rename"),
-      newName: z.string().describe("The new name for the channel"),
+      channelId: z.string(),
+      newName: z.string(),
     }),
     outputSchema: z.object({
-      channelId: z.string().describe("Channel ID"),
-      oldName: z.string().nullable().describe("Previous channel name"),
-      newName: z.string().describe("New channel name"),
+      channelId: z.string(),
+      oldName: z.string().nullable(),
+      newName: z.string(),
     }),
     execute: async ({ channelId, newName }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (!channel) {
-        throw new Error("Channel not found");
-      }
+      const channel = await fetchDiscordChannel(channelId);
       if (!("setName" in channel)) {
         throw new Error("This channel type cannot be renamed");
       }
@@ -215,22 +800,22 @@ export const discordTools = {
   }),
 
   setChannelTopic: tool({
-    description: "Change the topic of a text channel. Pass an empty string to clear the topic.",
+    description: "Set or clear a channel topic.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to update"),
+      channelId: z.string(),
       topic: z.string().max(1024).describe("The new channel topic (empty string to clear)"),
     }),
     outputSchema: z.object({
-      channelId: z.string().describe("Channel ID"),
-      topic: z.string().describe("New channel topic"),
+      channelId: z.string(),
+      topic: z.string(),
     }),
     execute: async ({ channelId, topic }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel === undefined || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
-        throw new Error("Channel not found or not a text channel");
+      const channel = await fetchDiscordChannel(channelId);
+      if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement && channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildMedia) {
+        throw new Error("Channel does not support topics");
       }
 
-      await channel.setTopic(topic === "" ? null : topic);
+      await channel.edit({ topic: topic === "" ? null : topic });
 
       return {
         channelId: channel.id,
@@ -240,9 +825,9 @@ export const discordTools = {
   }),
 
   createThread: tool({
-    description: "Create a thread in a text channel, optionally started from an existing message.",
+    description: "Create a thread, optionally from a message.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to create the thread in"),
+      channelId: z.string(),
       name: z.string().describe("The thread name"),
       messageId: z.string().optional().describe("Message ID to start the thread from"),
       autoArchiveMinutes: z.union([
@@ -253,14 +838,11 @@ export const discordTools = {
       ]).optional().describe("Auto-archive duration in minutes: 60 (1 hour), 1440 (1 day), 4320 (3 days), 10080 (1 week). Default: 1 day"),
     }),
     outputSchema: z.object({
-      threadId: z.string().describe("ID of the created thread"),
-      threadName: z.string().describe("Name of the created thread"),
+      threadId: z.string(),
+      threadName: z.string(),
     }),
     execute: async ({ channelId, name, messageId, autoArchiveMinutes = ThreadAutoArchiveDuration.OneDay }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordTextChannel(channelId);
       if (!("threads" in channel)) {
         throw new Error("This channel type does not support threads");
       }
@@ -281,32 +863,29 @@ export const discordTools = {
   // Members:
 
   getMembers: tool({
-    description: "List the members of a guild with their status, activities and voice channel. Use inVoice to only get members currently in a voice channel.",
+    description: "Find guild members and their voice and presence information.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       nameFilter: z.string().optional().describe("Filter members by username or display name (a numeric value is treated as a user ID)"),
       inVoice: z.boolean().optional().describe("Only return members currently in a voice channel (ignored when nameFilter is provided)"),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Member user ID"),
-      username: z.string().describe("Username"),
-      displayName: z.string().describe("Display name in the guild"),
-      status: z.string().describe("Presence status (online, idle, dnd, offline)"),
+      id: z.string(),
+      username: z.string(),
+      displayName: z.string(),
+      status: z.string(),
       activities: z.array(z.object({
-        name: z.string().describe("Activity name"),
-        type: z.number().describe("Discord activity type enum value"),
-        details: z.string().optional().describe("Activity details"),
-        state: z.string().optional().describe("Activity state"),
-        url: z.string().optional().describe("Activity URL"),
-      })).describe("Current activities"),
-      voiceChannelId: z.string().nullable().describe("Voice channel ID if the member is in a voice channel"),
-      voiceChannelName: z.string().nullable().describe("Voice channel name if the member is in a voice channel"),
-    })).describe("Members of the guild"),
+        name: z.string(),
+        type: z.number(),
+        details: z.string().optional(),
+        state: z.string().optional(),
+        url: z.string().optional(),
+      })),
+      voiceChannelId: z.string().nullable(),
+      voiceChannelName: z.string().nullable(),
+    })),
     execute: async ({ guildId, nameFilter, inVoice }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       let members;
 
@@ -342,27 +921,24 @@ export const discordTools = {
   }),
 
   getMemberInfo: tool({
-    description: "Get a member's profile in a guild: display name, avatar, status, voice channel and permissions. Fails if the user is not a member of the guild.",
+    description: "Get a guild member profile and permissions.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      userId: z.string().describe("The Discord user ID to fetch"),
+      guildId: z.string(),
+      userId: z.string(),
     }),
     outputSchema: z.object({
-      userId: z.string().describe("Member user ID"),
-      username: z.string().describe("Username"),
-      displayName: z.string().describe("Display name in the guild"),
-      avatarUrl: z.string().describe("Avatar URL"),
-      status: z.string().describe("Presence status (online, idle, dnd, offline)"),
-      isAdmin: z.boolean().describe("Whether the member has the Administrator permission"),
-      permissions: z.array(z.string()).describe("List of granted permissions"),
-      voiceChannelId: z.string().nullable().describe("Voice channel ID if the member is in a voice channel"),
-      voiceChannelName: z.string().nullable().describe("Voice channel name if the member is in a voice channel"),
+      userId: z.string(),
+      username: z.string(),
+      displayName: z.string(),
+      avatarUrl: z.string(),
+      status: z.string(),
+      isAdmin: z.boolean(),
+      permissions: z.array(z.string()),
+      voiceChannelId: z.string().nullable(),
+      voiceChannelName: z.string().nullable(),
     }),
     execute: async ({ guildId, userId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(userId);
 
@@ -370,7 +946,7 @@ export const discordTools = {
         userId: member.id,
         username: member.user.username,
         displayName: member.displayName,
-        avatarUrl: member.user.displayAvatarURL({ size: 1024, extension: "png" }),
+        avatarUrl: member.displayAvatarURL({ size: 1024, extension: "png" }),
         status: member.presence?.status ?? "offline",
         isAdmin: member.permissions.has("Administrator"),
         permissions: member.permissions.toArray(),
@@ -381,19 +957,19 @@ export const discordTools = {
   }),
 
   getUserInfo: tool({
-    description: "Get a Discord user's global profile by ID: username, avatar and account creation date. Provide guildId to also get their display name in that guild.",
+    description: "Get a user profile, optionally with their guild display name.",
     inputSchema: z.object({
-      userId: z.string().describe("The Discord user ID to fetch"),
+      userId: z.string(),
       guildId: z.string().optional().describe("Guild ID to also fetch the member display name"),
     }),
     outputSchema: z.object({
-      id: z.string().describe("User ID"),
-      username: z.string().describe("Username"),
-      globalName: z.string().nullable().describe("Global display name chosen by the user"),
-      avatarUrl: z.string().describe("Avatar URL"),
-      isBot: z.boolean().describe("Whether the user is a bot"),
-      createdAt: z.string().describe("Account creation date (ISO)"),
-      displayName: z.string().optional().describe("Guild display name, only when guildId is provided"),
+      id: z.string(),
+      username: z.string(),
+      globalName: z.string().nullable(),
+      avatarUrl: z.string(),
+      isBot: z.boolean(),
+      createdAt: z.string(),
+      displayName: z.string().optional(),
     }),
     execute: async ({ userId, guildId }) => {
       let displayName: string | undefined;
@@ -418,25 +994,22 @@ export const discordTools = {
   }),
 
   renameMember: tool({
-    description: "Change the nickname of a member in a guild.",
+    description: "Set or clear a guild nickname.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to rename"),
-      nickname: z.string().describe("The new nickname for the member"),
+      guildId: z.string(),
+      memberId: z.string(),
+      nickname: z.string().max(32).nullable().describe("Null clears the nickname"),
     }),
     outputSchema: z.object({
-      memberId: z.string().describe("Member ID"),
-      oldNickname: z.string().describe("Previous nickname"),
-      newNickname: z.string().describe("New nickname"),
+      memberId: z.string(),
+      oldNickname: z.string().nullable(),
+      newNickname: z.string().nullable(),
     }),
     execute: async ({ guildId, memberId, nickname }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
-      const oldNickname = member.nickname ?? member.user.username;
+      const oldNickname = member.nickname;
       await member.setNickname(nickname);
 
       return {
@@ -448,27 +1021,24 @@ export const discordTools = {
   }),
 
   timeoutMember: tool({
-    description: "Put a member in timeout: the member can neither send messages, react nor speak in voice channels. Use for moderation or as a fun punishment.",
+    description: "Time out a guild member for up to 28 days.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to time out"),
+      guildId: z.string(),
+      memberId: z.string(),
       durationMinutes: z.number().int().min(1).max(40_320).optional().describe("Timeout duration in minutes, 1 to 40320 (28 days). Default: 10"),
       reason: z.string().optional().describe("Reason shown in the audit log"),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the timed out member"),
-      until: z.string().describe("End of the timeout (ISO)"),
+      memberName: z.string(),
+      until: z.string(),
     }),
     execute: async ({ guildId, memberId, durationMinutes = 10, reason }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
-      await member.timeout(durationMinutes * 60_000, reason);
+      const updatedMember = await member.timeout(durationMinutes * 60_000, reason);
 
-      const until = member.communicationDisabledUntil;
+      const until = updatedMember.communicationDisabledUntil;
       if (until === null) {
         throw new Error("Timeout did not apply (the member may have a higher role than the bot)");
       }
@@ -485,22 +1055,19 @@ export const discordTools = {
   getRoles: tool({
     description: "List the roles of a guild, optionally filtered by name.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       nameFilter: z.string().optional().describe("Filter roles by name (case-insensitive, spaces ignored)"),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Role ID"),
-      name: z.string().describe("Role name"),
-      color: z.string().describe("Role color in hex format"),
-      position: z.number().describe("Role position in the hierarchy (higher = higher)"),
-    })).describe("Roles of the guild"),
-    execute: ({ guildId, nameFilter }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      id: z.string(),
+      name: z.string(),
+      color: z.string(),
+      position: z.number(),
+    })),
+    execute: async ({ guildId, nameFilter }) => {
+      const guild = await discordClient.guilds.fetch(guildId);
 
-      let roles = guild.roles.cache.map((role) => ({
+      let roles = (await guild.roles.fetch()).map((role) => ({
         id: role.id,
         name: role.name,
         color: role.hexColor,
@@ -511,7 +1078,7 @@ export const discordTools = {
         const filter = nameFilter.toLowerCase().replace(/\s+/gu, "");
         roles = roles.filter((role) => {
           const roleName = role.name.toLowerCase().replace(/\s+/gu, "");
-          return roleName.includes(filter) || filter.includes(roleName);
+          return roleName.includes(filter);
         });
       }
 
@@ -522,20 +1089,17 @@ export const discordTools = {
   createRole: tool({
     description: "Create a role in a guild.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       name: z.string().describe("The name for the new role"),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/u).optional().describe("Hex color code (e.g. #5865F2)"),
     }),
     outputSchema: z.object({
-      roleId: z.string().describe("ID of the created role"),
-      roleName: z.string().describe("Name of the created role"),
-      color: z.string().describe("Color of the role in hex format"),
+      roleId: z.string(),
+      roleName: z.string(),
+      color: z.string(),
     }),
     execute: async ({ guildId, name, color }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const role = await guild.roles.create({
         name,
@@ -553,22 +1117,19 @@ export const discordTools = {
   addRoleToMember: tool({
     description: "Add a role to a member.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to add the role to"),
-      roleId: z.string().describe("The role ID to add"),
+      guildId: z.string(),
+      memberId: z.string(),
+      roleId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the member"),
-      roleName: z.string().describe("Name of the added role"),
+      memberName: z.string(),
+      roleName: z.string(),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
-      const role = guild.roles.cache.get(roleId);
+      const role = await guild.roles.fetch(roleId);
       if (!role) {
         throw new Error("Role not found");
       }
@@ -585,22 +1146,19 @@ export const discordTools = {
   removeRoleFromMember: tool({
     description: "Remove a role from a member.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to remove the role from"),
-      roleId: z.string().describe("The role ID to remove"),
+      guildId: z.string(),
+      memberId: z.string(),
+      roleId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the member"),
-      roleName: z.string().describe("Name of the removed role"),
+      memberName: z.string(),
+      roleName: z.string(),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
-      const role = guild.roles.cache.get(roleId);
+      const role = await guild.roles.fetch(roleId);
       if (!role) {
         throw new Error("Role not found");
       }
@@ -615,35 +1173,32 @@ export const discordTools = {
   }),
 
   changeRolePosition: tool({
-    description: "Move a role in the guild hierarchy. A higher position means higher in the hierarchy (@everyone is position 0, the lowest).",
+    description: "Move a role in the guild hierarchy.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      roleId: z.string().describe("The role ID to move"),
+      guildId: z.string(),
+      roleId: z.string(),
       position: z.number().int().min(1).describe("The new position for the role (higher = higher in hierarchy)"),
     }),
     outputSchema: z.object({
-      roleName: z.string().describe("Name of the role"),
-      oldPosition: z.number().describe("Previous position"),
-      newPosition: z.number().describe("New position"),
+      roleName: z.string(),
+      oldPosition: z.number(),
+      newPosition: z.number(),
     }),
     execute: async ({ guildId, roleId, position }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
-      const role = guild.roles.cache.get(roleId);
+      const role = await guild.roles.fetch(roleId);
       if (!role) {
         throw new Error("Role not found");
       }
 
       const oldPosition = role.position;
-      await role.setPosition(position);
+      const updatedRole = await role.setPosition(position);
 
       return {
         roleName: role.name,
         oldPosition,
-        newPosition: position,
+        newPosition: updatedRole.position,
       };
     },
   }),
@@ -651,31 +1206,34 @@ export const discordTools = {
   // Messages:
 
   getChannelMessages: tool({
-    description: "Get the most recent messages of a channel, from newest to oldest.",
+    description: "List channel messages, newest first.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to fetch messages from"),
-      limit: z.number().int().min(1).max(100).optional().describe("Number of messages to fetch (default: 10)"),
+      channelId: z.string(),
+      limit: z.number().int().min(1).max(100).optional().describe("Default: 10"),
+      before: z.string().optional().describe("Message ID before which to fetch"),
+      after: z.string().optional().describe("Message ID after which to fetch"),
+      around: z.string().optional().describe("Message ID around which to fetch"),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Message ID"),
-      authorId: z.string().describe("Author user ID"),
-      authorUsername: z.string().describe("Author username"),
-      content: z.string().describe("Message content"),
-      createdAt: z.string().describe("Creation date (ISO)"),
-      hasAttachments: z.boolean().describe("Whether the message has attachments"),
+      id: z.string(),
+      authorId: z.string(),
+      authorUsername: z.string(),
+      content: z.string(),
+      createdAt: z.string(),
+      hasAttachments: z.boolean(),
       attachments: z.array(z.object({
-        url: z.string().describe("Attachment URL"),
-        name: z.string().describe("File name"),
-        contentType: z.string().nullable().describe("MIME type"),
-      })).describe("Message attachments"),
-    })).describe("Messages, newest first"),
-    execute: async ({ channelId, limit = 10 }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
+        url: z.string(),
+        name: z.string(),
+        contentType: z.string().nullable(),
+      })),
+    })),
+    execute: async ({ channelId, limit = 10, before, after, around }) => {
+      if ([before, after, around].filter((cursor) => cursor !== undefined).length > 1) {
+        throw new Error("Use one cursor: before, after or around");
       }
+      const channel = await fetchDiscordTextChannel(channelId);
 
-      const messages = await channel.messages.fetch({ limit });
+      const messages = await channel.messages.fetch({ limit, before, after, around });
 
       return Array.from(messages.values()).map((message) => ({
         id: message.id,
@@ -694,30 +1252,16 @@ export const discordTools = {
   }),
 
   sendMessage: tool({
-    description: dedent`
-      Send a plain text message to a channel. Long contents are split automatically across several messages.
-
-      Supports Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, > quotes, ### headings, - lists, [links](url), ||spoilers||. Tables are not supported.
-
-      Mass mentions (@everyone, @here) are automatically neutralized into @{everyone} / @{here}: mass-ping is impossible.
-    `,
+    description: "Send a channel message. Supports Discord markdown. Long text is split.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to send the message to"),
-      content: z.string().min(1).describe("The message content to send"),
+      channelId: z.string(),
+      content: z.string().min(1),
     }),
     outputSchema: z.object({
-      messageIds: z.array(z.string()).describe("Sent message IDs (one per chunk when the content was split)"),
+      messageIds: z.array(z.string()),
     }),
     execute: async ({ channelId, content }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
-      if (!("send" in channel)) {
-        throw new Error("Channel does not support sending messages");
-      }
-
-      await channel.sendTyping();
+      const channel = await fetchDiscordSendableChannel(channelId);
 
       const messageIds: string[] = [];
 
@@ -731,7 +1275,7 @@ export const discordTools = {
   }),
 
   sendEmbed: tool({
-    description: "Send a rich embed to a channel or as a direct message. Provide exactly one target: channelId or userId.",
+    description: "Send an embed to a channel or user.",
     inputSchema: z.object({
       channelId: z.string().optional().describe("Target channel ID (provide either channelId or userId)"),
       userId: z.string().optional().describe("Target user ID to send the embed as a direct message (provide either channelId or userId)"),
@@ -752,7 +1296,7 @@ export const discordTools = {
       })).max(5).optional().describe("Link buttons shown below the embed (only link buttons are supported)"),
     }),
     outputSchema: z.object({
-      messageId: z.string().describe("Sent message ID"),
+      messageId: z.string(),
     }),
     execute: async ({ channelId, userId, title, description, color, thumbnail, fields, buttons }) => {
       if (channelId === undefined && userId === undefined) {
@@ -784,15 +1328,7 @@ export const discordTools = {
       };
 
       if (channelId !== undefined) {
-        const channel = discordClient.channels.cache.get(channelId);
-        if (channel?.isTextBased() !== true) {
-          throw new Error("Channel not found or not a text channel");
-        }
-        if (!("send" in channel)) {
-          throw new Error("Channel does not support sending messages");
-        }
-
-        await channel.sendTyping();
+        const channel = await fetchDiscordSendableChannel(channelId);
 
         const message = await channel.send(payload);
         return { messageId: message.id };
@@ -800,7 +1336,6 @@ export const discordTools = {
 
       const user = await discordClient.users.fetch(userId!);
       const dmChannel = await user.createDM();
-      await dmChannel.sendTyping();
 
       const message = await dmChannel.send(payload);
 
@@ -809,22 +1344,17 @@ export const discordTools = {
   }),
 
   sendDm: tool({
-    description: dedent`
-      Send a plain text direct message to a user. Long contents are split automatically across several messages.
-
-      Supports Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, > quotes, ### headings, - lists, [links](url), ||spoilers||. Tables are not supported.
-    `,
+    description: "Send a direct message. Long text is split.",
     inputSchema: z.object({
-      userId: z.string().describe("The user ID to send the direct message to"),
-      content: z.string().min(1).describe("The message content to send"),
+      userId: z.string(),
+      content: z.string().min(1),
     }),
     outputSchema: z.object({
-      messageIds: z.array(z.string()).describe("Sent message IDs (one per chunk when the content was split)"),
+      messageIds: z.array(z.string()),
     }),
     execute: async ({ userId, content }) => {
       const user = await discordClient.users.fetch(userId);
       const dmChannel = await user.createDM();
-      await dmChannel.sendTyping();
 
       const messageIds: string[] = [];
 
@@ -838,18 +1368,15 @@ export const discordTools = {
   }),
 
   addReaction: tool({
-    description: "Add an emoji reaction to a message. Supports Unicode emojis (e.g. 👍) and custom emojis (e.g. <:name:id>).",
+    description: "React with a Unicode or custom emoji.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID where the message is located"),
-      messageId: z.string().describe("The message ID to react to"),
+      channelId: z.string(),
+      messageId: z.string(),
       emoji: z.string().describe("The emoji to react with (Unicode or custom emoji identifier)"),
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId, emoji }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordTextChannel(channelId);
 
       const message = await channel.messages.fetch(messageId);
       await message.react(emoji);
@@ -861,25 +1388,17 @@ export const discordTools = {
   createPoll: tool({
     description: "Create a poll in a channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to create the poll in"),
-      question: z.string().describe("The poll question"),
-      answers: z.array(z.string()).min(2).max(10).describe("Answer options (2 to 10)"),
+      channelId: z.string(),
+      question: z.string().min(1).max(300),
+      answers: z.array(z.string().min(1).max(55)).min(2).max(10),
       duration: z.number().int().min(1).max(168).optional().describe("Poll duration in hours, 1 to 168 (default: 24)"),
       allowMultiselect: z.boolean().optional().describe("Allow multiple selections (default: false)"),
     }),
-    outputSchema: z.object({}),
+    outputSchema: z.object({ messageId: z.string() }),
     execute: async ({ channelId, question, answers, duration = 24, allowMultiselect = false }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
-      if (!("send" in channel)) {
-        throw new Error("Channel does not support sending messages");
-      }
+      const channel = await fetchDiscordSendableChannel(channelId);
 
-      await channel.sendTyping();
-
-      await channel.send({
+      const message = await channel.send({
         poll: {
           question: { text: question },
           answers: answers.map((answer) => ({ text: answer })),
@@ -888,31 +1407,23 @@ export const discordTools = {
         },
       });
 
-      return {};
+      return { messageId: message.id };
     },
   }),
 
   sendFile: tool({
-    description: "Send a file (image, audio, document...) to a channel, downloaded from a URL. Optionally add a text message with it.",
+    description: "Send a file from a URL, with optional text.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to send the file to"),
+      channelId: z.string(),
       url: z.url().describe("URL of the file to download and send"),
       name: z.string().optional().describe("File name shown in Discord (default: derived from the URL)"),
       content: z.string().optional().describe("Optional text message sent along with the file"),
     }),
     outputSchema: z.object({
-      messageId: z.string().describe("Sent message ID"),
+      messageId: z.string(),
     }),
     execute: async ({ channelId, url, name, content }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
-      if (!("send" in channel)) {
-        throw new Error("Channel does not support sending messages");
-      }
-
-      await channel.sendTyping();
+      const channel = await fetchDiscordSendableChannel(channelId);
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -932,20 +1443,17 @@ export const discordTools = {
   }),
 
   editMessage: tool({
-    description: "Edit a message sent by the bot. Fails if the message was not sent by the bot.",
+    description: "Edit the bot's own message.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID where the message is located"),
-      messageId: z.string().describe("The message ID to edit"),
-      newContent: z.string().describe("The new message content"),
+      channelId: z.string(),
+      messageId: z.string(),
+      newContent: z.string(),
     }),
     outputSchema: z.object({
-      messageId: z.string().describe("Edited message ID"),
+      messageId: z.string(),
     }),
     execute: async ({ channelId, messageId, newContent }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordTextChannel(channelId);
 
       const message = await channel.messages.fetch(messageId);
       if (!message.editable) {
@@ -959,17 +1467,14 @@ export const discordTools = {
   }),
 
   deleteMessage: tool({
-    description: "Delete a message. The bot can always delete its own messages, and any other message if it has the Manage Messages permission.",
+    description: "Delete a message.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID where the message is located"),
-      messageId: z.string().describe("The message ID to delete"),
+      channelId: z.string(),
+      messageId: z.string(),
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordTextChannel(channelId);
 
       const message = await channel.messages.fetch(messageId);
       if (!message.deletable) {
@@ -983,31 +1488,17 @@ export const discordTools = {
   }),
 
   sendReply: tool({
-    description: dedent`
-      Send a message as a direct reply to a specific message (shows the reply preview above the message): the standard way to reply in a conversation. Long contents are split automatically across several messages. If it fails (e.g. missing permissions), fall back to sendMessage in the same channel.
-
-      Supports Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, > quotes, ### headings, - lists, [links](url), ||spoilers||. Tables are not supported.
-
-      Mass mentions (@everyone, @here) are automatically neutralized into @{everyone} / @{here}: mass-ping is impossible.
-    `,
+    description: "Reply to a message. Long text is split.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID where the target message is located"),
-      messageId: z.string().describe("The message ID to reply to"),
-      content: z.string().min(1).describe("The reply content to send"),
+      channelId: z.string(),
+      messageId: z.string(),
+      content: z.string().min(1),
     }),
     outputSchema: z.object({
-      messageIds: z.array(z.string()).describe("Sent message IDs (one per chunk when the content was split)"),
+      messageIds: z.array(z.string()),
     }),
     execute: async ({ channelId, messageId, content }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
-      if (!("send" in channel)) {
-        throw new Error("Channel does not support sending messages");
-      }
-
-      await channel.sendTyping();
+      const channel = await fetchDiscordSendableChannel(channelId);
 
       const messageIds: string[] = [];
 
@@ -1021,25 +1512,22 @@ export const discordTools = {
   }),
 
   getReactions: tool({
-    description: "Get all emoji reactions on a message, with counts and the users who reacted.",
+    description: "List reactions and up to 100 users per emoji.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID where the message is located"),
-      messageId: z.string().describe("The message ID to get reactions from"),
+      channelId: z.string(),
+      messageId: z.string(),
     }),
     outputSchema: z.array(z.object({
-      emoji: z.string().describe("Emoji (Unicode character or <:name:id> / <a:name:id> markup)"),
-      count: z.number().describe("Number of users who reacted"),
+      emoji: z.string(),
+      count: z.number(),
       users: z.array(z.object({
-        id: z.string().describe("User ID"),
-        username: z.string().describe("Username"),
-        globalName: z.string().nullable().describe("Global display name"),
-      })).describe("Users who reacted with this emoji"),
-    })).describe("Reactions of the message"),
+        id: z.string(),
+        username: z.string(),
+        globalName: z.string().nullable(),
+      })),
+    })),
     execute: async ({ channelId, messageId }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordTextChannel(channelId);
 
       const message = await channel.messages.fetch(messageId);
 
@@ -1064,15 +1552,12 @@ export const discordTools = {
   pinMessage: tool({
     description: "Pin a message in its channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID where the message is located"),
-      messageId: z.string().describe("The message ID to pin"),
+      channelId: z.string(),
+      messageId: z.string(),
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordTextChannel(channelId);
 
       const message = await channel.messages.fetch(messageId);
       await message.pin();
@@ -1084,23 +1569,22 @@ export const discordTools = {
   getPinnedMessages: tool({
     description: "Get the pinned messages of a channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to fetch pinned messages from"),
+      channelId: z.string(),
+      before: z.iso.datetime({ offset: true }).optional(),
+      limit: z.number().int().min(1).max(50).optional(),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Message ID"),
-      authorId: z.string().describe("Author user ID"),
-      authorUsername: z.string().describe("Author username"),
-      content: z.string().describe("Message content"),
-      createdAt: z.string().describe("Creation date (ISO)"),
-      pinnedAt: z.string().describe("Pin date (ISO)"),
-    })).describe("Pinned messages of the channel"),
-    execute: async ({ channelId }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      id: z.string(),
+      authorId: z.string(),
+      authorUsername: z.string(),
+      content: z.string(),
+      createdAt: z.string(),
+      pinnedAt: z.string(),
+    })),
+    execute: async ({ channelId, before, limit }) => {
+      const channel = await fetchDiscordTextChannel(channelId);
 
-      const pinned = await channel.messages.fetchPins();
+      const pinned = await channel.messages.fetchPins({ before, limit });
 
       return pinned.items.map((pin) => ({
         id: pin.message.id,
@@ -1116,39 +1600,41 @@ export const discordTools = {
   // Voice:
 
   joinVoiceChannel: tool({
-    description: "Make the bot join a voice channel. To join a user's channel, get their voiceChannelId from getMembers first.",
+    description: "Join a voice or stage channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The voice channel ID to join"),
-      guildId: z.string().describe("The Discord guild/server ID"),
+      channelId: z.string(),
+      guildId: z.string(),
     }),
     outputSchema: z.object({}),
-    execute: ({ channelId, guildId }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isVoiceBased() !== true) {
+    execute: async ({ channelId, guildId }) => {
+      const channel = await fetchDiscordChannel(channelId);
+      if (!channel.isVoiceBased()) {
         throw new Error("Channel not found or not a voice channel");
       }
 
-      joinVoiceChannel({
+      if (channel.guild.id !== guildId) {
+        throw new Error("Channel does not belong to the guild");
+      }
+
+      const connection = joinVoiceChannel({
         channelId: channel.id,
         guildId,
         adapterCreator: channel.guild.voiceAdapterCreator,
       });
+      await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
 
       return {};
     },
   }),
 
   leaveVoiceChannel: tool({
-    description: "Make the bot leave its current voice channel in a guild. Fails if the bot is not connected to a voice channel.",
+    description: "Leave voice in a guild.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
     }),
     outputSchema: z.object({}),
     execute: ({ guildId }) => {
-      const connection = getVoiceConnection(guildId);
-      if (!connection) {
-        throw new Error("Bot is not connected to any voice channel in this guild");
-      }
+      const connection = fetchDiscordVoiceConnection(guildId);
 
       connection.destroy();
 
@@ -1157,29 +1643,26 @@ export const discordTools = {
   }),
 
   moveMember: tool({
-    description: "Move a member to another voice channel. Fails if the member is not in a voice channel.",
+    description: "Move a member to another voice channel.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to move"),
-      channelId: z.string().describe("The voice channel ID to move the member to"),
+      guildId: z.string(),
+      memberId: z.string(),
+      channelId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the moved member"),
-      channelName: z.string().describe("Name of the destination channel"),
+      memberName: z.string(),
+      channelName: z.string(),
     }),
     execute: async ({ guildId, memberId, channelId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
       if (member.voice.channelId === null) {
         throw new Error("Member is not in a voice channel");
       }
 
-      const channel = guild.channels.cache.get(channelId);
-      if (channel?.type !== ChannelType.GuildVoice) {
+      const channel = await guild.channels.fetch(channelId);
+      if (channel?.isVoiceBased() !== true) {
         throw new Error("Voice channel not found");
       }
 
@@ -1193,19 +1676,16 @@ export const discordTools = {
   }),
 
   disconnectMember: tool({
-    description: "Disconnect a member from their current voice channel. Fails if the member is not in a voice channel.",
+    description: "Disconnect a member from voice.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to disconnect"),
+      guildId: z.string(),
+      memberId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the disconnected member"),
+      memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
       if (member.voice.channelId === null) {
@@ -1219,19 +1699,16 @@ export const discordTools = {
   }),
 
   muteMember: tool({
-    description: "Server-mute a member in their voice channel. Fails if the member is not in a voice channel.",
+    description: "Server-mute a member in voice.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to mute"),
+      guildId: z.string(),
+      memberId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the muted member"),
+      memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
       if (member.voice.channelId === null) {
@@ -1245,19 +1722,16 @@ export const discordTools = {
   }),
 
   unmuteMember: tool({
-    description: "Remove the server-mute of a member in their voice channel. Fails if the member is not in a voice channel.",
+    description: "Remove a server mute.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to unmute"),
+      guildId: z.string(),
+      memberId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the unmuted member"),
+      memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
       if (member.voice.channelId === null) {
@@ -1271,19 +1745,16 @@ export const discordTools = {
   }),
 
   deafenMember: tool({
-    description: "Server-deafen a member in their voice channel (they no longer hear anything). Fails if the member is not in a voice channel.",
+    description: "Server-deafen a member in voice.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to deafen"),
+      guildId: z.string(),
+      memberId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the deafened member"),
+      memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
       if (member.voice.channelId === null) {
@@ -1297,19 +1768,16 @@ export const discordTools = {
   }),
 
   undeafenMember: tool({
-    description: "Remove the server-deafen of a member in their voice channel. Fails if the member is not in a voice channel.",
+    description: "Remove a server deafen.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      memberId: z.string().describe("The Discord member ID to undeafen"),
+      guildId: z.string(),
+      memberId: z.string(),
     }),
     outputSchema: z.object({
-      memberName: z.string().describe("Display name of the undeafened member"),
+      memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
       if (member.voice.channelId === null) {
@@ -1323,17 +1791,14 @@ export const discordTools = {
   }),
 
   playAudio: tool({
-    description: "Play an audio stream (music, sound effect, radio, TTS audio...) in the voice channel the bot is connected to. Requires joinVoiceChannel first. Starting a new playback replaces the current one. Handles most formats (mp3, ogg, wav, radio streams...) through FFmpeg.",
+    description: "Play audio from a URL. Replaces current playback.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       url: z.url().describe("URL of the audio file or stream to play"),
     }),
     outputSchema: z.object({}),
     execute: async ({ guildId, url }) => {
-      const connection = getVoiceConnection(guildId);
-      if (!connection) {
-        throw new Error("Bot is not connected to any voice channel in this guild");
-      }
+      const connection = fetchDiscordVoiceConnection(guildId);
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -1343,39 +1808,31 @@ export const discordTools = {
         throw new Error("Audio source returned an empty body");
       }
 
-      const player = createAudioPlayer();
-      // The listener prevents an unhandled "error" event (playback failure) from crashing the process:
-      player.on("error", () => undefined);
-      connection.subscribe(player);
-
       const resource = createAudioResource(Readable.fromWeb(response.body), { inputType: StreamType.Arbitrary });
-      player.play(resource);
+      replaceDiscordAudio(connection, resource);
 
       return {};
     },
   }),
 
   startVoiceActivity: tool({
-    description: "Get an invite link that launches a Discord embedded activity (game) in a voice channel: Watch Together, Poker Night, Chess in the Park, Spellcast... Share the returned URL in the chat: users click it to launch the activity in the channel.",
+    description: "Create a voice invite for an embedded activity.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      channelId: z.string().describe("The voice channel to launch the activity in"),
+      guildId: z.string(),
+      channelId: z.string(),
       activity: z.enum(["watch-together", "poker-night", "betrayal-io", "fishington-io", "chess-in-the-park", "checkers-in-the-park", "blazing-v8", "letter-tiles", "words-party", "spellcast", "sketch-heads", "putt-party"]).optional().describe("Activity to launch"),
       applicationId: z.string().optional().describe("Raw Discord application ID of an activity, for activities not in the list (overrides activity)"),
     }),
     outputSchema: z.object({
-      url: z.string().describe("Activity invite URL to share"),
-      activityName: z.string().nullable().describe("Name of the launched activity"),
-      channelName: z.string().describe("Name of the voice channel"),
+      url: z.string(),
+      activityName: z.string().nullable(),
+      channelName: z.string(),
     }),
     execute: async ({ guildId, channelId, activity, applicationId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
-      const channel = guild.channels.cache.get(channelId);
-      if (channel?.type !== ChannelType.GuildVoice) {
+      const channel = await guild.channels.fetch(channelId);
+      if (channel?.isVoiceBased() !== true) {
         throw new Error("Voice channel not found");
       }
 
@@ -1407,37 +1864,34 @@ export const discordTools = {
 
       return {
         url: invite.url,
-        activityName: activity ?? null,
+        activityName: invite.targetApplication?.name ?? activity ?? null,
         channelName: channel.name,
       };
     },
   }),
 
   moveAllMembers: tool({
-    description: "Move every member of a voice channel to another voice channel (e.g. to gather everyone for a game night).",
+    description: "Move all members between voice channels.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
-      fromChannelId: z.string().describe("The voice channel to move members from"),
-      toChannelId: z.string().describe("The voice channel to move members to"),
+      guildId: z.string(),
+      fromChannelId: z.string(),
+      toChannelId: z.string(),
     }),
     outputSchema: z.object({
-      movedCount: z.number().describe("Number of moved members"),
-      fromChannelName: z.string().describe("Name of the source channel"),
-      toChannelName: z.string().describe("Name of the destination channel"),
+      movedCount: z.number(),
+      fromChannelName: z.string(),
+      toChannelName: z.string(),
     }),
     execute: async ({ guildId, fromChannelId, toChannelId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
-      const fromChannel = guild.channels.cache.get(fromChannelId);
-      if (fromChannel?.type !== ChannelType.GuildVoice) {
+      const fromChannel = await guild.channels.fetch(fromChannelId);
+      if (fromChannel?.isVoiceBased() !== true) {
         throw new Error("Source voice channel not found");
       }
 
-      const toChannel = guild.channels.cache.get(toChannelId);
-      if (toChannel?.type !== ChannelType.GuildVoice) {
+      const toChannel = await guild.channels.fetch(toChannelId);
+      if (toChannel?.isVoiceBased() !== true) {
         throw new Error("Destination voice channel not found");
       }
 
@@ -1459,32 +1913,32 @@ export const discordTools = {
   createInvite: tool({
     description: "Create an invite link for a channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to create the invite for"),
+      channelId: z.string(),
       maxAge: z.number().int().min(0).max(604_800).optional().describe("Invite lifetime in seconds, 0 for never expires (default: 86400 = 24h)"),
-      maxUses: z.number().int().min(0).optional().describe("Maximum number of uses, 0 for unlimited (default: 0)"),
+      maxUses: z.number().int().min(0).max(100).optional().describe("Maximum number of uses, 0 for unlimited (default: 0)"),
+      temporary: z.boolean().optional(),
+      unique: z.boolean().optional(),
+      reason: z.string().max(512).optional(),
     }),
     outputSchema: z.object({
-      url: z.string().describe("Invite URL"),
-      code: z.string().describe("Invite code"),
-      expiresAt: z.string().nullable().describe("Expiration date (ISO), null if never expires"),
-      maxUses: z.number().describe("Maximum uses, 0 for unlimited"),
+      url: z.string(),
+      code: z.string(),
+      expiresAt: z.string().nullable(),
+      maxUses: z.number(),
     }),
-    execute: async ({ channelId, maxAge = 86_400, maxUses = 0 }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (!channel) {
-        throw new Error("Channel not found");
-      }
+    execute: async ({ channelId, maxAge = 86_400, maxUses = 0, temporary, unique, reason }) => {
+      const channel = await fetchDiscordChannel(channelId);
       if (!("createInvite" in channel)) {
         throw new Error("This channel type does not support invites");
       }
 
-      const invite = await channel.createInvite({ maxAge, maxUses });
+      const invite = await channel.createInvite({ maxAge, maxUses, temporary, unique, reason });
 
       return {
         url: invite.url,
         code: invite.code,
-        expiresAt: maxAge > 0 ? new Date(Date.now() + maxAge * 1000).toISOString() : null,
-        maxUses,
+        expiresAt: invite.expiresAt?.toISOString() ?? null,
+        maxUses: invite.maxUses ?? maxUses,
       };
     },
   }),
@@ -1492,19 +1946,15 @@ export const discordTools = {
   getWebhooks: tool({
     description: "List the webhooks of a channel.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to get webhooks from"),
+      channelId: z.string(),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Webhook ID"),
-      url: z.string().describe("Webhook URL"),
-      name: z.string().nullable().describe("Webhook name"),
-      avatarUrl: z.string().nullable().describe("Webhook avatar URL"),
-    })).describe("Webhooks of the channel"),
+      id: z.string(),
+      name: z.string().nullable(),
+      avatarUrl: z.string().nullable(),
+    })),
     execute: async ({ channelId }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordChannel(channelId);
       if (!("fetchWebhooks" in channel)) {
         throw new Error("This channel type does not support webhooks");
       }
@@ -1513,7 +1963,6 @@ export const discordTools = {
 
       return webhooks.map((webhook) => ({
         id: webhook.id,
-        url: webhook.url,
         name: webhook.name,
         avatarUrl: webhook.avatarURL(),
       }));
@@ -1521,22 +1970,18 @@ export const discordTools = {
   }),
 
   createWebhook: tool({
-    description: "Create a webhook in a channel, with an optional avatar. Prefer getWebhooks to reuse an existing webhook with the same name.",
+    description: "Create a channel webhook.",
     inputSchema: z.object({
-      channelId: z.string().describe("The channel ID to create the webhook in"),
-      name: z.string().describe("The name for the webhook"),
-      avatarUrl: z.url().optional().describe("Image URL to use as the webhook avatar"),
+      channelId: z.string(),
+      name: z.string().min(1).max(80),
+      avatarUrl: z.url({ protocol: /^https?$/u }).optional(),
     }),
     outputSchema: z.object({
-      id: z.string().describe("Webhook ID"),
-      url: z.string().describe("Webhook URL"),
-      name: z.string().nullable().describe("Webhook name"),
+      id: z.string(),
+      name: z.string().nullable(),
     }),
     execute: async ({ channelId, name, avatarUrl }) => {
-      const channel = discordClient.channels.cache.get(channelId);
-      if (channel?.isTextBased() !== true) {
-        throw new Error("Channel not found or not a text channel");
-      }
+      const channel = await fetchDiscordChannel(channelId);
       if (!("createWebhook" in channel)) {
         throw new Error("This channel type does not support webhooks");
       }
@@ -1554,78 +1999,59 @@ export const discordTools = {
 
       return {
         id: webhook.id,
-        url: webhook.url,
         name: webhook.name,
       };
     },
   }),
 
   sendWebhookMessage: tool({
-    description: dedent`
-      Send a message through a webhook, displaying a custom username and avatar (impersonation).
-
-      STRICTLY reserved for explicit impersonation requests ("pretend to be X", "answer as X", "imitate X"). Never use it for normal messages — use sendMessage instead.
-
-      Flow:
-      1. getMembers to find the target member and their displayName
-      2. getMemberInfo to get their avatarUrl
-      3. getWebhooks on the current channel: reuse an existing webhook with the same name, otherwise createWebhook with the displayName and avatarUrl
-      4. sendWebhookMessage with the webhook URL, the displayName and the avatarUrl
-      5. After sending, do NOT reply — the webhook message speaks for itself
-    `,
+    description: "Send a message through a Discord webhook.",
     inputSchema: z.object({
-      webhookUrl: z.url().describe("The webhook URL to send the message through"),
-      content: z.string().describe("The message content to send"),
-      username: z.string().describe("The username to display for the webhook message"),
-      avatarUrl: z.url().optional().describe("The avatar URL to display for the webhook message"),
+      webhookId: z.string().regex(/^\d{1,20}$/u).optional(),
+      webhookUrl: z.url().regex(/^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/(?:v10\/)?webhooks\/\d{1,20}\/[\w-]+$/u).optional().describe("Discord webhook URL, as an alternative to webhookId"),
+      content: z.string().min(1).max(2000),
+      username: z.string().min(1).max(80).optional(),
+      avatarUrl: z.url().optional(),
+      threadId: z.string().optional(),
+      threadName: z.string().min(1).max(100).optional().describe("Create a post in a forum or media channel"),
+      appliedTags: z.array(z.string()).max(5).optional(),
     }),
-    outputSchema: z.object({}),
-    execute: async ({ webhookUrl, content, username, avatarUrl }) => {
-      const payload: { content: string; username: string; avatar_url?: string } = {
+    outputSchema: z.object({ messageId: z.string() }),
+    execute: async ({ webhookId, webhookUrl, content, username, avatarUrl, threadId, threadName, appliedTags }) => {
+      if ((webhookId === undefined) === (webhookUrl === undefined)) {
+        throw new Error("Provide exactly one of webhookId or webhookUrl");
+      }
+
+      const webhook = webhookId !== undefined ? await discordClient.fetchWebhook(webhookId) : new WebhookClient({ url: webhookUrl! });
+      const message = await webhook.send({
         content: sanitizeDiscordMessage(content),
         username,
-      };
-
-      if (avatarUrl !== undefined) {
-        payload.avatar_url = avatarUrl;
-      }
-
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+        avatarURL: avatarUrl,
+        threadId,
+        threadName,
+        appliedTags,
+        allowedMentions: { parse: ["users", "roles"] },
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Webhook request failed (HTTP ${String(response.status)}): ${errorText}`);
-      }
-
-      return {};
+      return { messageId: message.id };
     },
   }),
 
   // Emojis:
 
   getGuildEmojis: tool({
-    description: "List the custom emojis of a guild, with their markup to use them in messages or reactions.",
+    description: "List custom guild emojis.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
     }),
     outputSchema: z.array(z.object({
-      id: z.string().describe("Emoji ID"),
-      name: z.string().nullable().describe("Emoji name"),
-      animated: z.boolean().describe("Whether the emoji is animated"),
-      display: z.string().describe("Emoji markup to use in a message (e.g. <:name:id> or <a:name:id>)"),
-      url: z.string().describe("Emoji image URL"),
-    })).describe("Custom emojis of the guild"),
+      id: z.string(),
+      name: z.string().nullable(),
+      animated: z.boolean(),
+      display: z.string(),
+      url: z.string(),
+    })),
     execute: async ({ guildId }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const emojis = await guild.emojis.fetch();
 
@@ -1640,23 +2066,20 @@ export const discordTools = {
   }),
 
   createEmoji: tool({
-    description: "Create a custom emoji in a guild from an image URL (max 256 KB, PNG/JPG/GIF). Combines well with the image tools to create emojis from generated or found images.",
+    description: "Create a custom guild emoji from an image URL.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       name: z.string().regex(/^[a-z0-9_]{2,32}$/u).describe("Emoji name (2-32 characters: letters, numbers, underscores)"),
       imageUrl: z.url().describe("Image URL for the emoji (max 256 KB)"),
     }),
     outputSchema: z.object({
-      id: z.string().describe("Emoji ID"),
-      name: z.string().describe("Emoji name"),
-      display: z.string().describe("Emoji markup to use in a message (e.g. <:name:id>)"),
-      url: z.string().describe("Emoji image URL"),
+      id: z.string(),
+      name: z.string(),
+      display: z.string(),
+      url: z.string(),
     }),
     execute: async ({ guildId, name, imageUrl }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
+      const guild = await discordClient.guilds.fetch(guildId);
 
       const emoji = await guild.emojis.create({ attachment: imageUrl, name });
 
@@ -1672,9 +2095,9 @@ export const discordTools = {
   // Events:
 
   createGuildEvent: tool({
-    description: "Create a scheduled event in a guild (game night, movie night...), either in a voice/stage channel or at an external location.",
+    description: "Schedule a voice, stage or external event.",
     inputSchema: z.object({
-      guildId: z.string().describe("The Discord guild/server ID"),
+      guildId: z.string(),
       name: z.string().min(1).max(100).describe("Event name"),
       description: z.string().max(1000).optional().describe("Event description"),
       startAt: z.iso.datetime({ offset: true }).describe("Start date and time (ISO 8601)"),
@@ -1683,19 +2106,16 @@ export const discordTools = {
       location: z.string().max(100).optional().describe("External location description (provide either channelId or location)"),
     }),
     outputSchema: z.object({
-      id: z.string().describe("Event ID"),
-      name: z.string().describe("Event name"),
-      url: z.string().describe("Event URL (discord.com/events/...)"),
-      startAt: z.string().describe("Start date and time (ISO)"),
-      endAt: z.string().describe("End date and time (ISO)"),
+      id: z.string(),
+      name: z.string(),
+      url: z.string(),
+      startAt: z.string(),
+      endAt: z.string(),
     }),
     execute: async ({ guildId, name, description, startAt, durationMinutes = 60, channelId, location }) => {
-      const guild = discordClient.guilds.cache.get(guildId);
-      if (!guild) {
-        throw new Error("Guild not found");
-      }
-      if (channelId === undefined && location === undefined) {
-        throw new Error("Provide a target: channelId or location");
+      const guild = await discordClient.guilds.fetch(guildId);
+      if ((channelId === undefined) === (location === undefined)) {
+        throw new Error("Provide exactly one of channelId or location");
       }
 
       const startDate = new Date(startAt);
@@ -1708,8 +2128,8 @@ export const discordTools = {
       let entityType = GuildScheduledEventEntityType.External;
 
       if (channelId !== undefined) {
-        const voiceChannel = guild.channels.cache.get(channelId);
-        if (voiceChannel === undefined) {
+        const voiceChannel = await guild.channels.fetch(channelId);
+        if (voiceChannel === null) {
           throw new Error("Channel not found");
         }
         if (voiceChannel.type !== ChannelType.GuildVoice && voiceChannel.type !== ChannelType.GuildStageVoice) {
@@ -1744,22 +2164,22 @@ export const discordTools = {
   // Bot presence:
 
   setBotPresence: tool({
-    description: "Change the bot's own presence: status and/or activity shown in the member list (e.g. \"Playing Fortnite\", \"Listening to lofi\", custom status). Persists until changed again.",
+    description: "Set the bot's status or activity.",
     inputSchema: z.object({
       status: z.enum(["online", "idle", "dnd", "invisible"]).optional().describe("Presence status"),
       activityType: z.enum(["playing", "streaming", "listening", "watching", "competing", "custom"]).optional().describe("Activity type (default: playing)"),
-      activityName: z.string().min(1).max(128).optional().describe("Activity text (e.g. \"Fortnite\", \"lofi radio\", or the custom status text)"),
+      activityName: z.string().min(1).max(128).nullable().optional().describe("Null clears the activity"),
       url: z.url().optional().describe("Stream URL (required for the streaming activity type)"),
     }),
     outputSchema: z.object({
-      status: z.string().nullable().describe("New presence status, null if unchanged"),
-      activityName: z.string().nullable().describe("New activity text, null if unchanged"),
+      status: z.string().nullable(),
+      activityName: z.string().nullable(),
     }),
     execute: ({ status, activityType, activityName, url }) => {
       if (status === undefined && activityName === undefined) {
         throw new Error("Provide a status or an activity");
       }
-      if (activityType === "streaming" && url === undefined) {
+      if (typeof activityName === "string" && activityType === "streaming" && url === undefined) {
         throw new Error("The streaming activity type requires a url");
       }
 
@@ -1779,7 +2199,10 @@ export const discordTools = {
 
       let activities: ActivitiesOptions[];
 
-      if (activityName !== undefined) {
+      if (activityName === null) {
+        activities = [];
+      }
+      else if (activityName !== undefined) {
         const resolvedType = activityType ?? "playing";
         activities = [resolvedType === "custom" ? { name: "Custom Status", type: activityTypes.custom, state: activityName } : { name: activityName, type: activityTypes[resolvedType], url: resolvedType === "streaming" ? url : undefined }];
       }

@@ -1,3 +1,6 @@
+import type { AudioResource, VoiceConnection } from "@discordjs/voice";
+import type { SendableChannels } from "discord.js";
+import { createAudioPlayer, getVoiceConnection } from "@discordjs/voice";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { Client, GatewayIntentBits, Partials } from "discord.js";
@@ -32,6 +35,75 @@ export const discordClient = new Client({
     Partials.Channel,
   ],
 });
+
+export const fetchDiscordChannel = async (channelId: string) => {
+  const channel = await discordClient.channels.fetch(channelId);
+  if (channel === null) {
+    throw new Error("Channel not found");
+  }
+  return channel;
+};
+
+export const fetchDiscordTextChannel = async (channelId: string) => {
+  const channel = await fetchDiscordChannel(channelId);
+  if (!channel.isTextBased()) {
+    throw new Error("Channel does not support messages");
+  }
+  return channel;
+};
+
+export const fetchDiscordSendableChannel = async (channelId: string) => {
+  const channel = await fetchDiscordChannel(channelId);
+  if (!channel.isSendable()) {
+    throw new Error("Channel does not support sending messages");
+  }
+  return channel;
+};
+
+export const startDiscordTyping = (channel: SendableChannels, onError: () => void) => {
+  const sendTyping = async () => {
+    try {
+      await channel.sendTyping();
+    }
+    catch {
+      onError();
+    }
+  };
+
+  void sendTyping();
+  const timer = setInterval(() => {
+    void sendTyping();
+  }, 8_000).unref();
+  return () => {
+    clearInterval(timer);
+  };
+};
+
+export const fetchDiscordVoiceConnection = (guildId: string) => {
+  const connection = getVoiceConnection(guildId);
+  if (connection === undefined) {
+    throw new Error("Bot is not connected to voice in this guild");
+  }
+  return connection;
+};
+
+export const getDiscordAudioPlayer = (connection: VoiceConnection) => "subscription" in connection.state ? connection.state.subscription?.player : undefined;
+
+export const replaceDiscordAudio = (connection: VoiceConnection, resource: AudioResource) => {
+  const existingPlayer = getDiscordAudioPlayer(connection);
+  if (existingPlayer !== undefined) {
+    existingPlayer.play(resource);
+    return;
+  }
+
+  const player = createAudioPlayer();
+  player.on("error", (error) => logger.error(`Discord audio playback failed: ${error.message}`));
+  player.on("unsubscribe", () => {
+    player.stop(true);
+  });
+  connection.subscribe(player);
+  player.play(resource);
+};
 
 export const discordClientStart = async (loadEvents: () => Promise<void>) => {
   discordClient.once("clientReady", (readyClient) => {

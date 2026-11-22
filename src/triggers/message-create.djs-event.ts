@@ -1,7 +1,7 @@
 import { discordClient, startDiscordTyping } from "#/integrations/discord";
 import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
 import { tableModelUsage } from "#/tables/model-usage";
-import { discordCoreToolNames, discordTools, getDiscordActionNames } from "#/tools/discord";
+import { discordTools } from "#/tools/discord";
 import { replyContextTools } from "#/tools/reply-context";
 import { websearchTools } from "#/tools/websearch";
 import { aiUsage } from "#/utils/ai-usage";
@@ -68,20 +68,12 @@ trigger.discordEvent("messageCreate", async (message) => {
       Commence par \`getReplyContext\` pour lire le channel, la conversation récente (le message cible y est marqué "isTarget"), le message auquel il répond et les mentions.
     `,
     prepareStep: ({ stepNumber, steps }) => {
-      if (stepNumber === 0) {
-        return { activeTools: ["getReplyContext"], toolChoice: { type: "tool", toolName: "getReplyContext" } };
-      }
+      if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "getReplyContext" } };
       if (stepNumber === maxSteps - 1) {
         const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
-        const toolName = triedReply ? "sendMessage" : "sendReply";
-        return { activeTools: [toolName], toolChoice: { type: "tool", toolName } };
+        return { toolChoice: { type: "tool", toolName: triedReply ? "sendMessage" : "sendReply" } };
       }
-
-      const selected = steps.flatMap((step) => step.toolResults).findLast(({ toolName }) => toolName === "selectDiscordActions");
-      return {
-        activeTools: [...discordCoreToolNames, ...getDiscordActionNames(selected?.output), "getReplyContext", ...Object.keys(websearchTools) as (keyof typeof websearchTools)[]],
-        toolChoice: "required",
-      };
+      return { toolChoice: "required" };
     },
     tools: {
       ...discordTools,
