@@ -9,11 +9,10 @@ import { trigger } from "#/utils/trigger";
 // Reply used without any AI call while the OpenRouter quota is exhausted (funny, in Jean Pascal's tone):
 const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24/7. Réveillez-moi quand le budget passe.";
 
-// Bot names acting as a secondary mention system: the configured bot name and its aliases, matched
-// as whole words and case-insensitively (e.g. "yo JP" triggers like a real @mention):
-const botNames = [...new Set([env.DISCORD_BOT_NAME, ...env.DISCORD_BOT_ALIASES].map((name) => name.trim()).filter(Boolean))];
+// The configured bot name acts like a mention when matched as whole words, case-insensitively:
+const botName = env.DISCORD_BOT_NAME.trim();
 
-const botNamePattern = botNames.length > 0 ? new RegExp(`(?<![\\p{L}\\p{N}_])(${botNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")})(?![\\p{L}\\p{N}_])`, "iu") : null;
+const botNamePattern = botName.length > 0 ? new RegExp(`(?<![\\p{L}\\p{N}_])${botName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![\\p{L}\\p{N}_])`, "iu") : null;
 
 // Code blocks are stripped before matching, so quoted or shared code never triggers the bot:
 const codeBlockPattern = /```[\s\S]*?```|`[^`\n]*`/gu;
@@ -28,8 +27,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   const botUser = discordClient.user;
 
-  // Explicit mentions: DM, real @mention or bot name in the text. Everything else is left to the
-  // AI's own reply decision (conversation context + skills):
+  // Explicit mentions: DM, real @mention or bot name in the text. Otherwise the AI decides from the conversation context:
   const isExplicitlyMentioned = message.guildId === null || message.mentions.has(botUser.id) || isBotNamedIn(message.content);
 
   // While the OpenRouter quota is exhausted: canned reply on explicit mention, full silence otherwise:

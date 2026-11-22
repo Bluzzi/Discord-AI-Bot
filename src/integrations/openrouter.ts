@@ -223,8 +223,7 @@ export const openRouterQuota = {
   reportFailure,
 };
 
-// ── Models ────────────────────────────────────────────────────────────────────────────────────────
-// AI SDK providers used by every generation flow:
+// ── Model ─────────────────────────────────────────────────────────────────────────────────────────
 
 // Wrap fetch to report quota failures (429/402) raised by real AI calls, without consuming any extra request:
 const quotaAwareFetch: typeof fetch = async (input, init) => {
@@ -242,7 +241,4 @@ const openRouterProvider = createOpenRouter({
   fetch: quotaAwareFetch,
 });
 
-export const aiModel = {
-  fast: openRouterProvider(env.OPENROUTER_MODEL_FAST),
-  large: openRouterProvider(env.OPENROUTER_MODEL_LARGE),
-};
+export const aiModel = openRouterProvider(env.OPENROUTER_MODEL);
