@@ -1,7 +1,7 @@
-import { discordClient } from "#/integrations/discord";
+import { discordClient, startDiscordTyping } from "#/integrations/discord";
 import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
 import { tableModelUsage } from "#/tables/model-usage";
-import { discordTools } from "#/tools/discord";
+import { discordCoreToolNames, discordTools, getDiscordActionNames } from "#/tools/discord";
 import { replyContextTools } from "#/tools/reply-context";
 import { websearchTools } from "#/tools/websearch";
 import { aiUsage } from "#/utils/ai-usage";
@@ -10,35 +10,48 @@ import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { postgres } from "#/utils/postgres";
 import { trigger } from "#/utils/trigger";
-import { generateText, hasToolCall, stepCountIs } from "ai";
+import { stepCountIs, streamText } from "ai";
 import dedent from "dedent";
+import { randomUUID } from "node:crypto";
 
 const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24/7. Réveillez-moi quand le budget passe.";
 
-const replyToolNames = ["sendReply", "sendMessage", "sendDm", "sendEmbed", "sendFile", "sendWebhookMessage", "createPoll", "addReaction"] as const;
+const maxSteps = 20;
+const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
+
+const redactWebhookTokens = (text: string) => text.replace(
+  /(https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/)[\w-]+/giu,
+  "$1[redacted]",
+);
 
 trigger.discordEvent("messageCreate", async (message) => {
-  if (message.author.id === "1444427058481467462") return;
+  // Check whether the bot needs to reply.
   if (message.author.bot) return;
-  if (!message.channel.isTextBased()) return;
+  const channel = message.channel;
+  if (!channel.isSendable()) return;
 
   const botUser = discordClient.user;
 
   if (!botUser || !message.mentions.has(botUser, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true })) return;
 
+  const logPrefix = `[Discord reply ${randomUUID()}]`;
+
   if (openRouterQuota.isExhausted()) {
-    logger.info(`Reply to ${message.author.displayName} without AI (OpenRouter quota exhausted, explicit mention)`);
+    logger.info(`${logPrefix} Reply to ${message.author.displayName} without AI (OpenRouter quota exhausted, explicit mention)`);
     await message.reply(NO_QUOTA_REPLY);
     return;
   }
 
-  const channelId = message.channel.id;
+  // Stream the reply and report tool activity as it happens.
+  const channelId = channel.id;
   const guild = message.guild;
   const startedAt = Date.now();
 
-  const result = await generateText({
+  logger.info(`${logPrefix} Reply started for message ${message.id} from ${message.author.username}`);
+
+  const result = streamText({
     model: aiModel,
-    stopWhen: [stepCountIs(20), hasToolCall(...replyToolNames)],
+    stopWhen: [stepCountIs(maxSteps), ({ steps }) => steps.at(-1)?.toolResults.some(({ toolName }) => isReplyTool(toolName)) ?? false],
     instructions: dedent`
       Tu es ${env.DISCORD_BOT_NAME}, un assistant Discord sympa dans « Le Royaume », une communauté de gamers, de développeurs, de designers et de personnes de tous horizons.
       Aide les membres avec des réponses claires, brèves et adaptées à leur demande.
@@ -54,8 +67,21 @@ trigger.discordEvent("messageCreate", async (message) => {
 
       Commence par \`getReplyContext\` pour lire le channel, la conversation récente (le message cible y est marqué "isTarget"), le message auquel il répond et les mentions.
     `,
-    prepareStep: ({ stepNumber }) => {
-      if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "getReplyContext" } };
+    prepareStep: ({ stepNumber, steps }) => {
+      if (stepNumber === 0) {
+        return { activeTools: ["getReplyContext"], toolChoice: { type: "tool", toolName: "getReplyContext" } };
+      }
+      if (stepNumber === maxSteps - 1) {
+        const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
+        const toolName = triedReply ? "sendMessage" : "sendReply";
+        return { activeTools: [toolName], toolChoice: { type: "tool", toolName } };
+      }
+
+      const selected = steps.flatMap((step) => step.toolResults).findLast(({ toolName }) => toolName === "selectDiscordActions");
+      return {
+        activeTools: [...discordCoreToolNames, ...getDiscordActionNames(selected?.output), "getReplyContext", ...Object.keys(websearchTools) as (keyof typeof websearchTools)[]],
+        toolChoice: "required",
+      };
     },
     tools: {
       ...discordTools,
@@ -65,36 +91,57 @@ trigger.discordEvent("messageCreate", async (message) => {
     toolsContext: {
       getReplyContext: { channelId, messageId: message.id },
     },
+    onToolExecutionStart: ({ toolCall }) => {
+      logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(toolCall.input))}`);
+    },
+    onStepEnd: ({ stepNumber, text }) => {
+      if (text) logger.info(`${logPrefix} Step ${String(stepNumber + 1)} text: ${redactWebhookTokens(text)}`);
+    },
+    // Stream errors are propagated to the Discord event handler below.
+    onError: () => undefined,
   });
 
+  const stopTyping = startDiscordTyping(channel, () => logger.warn(`${logPrefix} Could not send the typing indicator`));
+
+  try {
+    for await (const part of result.stream) {
+      if (part.type === "error") throw new Error(`${logPrefix} Reply stream failed`, { cause: part.error });
+      if (part.type === "tool-error") logger.warn(`${logPrefix} Tool ${part.toolName} failed`);
+      if (part.type === "tool-result" && isReplyTool(part.toolName)) stopTyping();
+    }
+  }
+  finally {
+    stopTyping();
+  }
+
+  // Log and save the metrics for all steps.
   const durationMs = Date.now() - startedAt;
-  const replied = result.steps.some((step) => step.toolCalls.some((toolCall) => (replyToolNames as readonly string[]).includes(toolCall.toolName)));
+  const [steps, finishReason, usage, text] = await Promise.all([result.steps, result.finishReason, result.usage, result.text]);
+  const replied = steps.some((step) => step.toolResults.some(({ toolName }) => isReplyTool(toolName)));
 
   logger.info(dedent`
-    Reply to message:
-    - [AUTHOR] ${message.author.username}: ${message.content}
+    ${logPrefix} Reply finished:
     - [REPLIED] ${replied ? "yes" : "no"}
-    - [TEXT] ${result.text}
-    - [CONTEXT] ${aiUsage.formatTokens(result.usage)}
-    - [TOOLS] ${aiUsage.formatToolCalls(result.toolCalls)} | errors: ${aiUsage.formatToolErrors(result.content)}
-    - [PERF] ${result.steps.length} steps, finish: ${result.finishReason}, ${durationMs} ms
+    - [TEXT] ${redactWebhookTokens(text)}
+    - [CONTEXT] ${aiUsage.formatTokens(usage)}
+    - [PERF] ${steps.length} steps, finish: ${finishReason}, ${durationMs} ms
   `);
 
   if (!replied) {
-    logger.warn(`Explicit mention from ${message.author.username} produced no send tool call (${String(result.steps.length)} steps)`);
+    logger.warn(`${logPrefix} No reply was sent in ${String(steps.length)} steps`);
   }
 
-  const modelUsed = result.steps.at(-1)?.model.modelId;
+  const modelUsed = steps.at(-1)?.model.modelId;
   if (modelUsed === undefined) {
-    throw new Error("Cannot resolve the used model: no step available");
+    throw new Error(`${logPrefix} Cannot resolve the used model: no step available`);
   }
 
-  const prices = await openRouterApi.computeUsagePrices(modelUsed, result.usage);
+  const prices = await openRouterApi.computeUsagePrices(modelUsed, usage);
 
   await postgres.insert(tableModelUsage).values({
     cause: "reply_to_message",
-    inputTokenCount: result.usage.inputTokens ?? 0,
-    outputTokenCount: result.usage.outputTokens ?? 0,
+    inputTokenCount: usage.inputTokens ?? 0,
+    outputTokenCount: usage.outputTokens ?? 0,
     inputPrice: prices.inputPrice,
     outputPrice: prices.outputPrice,
     modelUsed,
