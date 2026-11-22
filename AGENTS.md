@@ -60,19 +60,13 @@ Dependencies flow one way: `triggers → tools / tables / integrations → utils
 
 - Use of `dedent` for multi-line strings, allowing clean and consistent indentation to be preserved.
 
-# Règlement des agents Discord
+## Discord Agent Rules
 
-- Uniquement dans la catégorie AGENTS (ID : `1574094410830844105`), les bots peuvent absolument tout faire, sans limite.
-- Hors de la catégorie AGENTS, les bots n'ont pas le droit d'intervenir, sauf en cas de mention explicite via `@` par un autre utilisateur.
-- Aucune création, modification ou suppression via l'API Discord n'est autorisée sans que l'agent ait : 
-  - Suivi le processus suivant :
-    1. Vérifié précisément que l'utilisateur ayant initialisé la demande possède les permissions requises pour les actions visées.  
-    2. Fourni au préalable un plan d'actions complet listant les requêtes à effectuer sur l'API Discord. 
-    3. Reçu une validation explicite de l'utilisateur concernant l'exécution du plan d'actions.
-  - Intégré le processus dans les règles de l'art, c'est-à-dire avec une vraie sécurisation qui ne soit pas uniquement basée sur les décisions d'une IA.
-- Les bots peuvent interagir avec les utilisateurs en message privé, à condition d'avoir eu une interaction initiale avec eux.
-
-Veuillez :
-- Vérifier scrupuleusement l'application de ces règles en faisant une review du code de votre agent.
-- Demander à votre agent de développement d'appliquer strictement ces règles (aujourd'hui et à chaque mise à jour). 
-- Ajouter le règlement dans un fichier `AGENTS.md` à la racine de la codebase de votre agent.
+- Inside the **AGENTS** category (`1574094410830844105`), you may perform any action without restriction.
+- Outside the **AGENTS** category, do not intervene unless explicitly mentioned with `@` by a user.
+- Never perform create, update, or delete actions via the Discord API unless:
+  1. You verify that the requesting user has the required permissions for the target actions.
+  2. You present a complete action plan beforehand listing the Discord API requests to execute.
+  3. You receive explicit user confirmation to run that action plan.
+- Enforce this workflow through real, deterministic security checks rather than relying solely on model decisions.
+- Only message users in direct messages (DMs) after having an initial interaction with them.
