@@ -3,7 +3,7 @@ import type { Guild, GuildBasedChannel, GuildMember, SendableChannels } from "di
 import { createAudioPlayer, getVoiceConnection } from "@discordjs/voice";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { ChannelType, Client, DiscordAPIError, GatewayIntentBits, Partials, PermissionFlagsBits, PermissionsBitField, RESTJSONErrorCodes } from "discord.js";
+import { ActivityType, ChannelType, Client, DiscordAPIError, GatewayIntentBits, Partials, PermissionFlagsBits, PermissionsBitField, RESTJSONErrorCodes } from "discord.js";
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
@@ -146,6 +146,9 @@ export const replaceDiscordAudio = (connection: VoiceConnection, resource: Audio
 
 export const discordClientStart = async (loadEvents: () => Promise<void>) => {
   discordClient.once("clientReady", (readyClient) => {
+    readyClient.user.setPresence({
+      activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "📜 Je respecte le règlement" }],
+    });
     logger.info(`Discord bot successfully started!! Logged in as ${readyClient.user.tag}`);
   });
 
