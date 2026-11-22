@@ -15,6 +15,7 @@ import { postgres } from "#/utils/postgres";
 import { trigger } from "#/utils/trigger";
 import { stepCountIs, streamText } from "ai";
 import dedent from "dedent";
+import { MessageType } from "discord.js";
 import { randomUUID } from "node:crypto";
 
 const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24/7. Réveillez-moi quand le budget passe.";
@@ -34,13 +35,16 @@ trigger.discordEvent("messageCreate", async (message) => {
   if (!channel.isSendable()) return;
 
   const botUser = discordClient.user;
+  if (!botUser) return;
 
-  if (!botUser || !message.mentions.has(botUser, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true })) return;
+  const isReplyToBot = message.type === MessageType.Reply && message.mentions.repliedUser?.id === botUser.id;
+  const mentionsBot = message.mentions.has(botUser, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
+  if (!isReplyToBot && !mentionsBot) return;
 
   const logPrefix = `[Discord reply ${randomUUID()}]`;
 
   if (openRouterQuota.isExhausted()) {
-    logger.info(`${logPrefix} Reply to ${message.author.displayName} without AI (OpenRouter quota exhausted, explicit mention)`);
+    logger.info(`${logPrefix} Reply to ${message.author.displayName} without AI (OpenRouter quota exhausted)`);
     await message.reply(NO_QUOTA_REPLY);
     return;
   }
