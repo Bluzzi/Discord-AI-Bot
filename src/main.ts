@@ -1,5 +1,6 @@
 import { discordClientStart } from "#/integrations/discord";
 import { logger } from "#/utils/logger";
+import { migratePostgres } from "#/utils/postgres";
 
 // Uncaught exception handler:
 process.on("uncaughtException", (error, origin) => {
@@ -8,6 +9,8 @@ process.on("uncaughtException", (error, origin) => {
 });
 
 // Start services and related triggers:
+await migratePostgres();
+
 await discordClientStart(async () => {
   await import("#/triggers/message-create.djs-event");
 });

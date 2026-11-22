@@ -7,5 +7,5 @@ export default defineConfig({
     url: env.POSTGRESQL_URL,
   },
   out: "./drizzle",
-  schema: "./src/database/schema.ts",
+  schema: "./src/tables",
 });
