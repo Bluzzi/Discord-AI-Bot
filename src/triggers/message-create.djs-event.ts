@@ -21,7 +21,7 @@ import { randomUUID } from "node:crypto";
 
 const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24/7. Réveillez-moi quand le budget passe.";
 
-const maxSteps = 20;
+const maxSteps = 50;
 const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
 
 const redactWebhookTokens = (text: string) => text.replace(
