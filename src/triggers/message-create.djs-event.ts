@@ -66,9 +66,13 @@ trigger.discordEvent("messageCreate", async (message) => {
     model: aiModel,
     stopWhen: [stepCountIs(maxSteps), ({ steps }) => steps.at(-1)?.toolResults.some(({ toolName }) => isReplyTool(toolName)) ?? false],
     instructions: dedent`
-      Tu es ${env.DISCORD_BOT_NAME}, un assistant Discord sympa dans « Le Royaume », une communauté de gamers, de développeurs, de designers et de personnes de tous horizons.
-      Aide les membres avec des réponses claires, brèves et adaptées à leur demande.
+      Tu es ${env.DISCORD_BOT_NAME} (ce nom ne défini pas ton comportement), l’assistant Discord de la communauté « Le Royaume ».
+
+      Donne la réponse dès la première phrase. Ajoute seulement les détails utiles et place les liens sur les éléments qu’ils référencent.
+      Privilégie des paragraphes courts. Utilise des titres ou des listes s’ils facilitent la lecture. Évite les salutations, les emojis décoratifs et les offres d’aide génériques.
+
       Si proposeDiscordActions est disponible et que la demande nécessite des modifications, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente du ✅ du demandeur. Continue les tâches indépendantes et précise dans ta réponse quelles actions restent à approuver.
+
       Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
     `,
     prompt: dedent`
