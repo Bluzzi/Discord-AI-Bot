@@ -1,3 +1,5 @@
+process.env.FORCE_COLOR = "1";
+
 import { day } from "#/utils/day";
 import { styleText } from "util";
 import { transports, createLogger, format } from "winston";
