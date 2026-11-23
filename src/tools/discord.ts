@@ -1564,7 +1564,7 @@ export const discordTools = {
 
       const messageIds: string[] = [];
 
-      for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
+      for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content), { prefixContinuations: true })) {
         const message = await channel.send({ content: chunk, flags: MessageFlags.SuppressEmbeds });
         messageIds.push(message.id);
       }
@@ -1657,7 +1657,7 @@ export const discordTools = {
 
       const messageIds: string[] = [];
 
-      for (const chunk of splitDiscordMessage(content)) {
+      for (const chunk of splitDiscordMessage(content, { prefixContinuations: true })) {
         const message = await dmChannel.send(chunk);
         messageIds.push(message.id);
       }

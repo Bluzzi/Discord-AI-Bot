@@ -108,13 +108,13 @@ const splitDiscordText = (text: string, maxLength: number, boundaries: RegExp, c
  * Splits text into Discord messages of up to 2,000 UTF-16 code units.
  * Prefers a paragraph break, then a line break, if it fills at least half the
  * message. Otherwise, uses the last whitespace outside protected Discord syntax.
- * Prefixes continuations after a line or paragraph break with a dot and newline.
+ * Optionally prefixes continuations after a line or paragraph break with a dot and newline.
  * Reopens oversized fenced code blocks and styled spans in subsequent chunks.
  */
-export const splitDiscordMessage = (text: string): string[] => {
+export const splitDiscordMessage = (text: string, { prefixContinuations = false } = {}): string[] => {
   // Match Discord markup before whitespace so its internal spaces cannot become breakpoints.
   const boundaries = /(?<fenceOpen>^ {0,3}`{3,}[^`\r\n]*\r?\n)(?<fenceBody>[\s\S]*?)(?<fenceClose>^ {0,3}`{3,}[\t ]*(?=\r?$))|\[(?:\\[^\r\n]|[^[\]\\\r\n])*\]\((?:<[^>\r\n]+>|(?:\\\S|[^\s()\\]|\([^\s()]*\))+)\)|<https?:\/\/[^\s<>`]+>|https?:\/\/[^\s<>`]+|<(?:@(?:[!&])?\d+|#\d+|a?:[\w]+:\d+|t:-?\d+(?::[tTdDfFsSR])?|\/[\w-]+(?: [\w-]+){0,2}:\d+|id:[\w-]+(?::\d+)?)>|(?<!`)(?<ticks>`+)(?!`)(?<inlineBody>[^\r\n]+?)(?<!`)\k<ticks>(?!`)|\\[^\r\n]|(?<style>\*{1,3}|_{1,3}|~~|\|\|)(?!\s)(?<styleBody>[^\r\n]+?)(?<=\S)\k<style>|\r\n|\s/gmu;
-  return splitDiscordText(text, DISCORD_MAX_MESSAGE_LENGTH, boundaries, ".\n");
+  return splitDiscordText(text, DISCORD_MAX_MESSAGE_LENGTH, boundaries, prefixContinuations ? ".\n" : "");
 };
 
 // Neutralizes mass-ping mentions into inert text so the bot can never ping everyone in a guild channel (low-level helper shared by the send tools):
