@@ -8,10 +8,11 @@ import { logger } from "#/utils/logger";
 import { postgres } from "#/utils/postgres";
 import { trigger } from "#/utils/trigger";
 import dedent from "dedent";
-import { EmbedBuilder } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } from "discord.js";
 import { and, eq, lt } from "drizzle-orm";
 
-const approvalEmoji = "✅";
+const applyButtonId = "discord-approval:apply";
+const cancelButtonId = "discord-approval:cancel";
 const approvalLifetimeMs = 15 * 60_000;
 
 export const requestDiscordApproval = async (
@@ -40,11 +41,16 @@ export const requestDiscordApproval = async (
   const embed = new EmbedBuilder()
     .setTitle("Actions Discord à approuver")
     .setDescription(inline ? inlineDescription : `${overview}\n\nLes paramètres complets sont dans le fichier joint, dans le même ordre.`)
-    .setFooter({ text: `Auteur de la demande, ajoute ${approvalEmoji} pour approuver toutes les actions.` });
+    .setFooter({ text: "Seul l’auteur de la demande peut appliquer ou annuler le plan." });
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(applyButtonId).setLabel("Appliquer").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(cancelButtonId).setLabel("Annuler").setStyle(ButtonStyle.Secondary),
+  );
 
   await postgres.delete(tableWaitingApproval).where(lt(tableWaitingApproval.expiresAt, now));
   const message = await channel.send({
     embeds: [embed],
+    components: [buttons],
     files: inline ? [] : [{ attachment: Buffer.from(parameters), name: "parametres-des-actions.json" }],
     allowedMentions: { parse: [] },
   });
@@ -62,40 +68,46 @@ export const requestDiscordApproval = async (
     throw new Error("Could not save the Discord approval request", { cause: saved.error });
   }
 
-  const seeded = await attempt(async () => message.react(approvalEmoji));
-  if (!seeded.ok) logger.warn(`Could not seed approval reaction on Discord message ${message.id}`);
   return { status: "waiting_approval" as const, approvalMessageUrl: message.url };
 };
 
-trigger.discordEvent("messageReactionAdd", async (reaction, user) => {
-  if (user.bot || reaction.emoji.id !== null || reaction.emoji.name !== approvalEmoji) return;
-  const message = reaction.message;
-  const guild = message.guild;
+trigger.discordEvent("interactionCreate", async (interaction) => {
+  if (!interaction.isButton() || (interaction.customId !== applyButtonId && interaction.customId !== cancelButtonId)) return;
+  const { guild, message, user } = interaction;
   if (guild === null) return;
 
+  await interaction.deferUpdate();
   const [approval] = await postgres.delete(tableWaitingApproval).where(and(
     eq(tableWaitingApproval.validatingMessageId, message.id),
     eq(tableWaitingApproval.channelId, message.channelId),
     eq(tableWaitingApproval.requesterMember, user.id),
   )).returning();
-  if (approval === undefined) return;
+  if (approval === undefined) {
+    await interaction.followUp({ content: "Cette demande est indisponible ou vous n’en êtes pas l’auteur.", flags: MessageFlags.Ephemeral });
+    return;
+  }
 
   const approvalMessage = await message.fetch();
   if (approvalMessage.editedTimestamp !== null) {
     await approvalMessage.edit({
       embeds: [new EmbedBuilder().setTitle("Demande annulée").setDescription("Le message d’approbation a été modifié.")],
+      components: [],
     });
     return;
   }
   const embed = new EmbedBuilder(approvalMessage.embeds[0]?.toJSON());
   if (approval.expiresAt.getTime() <= Date.now()) {
-    await approvalMessage.edit({ embeds: [embed.setTitle("Demande expirée").setFooter(null)] });
+    await approvalMessage.edit({ embeds: [embed.setTitle("Demande expirée").setFooter(null)], components: [] });
+    return;
+  }
+  if (interaction.customId === cancelButtonId) {
+    await approvalMessage.edit({ embeds: [embed.setTitle("Demande annulée").setFooter(null)], components: [] });
     return;
   }
 
   const member = await attempt(async () => guild.members.fetch({ user: user.id, force: true }));
   if (!member.ok) {
-    await approvalMessage.edit({ embeds: [embed.setTitle("Plan interrompu").setFooter({ text: "Impossible de vérifier le membre demandeur." })] });
+    await approvalMessage.edit({ embeds: [embed.setTitle("Plan interrompu").setFooter({ text: "Impossible de vérifier le membre demandeur." })], components: [] });
     return;
   }
   let completed = 0;
@@ -104,11 +116,11 @@ trigger.discordEvent("messageReactionAdd", async (reaction, user) => {
     if (!result.ok) {
       logger.warn(`Discord approval ${approval.id} stopped at ${toolName}`);
       const text = `${String(completed)}/${String(approval.actions.length)} actions exécutées. Arrêt sur ${toolName}.`;
-      await approvalMessage.edit({ embeds: [embed.setTitle("Plan interrompu").setFooter({ text })] });
+      await approvalMessage.edit({ embeds: [embed.setTitle("Plan interrompu").setFooter({ text })], components: [] });
       return;
     }
     completed += 1;
   }
 
-  await approvalMessage.edit({ embeds: [embed.setTitle("✅ Plan exécuté").setFooter({ text: `${String(completed)} action(s) exécutée(s).` })] });
+  await approvalMessage.edit({ embeds: [embed.setTitle("Plan exécuté").setFooter({ text: `${String(completed)} action(s) exécutée(s).` })], components: [] });
 });
