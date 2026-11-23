@@ -6,7 +6,7 @@ import { tableModelUsage } from "#/tables/model-usage";
 import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { replyContextTools } from "#/tools/reply-context";
-import { websearchTools } from "#/tools/websearch";
+import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
@@ -93,7 +93,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       ...tools,
       ...approvalTools,
       ...replyContextTools,
-      ...websearchTools,
+      ...webTools,
     },
     toolsContext: {
       getReplyContext: { channelId, messageId: message.id },
