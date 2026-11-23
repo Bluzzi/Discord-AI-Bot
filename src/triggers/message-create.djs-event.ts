@@ -188,6 +188,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   await postgres.insert(tableModelUsage).values({
     cause: "reply_to_message",
+    stepCount: steps.length,
     inputTokenCount: usage.inputTokens ?? 0,
     outputTokenCount: usage.outputTokens ?? 0,
     inputPrice: prices.inputPrice,

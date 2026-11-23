@@ -12,6 +12,7 @@ export const aiCauseEnum = pgEnum("ai_cause", [
 export const tableModelUsage = pgTable("model_usage", {
   id: uuid("id").primaryKey().defaultRandom(),
   cause: aiCauseEnum("cause").notNull(),
+  stepCount: integer("step_count"),
   inputTokenCount: integer("input_token_count").notNull(),
   outputTokenCount: integer("output_token_count").notNull(),
   inputPrice: numeric("input_price", { precision: 12, scale: 10, mode: "number" }),
