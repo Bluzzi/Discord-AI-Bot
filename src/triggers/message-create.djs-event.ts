@@ -7,7 +7,7 @@ import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
 import { replyContextTools } from "#/tools/reply-context";
-import { websearchTools } from "#/tools/websearch";
+import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
@@ -101,7 +101,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       ...approvalTools,
       ...replyContextTools,
       ...githubTools,
-      ...websearchTools,
+      ...webTools,
     },
     toolsContext: {
       getReplyContext: { channelId, messageId: message.id },
