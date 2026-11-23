@@ -1,7 +1,6 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
 import type { GuildMember, SendableChannels } from "discord.js";
 import { tableWaitingApproval } from "#/tables/waiting-approval";
-import { discordTools } from "#/tools/discord";
 import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/tools/discord-permissions";
 import { attempt } from "#/utils/attempt";
 import { logger } from "#/utils/logger";
@@ -19,6 +18,7 @@ export const requestDiscordApproval = async (
   channel: SendableChannels,
   requester: GuildMember,
   proposedActions: DiscordApprovalAction[],
+  summary: string,
 ) => {
   const actions = await Promise.all(proposedActions.map(async ({ toolName, input }) => ({
     toolName,
@@ -26,25 +26,21 @@ export const requestDiscordApproval = async (
   })));
   const now = new Date();
   const expiresAt = new Date(now.getTime() + approvalLifetimeMs);
-  const actionDescriptions = actions.map(({ toolName }, index) => {
-    const description = discordTools[toolName].description;
-    return `${String(index + 1)}. ${typeof description === "string" ? description : toolName}`;
-  });
   const overview = dedent`
-    Demande de <@${requester.id}> · Expire <t:${Math.floor(expiresAt.getTime() / 1000)}:R>
+    - 👤 Demande de <@${requester.id}>, en attente de son approbation
+    - ⏳ Expire <t:${Math.floor(expiresAt.getTime() / 1000)}:R>
 
-    ${actionDescriptions.join("\n")}
+    ${summary}
   `;
-  const parameters = JSON.stringify(actions.map(({ input }) => input), null, 2);
+  const parameters = JSON.stringify(actions, null, 2);
   const inlineDescription = `${overview}\n\n\`\`\`json\n${parameters.replaceAll("`", "\\u0060")}\n\`\`\``;
   const inline = inlineDescription.length <= 4096;
   const embed = new EmbedBuilder()
-    .setTitle("Actions Discord à approuver")
-    .setDescription(inline ? inlineDescription : `${overview}\n\nLes paramètres complets sont dans le fichier joint, dans le même ordre.`)
-    .setFooter({ text: "Seul l’auteur de la demande peut appliquer ou annuler le plan." });
+    .setTitle("Actions Discord")
+    .setDescription(inline ? inlineDescription : `${overview}\n\nLe détail des actions figure dans le fichier joint, dans l’ordre d’exécution.`);
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(applyButtonId).setLabel("Appliquer").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(cancelButtonId).setLabel("Annuler").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(applyButtonId).setLabel("Approuver").setStyle(ButtonStyle.Success),
   );
 
   await postgres.delete(tableWaitingApproval).where(lt(tableWaitingApproval.expiresAt, now));
@@ -90,24 +86,28 @@ trigger.discordEvent("interactionCreate", async (interaction) => {
   const approvalMessage = await message.fetch();
   if (approvalMessage.editedTimestamp !== null) {
     await approvalMessage.edit({
-      embeds: [new EmbedBuilder().setTitle("Demande annulée").setDescription("Le message d’approbation a été modifié.")],
+      embeds: [new EmbedBuilder().setTitle("Actions Discord").setDescription("Le message d’approbation a été modifié.").setFooter({ text: "Demande annulée" })],
       components: [],
     });
     return;
   }
-  const embed = new EmbedBuilder(approvalMessage.embeds[0]?.toJSON());
+  const embed = new EmbedBuilder(approvalMessage.embeds[0]?.toJSON()).setTitle("Actions Discord").setFields();
+  const description = embed.data.description;
+  if (description !== undefined) {
+    embed.setDescription(description.replace(/^(- 👤 Demande de <@\d+>), en attente de son approbation\n- ⏳ Expire <t:\d+:R>/u, "$1"));
+  }
   if (approval.expiresAt.getTime() <= Date.now()) {
-    await approvalMessage.edit({ embeds: [embed.setTitle("Demande expirée").setFooter(null)], components: [] });
+    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande expirée" })], components: [] });
     return;
   }
   if (interaction.customId === cancelButtonId) {
-    await approvalMessage.edit({ embeds: [embed.setTitle("Demande annulée").setFooter(null)], components: [] });
+    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande annulée" })], components: [] });
     return;
   }
 
   const member = await attempt(async () => guild.members.fetch({ user: user.id, force: true }));
   if (!member.ok) {
-    await approvalMessage.edit({ embeds: [embed.setTitle("Plan interrompu").setFooter({ text: "Impossible de vérifier le membre demandeur." })], components: [] });
+    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Plan interrompu · Impossible de vérifier le membre demandeur." })], components: [] });
     return;
   }
   let completed = 0;
@@ -115,12 +115,12 @@ trigger.discordEvent("interactionCreate", async (interaction) => {
     const result = await attempt(async () => executeApprovedDiscordAction(toolName, input, member.value, `${approval.id}-${String(completed)}`));
     if (!result.ok) {
       logger.warn(`Discord approval ${approval.id} stopped at ${toolName}`);
-      const text = `${String(completed)}/${String(approval.actions.length)} actions exécutées. Arrêt sur ${toolName}.`;
-      await approvalMessage.edit({ embeds: [embed.setTitle("Plan interrompu").setFooter({ text })], components: [] });
+      const text = `Plan interrompu · ${String(completed)}/${String(approval.actions.length)} actions exécutées. Arrêt sur ${toolName}.`;
+      await approvalMessage.edit({ embeds: [embed.setFooter({ text })], components: [] });
       return;
     }
     completed += 1;
   }
 
-  await approvalMessage.edit({ embeds: [embed.setTitle("Plan exécuté").setFooter({ text: `${String(completed)} action(s) exécutée(s).` })], components: [] });
+  await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande validée" })], components: [] });
 });

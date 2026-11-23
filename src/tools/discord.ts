@@ -11,6 +11,13 @@ import { z } from "zod";
 const id = z.string().regex(/^\d{1,20}$/u);
 const pathSegment = z.string().min(1).regex(/^[\w-]+$/u);
 const text = z.string();
+export const discordNativeMessageSyntax = dedent`
+  Discord also supports native message syntax:
+  - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
+  - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
+  - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
+  - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
+`;
 const discordMessageContent = z.string().min(1).describe(dedent`
   Discord Markdown supports:
   - Plain text with paragraphs separated by blank lines.
@@ -21,11 +28,7 @@ const discordMessageContent = z.string().min(1).describe(dedent`
   - Inline code with single backticks and code blocks with triple backticks, optionally followed by a language name on the opening line.
   - Links as bare URLs or with labels ([label](https://example.com)).
 
-  Discord also supports native message syntax:
-  - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
-  - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
-  - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
-  - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
+  ${discordNativeMessageSyntax}
 `);
 const integer = z.number().int();
 const flag = z.boolean();

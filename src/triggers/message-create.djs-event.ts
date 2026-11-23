@@ -80,7 +80,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   const { tools, approvalToolNames } = getDiscordToolsForMessage(message);
   const approvalTools: ToolSet = {};
   if (member !== null && approvalToolNames.length > 0) {
-    approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions) => requestDiscordApproval(channel, member, actions));
+    approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions, summary) => requestDiscordApproval(channel, member, actions, summary));
   }
   const result = streamText({
     model: aiModel,
@@ -98,7 +98,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
       Si on te demande des informations sauvegardés en mémoire concernant les utilisateurs, explique que c'est désormais <@1573860551610863766> et <@1574150367325855856> qui gèrent ceci.
 
-      Si proposeDiscordActions est disponible et que la demande nécessite des modifications, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Appliquer ». Continue les tâches indépendantes et précise dans ta réponse quelles actions restent à approuver.
+      Si proposeDiscordActions est disponible et que la demande nécessite des modifications, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les tâches indépendantes et précise dans ta réponse quelles actions restent à approuver.
 
       Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
     `,
