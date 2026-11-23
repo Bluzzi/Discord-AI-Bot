@@ -12,8 +12,8 @@ const id = z.string().regex(/^\d{1,20}$/u);
 const pathSegment = z.string().min(1).regex(/^[\w-]+$/u);
 const text = z.string();
 const discordMessageContent = z.string().min(1).describe(dedent`
-  Message text in Discord Markdown. Use **bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler|| and [label](https://example.com).
-  Start headings (## Heading), lists (- item or 1. item) and quotes (> text) on a new line, with a space after the marker. Use >>> for a quote that runs to the end of the message. Use backticks for inline code and triple backticks for fenced code blocks, with an optional language after the opening fence.
+  Use plain text with short paragraphs separated by a blank line. Use lists (- item or 1. item) when helpful and [label](https://example.com) for links. Avoid headings, bold and horizontal separators such as --- by default. Long text is split automatically.
+  Start lists and quotes (> text) on a new line, with a space after the marker. Use >>> for a quote that runs to the end of the message. Use backticks for inline code and triple backticks for fenced code blocks, with an optional language after the opening fence.
 
   Use Discord's native syntax for clickable references:
   - User: <@USER_ID>. Recognize <@!USER_ID> as a legacy user mention in incoming messages.
