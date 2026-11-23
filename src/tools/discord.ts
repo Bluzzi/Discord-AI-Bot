@@ -1549,7 +1549,7 @@ export const discordTools = {
       const messageIds: string[] = [];
 
       for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
-        const message = await channel.send(chunk);
+        const message = await channel.send({ content: chunk, flags: MessageFlags.SuppressEmbeds });
         messageIds.push(message.id);
       }
 
@@ -1786,7 +1786,11 @@ export const discordTools = {
       const messageIds: string[] = [];
 
       for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
-        const message = await channel.send({ content: chunk, reply: { messageReference: messageId } });
+        const message = await channel.send({
+          content: chunk,
+          flags: MessageFlags.SuppressEmbeds,
+          reply: { messageReference: messageId },
+        });
         messageIds.push(message.id);
       }
 
