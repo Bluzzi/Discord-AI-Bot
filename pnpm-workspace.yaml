@@ -1,3 +1,16 @@
+# Allow color in the terminal:
+color: "always"
+
+# Security:
+minimumReleaseAge: 2880 # 2 days
+blockExoticSubdeps: true
+
+# Disable updates if the trust policy has changed:
+trustPolicy: "no-downgrade"
+trustPolicyIgnoreAfter: 43200 # 30 days
+
+# Only allow these build scripts:
+strictDepBuilds: true
 allowBuilds:
   "@openrouter/sdk": true
   "@swc/core": true
