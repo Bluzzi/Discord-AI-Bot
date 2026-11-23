@@ -7,14 +7,66 @@ import { ActivityType, ChannelType, Client, DiscordAPIError, GatewayIntentBits, 
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
-// Splits a text into several chunks respecting the Discord message length limit (low-level helper shared by the send tools):
+/**
+ * Splits text into Discord messages of up to 2,000 UTF-16 code units.
+ * Prefers a paragraph break, then a line break, if it fills at least half the
+ * message. Otherwise, uses the last whitespace outside links and inline code.
+ * With no suitable whitespace, cuts before a link or inline code span that
+ * crosses the limit, or at the limit while keeping surrogate pairs intact.
+ */
 export const splitDiscordMessage = (text: string): string[] => {
   const chunks: string[] = [];
+  // Match links and inline code before whitespace so their internal spaces cannot become breakpoints.
+  const boundaries = /\[(?:\\[^\r\n]|[^[\]\\\r\n])*\]\((?:<[^>\r\n]+>|(?:\\\S|[^\s()\\]|\([^\s()]*\))+)\)|<https?:\/\/[^\s<>`]+>|https?:\/\/[^\s<>`]+|(?<!`)(?<ticks>`+)(?!`)[^\r\n]+?(?<!`)\k<ticks>(?!`)|\r\n|\s/gu;
+  let start = 0;
 
-  for (let index = 0; index < text.length; index += DISCORD_MAX_MESSAGE_LENGTH) {
-    chunks.push(text.slice(index, index + DISCORD_MAX_MESSAGE_LENGTH));
+  while (text.length - start > DISCORD_MAX_MESSAGE_LENGTH) {
+    // Set the maximum end of this chunk and start scanning at its first character.
+    const limit = start + DISCORD_MAX_MESSAGE_LENGTH;
+    let end = limit;
+    let wordBreak = start;
+    let lineBreak = start;
+    let paragraphBreak = start;
+    boundaries.lastIndex = start;
+
+    for (const match of text.matchAll(boundaries)) {
+      if (match.index >= limit) break;
+      const next = match.index + match[0].length;
+
+      // Move the fallback cut before a match that crosses the limit, if the chunk still contains text.
+      if (next > limit) {
+        if (match.index > start) end = match.index;
+        break;
+      }
+
+      // Track the last whitespace, line break and paragraph break within the limit.
+      if (match[0].trim() !== "") continue;
+
+      wordBreak = next;
+      if (match[0].endsWith("\n")) {
+        lineBreak = next;
+        if (text[match.index - 1] === "\n") paragraphBreak = next;
+      }
+    }
+
+    // Prefer a paragraph break, then a line break, if it fills at least half the chunk.
+    // Otherwise, use the last whitespace or keep the fallback cut.
+    if (paragraphBreak >= start + DISCORD_MAX_MESSAGE_LENGTH / 2) end = paragraphBreak;
+    else if (lineBreak >= start + DISCORD_MAX_MESSAGE_LENGTH / 2) end = lineBreak;
+    else if (wordBreak > start) end = wordBreak;
+
+    // Back up one code unit if the cut would split a surrogate pair.
+    const nextCodeUnit = text.charCodeAt(end);
+    const previousCodeUnit = text.charCodeAt(end - 1);
+    if (nextCodeUnit >= 0xDC00 && nextCodeUnit <= 0xDFFF && previousCodeUnit >= 0xD800 && previousCodeUnit <= 0xDBFF) end -= 1;
+
+    // Save the chunk and resume at the cut, preserving the original text.
+    chunks.push(text.slice(start, end));
+    start = end;
   }
 
+  // Append the remaining text once it fits in a single message.
+  if (start < text.length) chunks.push(text.slice(start));
   return chunks;
 };
 

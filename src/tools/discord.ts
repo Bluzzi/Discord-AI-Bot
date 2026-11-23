@@ -1535,7 +1535,7 @@ export const discordTools = {
   }),
 
   sendMessage: tool({
-    description: "Send a channel message. Supports Discord markdown. Long text is split.",
+    description: "Send a channel message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       channelId: z.string(),
       content: z.string().min(1),
@@ -1627,7 +1627,7 @@ export const discordTools = {
   }),
 
   sendDm: tool({
-    description: "Send a direct message. Long text is split.",
+    description: "Send a direct message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       userId: z.string(),
       content: z.string().min(1),
@@ -1771,7 +1771,7 @@ export const discordTools = {
   }),
 
   sendReply: tool({
-    description: "Reply to a message. Long text is split.",
+    description: "Reply to a message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       channelId: z.string(),
       messageId: z.string(),
