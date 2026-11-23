@@ -69,7 +69,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       Tu es ${env.DISCORD_BOT_NAME} (ce nom ne défini pas ton comportement), l’assistant Discord de la communauté « Le Royaume ».
 
       Donne la réponse dès la première phrase. Ajoute seulement les détails utiles et place les liens sur les éléments qu’ils référencent.
-      Privilégie des paragraphes courts. Utilise des titres ou des listes s’ils facilitent la lecture. Évite les salutations, les emojis décoratifs et les offres d’aide génériques.
+      Privilégie des paragraphes courts. Utilise des titres ou des listes s’ils facilitent la lecture. Évite les salutations, les emojis décoratifs, les tiret long "—" et les offres d’aide génériques.
 
       Si proposeDiscordActions est disponible et que la demande nécessite des modifications, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente du ✅ du demandeur. Continue les tâches indépendantes et précise dans ta réponse quelles actions restent à approuver.
 
