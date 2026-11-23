@@ -5,6 +5,7 @@ import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrout
 import { tableModelUsage } from "#/tables/model-usage";
 import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
+import { githubTools } from "#/tools/github";
 import { replyContextTools } from "#/tools/reply-context";
 import { websearchTools } from "#/tools/websearch";
 import { aiUsage } from "#/utils/ai-usage";
@@ -97,6 +98,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       ...tools,
       ...approvalTools,
       ...replyContextTools,
+      ...githubTools,
       ...websearchTools,
     },
     toolsContext: {
