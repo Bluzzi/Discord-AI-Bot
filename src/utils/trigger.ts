@@ -6,6 +6,7 @@ import { Cron } from "croner";
 const discordEvent = <K extends keyof ClientEvents>(
   eventName: K,
   fn: (...args: ClientEvents[K]) => void | Promise<void>,
+  onError?: (error: unknown, ...args: ClientEvents[K]) => void | Promise<void>,
 ) => {
   discordClient.on(eventName, (...args) => {
     void (async () => {
@@ -13,6 +14,10 @@ const discordEvent = <K extends keyof ClientEvents>(
         await fn(...args);
       }
       catch (error) {
+        if (onError) {
+          await onError(error, ...args);
+          return;
+        }
         logger.error(
           `Discord \`${eventName}\` event error:`,
           error instanceof Error ? error.stack : String(error),

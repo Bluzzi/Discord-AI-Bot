@@ -1,7 +1,9 @@
 import type { ToolSet } from "ai";
+import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
 import { discordClient, startDiscordTyping } from "#/integrations/discord";
 import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
+import { tableDiscordReplyError } from "#/tables/discord-reply-error";
 import { tableModelUsage } from "#/tables/model-usage";
 import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
@@ -9,6 +11,7 @@ import { githubTools } from "#/tools/github";
 import { replyContextTools } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
+import { attempt } from "#/utils/attempt";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
@@ -17,17 +20,31 @@ import { trigger } from "#/utils/trigger";
 import { stepCountIs, streamText } from "ai";
 import dedent from "dedent";
 import { MessageType } from "discord.js";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
+import { inspect } from "node:util";
 
 const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24/7. Réveillez-moi quand le budget passe.";
 
 const maxSteps = 50;
+const replyCodeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
 
 const redactWebhookTokens = (text: string) => text.replace(
   /(https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/)[\w-]+/giu,
   "$1[redacted]",
 );
+
+const saveReplyError = async (error: unknown, message: Message, label: string) => {
+  const id = randomUUID();
+  const saved = await attempt(async () => postgres.insert(tableDiscordReplyError).values({
+    id,
+    messageId: message.id,
+    messageContent: message.content,
+    errorContent: redactWebhookTokens(inspect(error, { depth: null, customInspect: false })),
+  }));
+
+  logger.error(saved.ok ? `${label} (error ID ${id})` : `${label} (could not save error ${id})`);
+};
 
 trigger.discordEvent("messageCreate", async (message) => {
   // Check whether the bot needs to reply.
@@ -42,11 +59,17 @@ trigger.discordEvent("messageCreate", async (message) => {
   const mentionsBot = message.mentions.has(botUser, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
   if (!isReplyToBot && !mentionsBot) return;
 
-  const logPrefix = `[Discord reply ${randomUUID()}]`;
+  const replyCode = Array.from({ length: 5 }, () => replyCodeAlphabet.charAt(randomInt(replyCodeAlphabet.length))).join("");
+  const logPrefix = `[Discord reply ${replyCode}]`;
+  const startedAt = Date.now();
+
+  logger.info(`${logPrefix} Reply started for message ${message.id} from @${message.author.username}`);
 
   if (openRouterQuota.isExhausted()) {
-    logger.info(`${logPrefix} Reply to ${message.author.displayName} without AI (OpenRouter quota exhausted)`);
-    await message.reply(NO_QUOTA_REPLY);
+    const reply = await message.reply(NO_QUOTA_REPLY);
+    logger.info(`${logPrefix} Context: no AI (OpenRouter quota exhausted)`);
+    logger.info(`${logPrefix} Reply: ${JSON.stringify(reply.content)}`);
+    logger.info(`${logPrefix} Reply finished in ${String(Date.now() - startedAt)}ms`);
     return;
   }
 
@@ -59,10 +82,6 @@ trigger.discordEvent("messageCreate", async (message) => {
   if (member !== null && approvalToolNames.length > 0) {
     approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions) => requestDiscordApproval(channel, member, actions));
   }
-  const startedAt = Date.now();
-
-  logger.info(`${logPrefix} Reply started for message ${message.id} from ${message.author.username}`);
-
   const result = streamText({
     model: aiModel,
     stopWhen: [stepCountIs(maxSteps), ({ steps }) => steps.at(-1)?.toolResults.some(({ toolName }) => isReplyTool(toolName)) ?? false],
@@ -112,7 +131,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       getReplyContext: { channelId, messageId: message.id },
     },
     onToolExecutionStart: ({ toolCall }) => {
-      if (toolCall.toolName === "proposeDiscordActions") {
+      if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
         logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
         return;
       }
@@ -127,14 +146,20 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   const stopTyping = startDiscordTyping(channel, () => logger.warn(`${logPrefix} Could not send the typing indicator`));
 
+  const sentReplies: string[] = [];
   try {
     for await (const part of result.stream) {
       if (part.type === "error") throw new Error(`${logPrefix} Reply stream failed`, { cause: part.error });
       if (part.type === "tool-error") {
-        const details = part.error instanceof Error ? part.error.stack ?? part.error.message : String(part.error);
-        logger.error(`${logPrefix} Tool ${part.toolName} failed`, redactWebhookTokens(details));
+        await saveReplyError(part.error, message, `${logPrefix} Tool ${part.toolName} failed`);
       }
-      if (part.type === "tool-result" && isReplyTool(part.toolName)) stopTyping();
+      if (part.type === "tool-result" && isReplyTool(part.toolName)) {
+        stopTyping();
+        const input: unknown = part.input;
+        if (typeof input === "object" && input !== null && "content" in input && typeof input.content === "string") {
+          sentReplies.push(input.content);
+        }
+      }
     }
   }
   finally {
@@ -143,20 +168,16 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   // Log and save the metrics for all steps.
   const durationMs = Date.now() - startedAt;
-  const [steps, finishReason, usage, text] = await Promise.all([result.steps, result.finishReason, result.usage, result.text]);
+  const [steps, usage] = await Promise.all([result.steps, result.usage]);
   const replied = steps.some((step) => step.toolResults.some(({ toolName }) => isReplyTool(toolName)));
-
-  logger.info(dedent`
-    ${logPrefix} Reply finished:
-    - [REPLIED] ${replied ? "yes" : "no"}
-    - [TEXT] ${redactWebhookTokens(text)}
-    - [CONTEXT] ${aiUsage.formatTokens(usage)}
-    - [PERF] ${steps.length} steps, finish: ${finishReason}, ${durationMs} ms
-  `);
 
   if (!replied) {
     logger.warn(`${logPrefix} No reply was sent in ${String(steps.length)} steps`);
   }
+
+  logger.info(`${logPrefix} Context: ${aiUsage.formatTokens(usage)}`);
+  logger.info(`${logPrefix} Reply: ${sentReplies.length ? JSON.stringify(redactWebhookTokens(sentReplies.join("\n"))) : "(none)"}`);
+  logger.info(`${logPrefix} Reply finished in ${String(durationMs)}ms`);
 
   const modelUsed = steps.at(-1)?.model.modelId;
   if (modelUsed === undefined) {
@@ -173,4 +194,4 @@ trigger.discordEvent("messageCreate", async (message) => {
     outputPrice: prices.outputPrice,
     modelUsed,
   });
-});
+}, async (error, message) => saveReplyError(error, message, "Discord reply failed"));
