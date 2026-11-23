@@ -11,6 +11,8 @@ const schema = z.object({
 
   OPENROUTER_API_KEY: z.string(),
   OPENROUTER_MODEL: z.string().default("deepseek/deepseek-v4.1-flash-1017"),
+
+  GITHUB_TOKEN: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);
