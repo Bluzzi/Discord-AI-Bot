@@ -2095,7 +2095,7 @@ export const discordTools = {
         throw new Error("Audio source returned an empty body");
       }
 
-      const resource = createAudioResource(Readable.fromWeb(response.body), { inputType: StreamType.Arbitrary });
+      const resource = createAudioResource(Readable.from(response.body, { objectMode: false }), { inputType: StreamType.Arbitrary });
       replaceDiscordAudio(connection, resource);
 
       return {};
