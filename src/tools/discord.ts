@@ -12,19 +12,20 @@ const id = z.string().regex(/^\d{1,20}$/u);
 const pathSegment = z.string().min(1).regex(/^[\w-]+$/u);
 const text = z.string();
 const discordMessageContent = z.string().min(1).describe(dedent`
-  Use plain text with short paragraphs separated by a blank line. Use lists (- item or 1. item) when helpful and [label](https://example.com) for links. Avoid headings, bold and horizontal separators such as --- by default. Long text is split automatically.
-  Start lists and quotes (> text) on a new line, with a space after the marker. Use >>> for a quote that runs to the end of the message. Use backticks for inline code and triple backticks for fenced code blocks, with an optional language after the opening fence.
+  Discord Markdown supports:
+  - Plain text with paragraphs separated by blank lines.
+  - Bold (**text**), italics (*text* or _text_), underline (__text__), strikethrough (~~text~~), and spoilers (||text||).
+  - Headings (# Heading, ## Heading, ### Heading) and subtext (-# text) at the start of a line.
+  - Bulleted lists (- item or * item), numbered lists (1. item), and nested lists with indentation.
+  - Single-line quotes (> text) and quotes that continue to the end of the message (>>> text), starting on a new line.
+  - Inline code with single backticks and code blocks with triple backticks, optionally followed by a language name on the opening line.
+  - Links as bare URLs or with labels ([label](https://example.com)).
 
-  Use Discord's native syntax for clickable references:
-  - User: <@USER_ID>. Recognize <@!USER_ID> as a legacy user mention in incoming messages.
-  - Channel or thread: <#CHANNEL_ID>.
-  - Role: <@&ROLE_ID>.
-  - Custom emoji: <:name:EMOJI_ID> or <a:name:EMOJI_ID> for animated emoji.
-  - Slash command: </command:COMMAND_ID> or </command subcommand:COMMAND_ID>. Include the group name between the command and subcommand when applicable.
-  - Timestamp: <t:UNIX_SECONDS:f> for a localized date and time, or <t:UNIX_SECONDS:R> for relative time. Use seconds, never milliseconds.
-
-  Replace the placeholders with resolved IDs. Keep live references outside code spans and blocks. Use code formatting to show syntax literally. User and role mentions may notify their targets, so use them only when appropriate. Avoid @everyone and @here.
-  Resolve targets anywhere in the relevant server using the available Discord tools. Use searchGuildMembers for people, getChannels for channels, getActiveThreads for active threads, getRoles for roles and getGuildEmojis for custom emoji. Use conversation context when it already identifies the target. Ask for clarification if matches are ambiguous. Use a plain label if a reference cannot be resolved and the exact target is not needed.
+  Discord also supports native message syntax:
+  - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
+  - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
+  - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
+  - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
 `);
 const integer = z.number().int();
 const flag = z.boolean();
