@@ -7,26 +7,43 @@ import { ActivityType, ChannelType, Client, DiscordAPIError, GatewayIntentBits, 
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
-/**
- * Splits text into Discord messages of up to 2,000 UTF-16 code units.
- * Prefers a paragraph break, then a line break, if it fills at least half the
- * message. Otherwise, uses the last whitespace outside links and inline code.
- * With no suitable whitespace, cuts before a link or inline code span that
- * crosses the limit, or at the limit while keeping surrogate pairs intact.
- */
-export const splitDiscordMessage = (text: string): string[] => {
+const splitDiscordText = (text: string, maxLength: number, boundaries: RegExp): string[] => {
   const chunks: string[] = [];
-  // Match links and inline code before whitespace so their internal spaces cannot become breakpoints.
-  const boundaries = /\[(?:\\[^\r\n]|[^[\]\\\r\n])*\]\((?:<[^>\r\n]+>|(?:\\\S|[^\s()\\]|\([^\s()]*\))+)\)|<https?:\/\/[^\s<>`]+>|https?:\/\/[^\s<>`]+|(?<!`)(?<ticks>`+)(?!`)[^\r\n]+?(?<!`)\k<ticks>(?!`)|\r\n|\s/gu;
+  const splitWrappedMatch = (groups: Record<string, string | undefined>) => {
+    const { fenceOpen, fenceBody, fenceClose, style, styleBody, ticks, inlineBody } = groups;
+    const opening = fenceOpen ?? style ?? ticks;
+    const closing = fenceClose ?? style ?? ticks;
+    const body = fenceBody ?? styleBody ?? inlineBody;
+    if (opening === undefined || closing === undefined || body === undefined || body === "") return [];
+    const budget = maxLength - opening.length - closing.length - (fenceOpen === undefined ? 0 : 1);
+    if (budget < 2) return [];
+    const innerBoundaries = style === undefined ? /\r\n|\s/gu : boundaries;
+    return splitDiscordText(body, budget, innerBoundaries).map((part) => {
+      if (style === undefined) {
+        const newline = fenceOpen !== undefined && !part.endsWith("\n") ? "\n" : "";
+        return `${opening}${part}${newline}${closing}`;
+      }
+
+      // Discord requires non-whitespace next to emphasis delimiters.
+      const content = part.trim();
+      if (content === "") return part;
+      const leading = part.slice(0, part.length - part.trimStart().length);
+      const trailing = part.slice(part.trimEnd().length);
+      return `${leading}${opening}${content}${closing}${trailing}`;
+    });
+  };
+
   let start = 0;
 
-  while (text.length - start > DISCORD_MAX_MESSAGE_LENGTH) {
+  while (text.length - start > maxLength) {
     // Set the maximum end of this chunk and start scanning at its first character.
-    const limit = start + DISCORD_MAX_MESSAGE_LENGTH;
+    const limit = start + maxLength;
     let end = limit;
     let wordBreak = start;
     let lineBreak = start;
     let paragraphBreak = start;
+    let wrappedEnd = start;
+    let wrapped: string[] = [];
     boundaries.lastIndex = start;
 
     for (const match of text.matchAll(boundaries)) {
@@ -35,7 +52,13 @@ export const splitDiscordMessage = (text: string): string[] => {
 
       // Move the fallback cut before a match that crosses the limit, if the chunk still contains text.
       if (next > limit) {
-        if (match.index > start) end = match.index;
+        if (match.index > start) {
+          end = match.index;
+        }
+        else if (match.groups !== undefined) {
+          wrapped = splitWrappedMatch(match.groups);
+          wrappedEnd = next;
+        }
         break;
       }
 
@@ -51,8 +74,14 @@ export const splitDiscordMessage = (text: string): string[] => {
 
     // Prefer a paragraph break, then a line break, if it fills at least half the chunk.
     // Otherwise, use the last whitespace or keep the fallback cut.
-    if (paragraphBreak >= start + DISCORD_MAX_MESSAGE_LENGTH / 2) end = paragraphBreak;
-    else if (lineBreak >= start + DISCORD_MAX_MESSAGE_LENGTH / 2) end = lineBreak;
+    if (wrapped.length > 0) {
+      for (const part of wrapped) chunks.push(part);
+      start = wrappedEnd;
+      continue;
+    }
+
+    if (paragraphBreak >= start + maxLength / 2) end = paragraphBreak;
+    else if (lineBreak >= start + maxLength / 2) end = lineBreak;
     else if (wordBreak > start) end = wordBreak;
 
     // Back up one code unit if the cut would split a surrogate pair.
@@ -68,6 +97,18 @@ export const splitDiscordMessage = (text: string): string[] => {
   // Append the remaining text once it fits in a single message.
   if (start < text.length) chunks.push(text.slice(start));
   return chunks;
+};
+
+/**
+ * Splits text into Discord messages of up to 2,000 UTF-16 code units.
+ * Prefers a paragraph break, then a line break, if it fills at least half the
+ * message. Otherwise, uses the last whitespace outside protected Discord syntax.
+ * Reopens oversized fenced code blocks and styled spans in subsequent chunks.
+ */
+export const splitDiscordMessage = (text: string): string[] => {
+  // Match Discord markup before whitespace so its internal spaces cannot become breakpoints.
+  const boundaries = /(?<fenceOpen>^ {0,3}`{3,}[^`\r\n]*\r?\n)(?<fenceBody>[\s\S]*?)(?<fenceClose>^ {0,3}`{3,}[\t ]*(?=\r?$))|\[(?:\\[^\r\n]|[^[\]\\\r\n])*\]\((?:<[^>\r\n]+>|(?:\\\S|[^\s()\\]|\([^\s()]*\))+)\)|<https?:\/\/[^\s<>`]+>|https?:\/\/[^\s<>`]+|<(?:@(?:[!&])?\d+|#\d+|a?:[\w]+:\d+|t:-?\d+(?::[tTdDfFsSR])?|\/[\w-]+(?: [\w-]+){0,2}:\d+|id:[\w-]+(?::\d+)?)>|(?<!`)(?<ticks>`+)(?!`)(?<inlineBody>[^\r\n]+?)(?<!`)\k<ticks>(?!`)|\\[^\r\n]|(?<style>\*{1,3}|_{1,3}|~~|\|\|)(?!\s)(?<styleBody>[^\r\n]+?)(?<=\S)\k<style>|\r\n|\s/gmu;
+  return splitDiscordText(text, DISCORD_MAX_MESSAGE_LENGTH, boundaries);
 };
 
 // Neutralizes mass-ping mentions into inert text so the bot can never ping everyone in a guild channel (low-level helper shared by the send tools):

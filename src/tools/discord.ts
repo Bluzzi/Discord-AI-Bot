@@ -3,6 +3,7 @@ import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIB
 import { createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
 import { discordClient, fetchDiscordChannel, fetchDiscordTextChannel, fetchDiscordSendableChannel, fetchDiscordVoiceConnection, getDiscordAudioPlayer, replaceDiscordAudio, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
 import { tool } from "ai";
+import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
 import { Readable } from "node:stream";
 import { z } from "zod";
@@ -10,6 +11,21 @@ import { z } from "zod";
 const id = z.string().regex(/^\d{1,20}$/u);
 const pathSegment = z.string().min(1).regex(/^[\w-]+$/u);
 const text = z.string();
+const discordMessageContent = z.string().min(1).describe(dedent`
+  Message text in Discord Markdown. Use **bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler|| and [label](https://example.com).
+  Start headings (## Heading), lists (- item or 1. item) and quotes (> text) on a new line, with a space after the marker. Use >>> for a quote that runs to the end of the message. Use backticks for inline code and triple backticks for fenced code blocks, with an optional language after the opening fence.
+
+  Use Discord's native syntax for clickable references:
+  - User: <@USER_ID>. Recognize <@!USER_ID> as a legacy user mention in incoming messages.
+  - Channel or thread: <#CHANNEL_ID>.
+  - Role: <@&ROLE_ID>.
+  - Custom emoji: <:name:EMOJI_ID> or <a:name:EMOJI_ID> for animated emoji.
+  - Slash command: </command:COMMAND_ID> or </command subcommand:COMMAND_ID>. Include the group name between the command and subcommand when applicable.
+  - Timestamp: <t:UNIX_SECONDS:f> for a localized date and time, or <t:UNIX_SECONDS:R> for relative time. Use seconds, never milliseconds.
+
+  Replace the placeholders with resolved IDs. Keep live references outside code spans and blocks. Use code formatting to show syntax literally. User and role mentions may notify their targets, so use them only when appropriate. Avoid @everyone and @here.
+  Resolve targets anywhere in the relevant server using the available Discord tools. Use searchGuildMembers for people, getChannels for channels, getActiveThreads for active threads, getRoles for roles and getGuildEmojis for custom emoji. Use conversation context when it already identifies the target. Ask for clarification if matches are ambiguous. Use a plain label if a reference cannot be resolved and the exact target is not needed.
+`);
 const integer = z.number().int();
 const flag = z.boolean();
 const date = z.iso.datetime({ offset: true });
@@ -1538,7 +1554,7 @@ export const discordTools = {
     description: "Send a channel message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       channelId: z.string(),
-      content: z.string().min(1),
+      content: discordMessageContent,
     }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
@@ -1630,7 +1646,7 @@ export const discordTools = {
     description: "Send a direct message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       userId: z.string(),
-      content: z.string().min(1),
+      content: discordMessageContent,
     }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
@@ -1775,7 +1791,7 @@ export const discordTools = {
     inputSchema: z.object({
       channelId: z.string(),
       messageId: z.string(),
-      content: z.string().min(1),
+      content: discordMessageContent,
     }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
