@@ -130,7 +130,10 @@ trigger.discordEvent("messageCreate", async (message) => {
   try {
     for await (const part of result.stream) {
       if (part.type === "error") throw new Error(`${logPrefix} Reply stream failed`, { cause: part.error });
-      if (part.type === "tool-error") logger.warn(`${logPrefix} Tool ${part.toolName} failed`);
+      if (part.type === "tool-error") {
+        const details = part.error instanceof Error ? part.error.stack ?? part.error.message : String(part.error);
+        logger.error(`${logPrefix} Tool ${part.toolName} failed`, redactWebhookTokens(details));
+      }
       if (part.type === "tool-result" && isReplyTool(part.toolName)) stopTyping();
     }
   }
