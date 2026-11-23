@@ -2,7 +2,7 @@ import type { DiscordToolName as ToolName } from "#/tools/discord";
 import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
 import { discordClient, findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord";
-import { discordTools, discordToolsRequiringApproval, getDiscordToolInputSchema } from "#/tools/discord";
+import { discordReadTools, discordTools, getDiscordToolInputSchema } from "#/tools/discord";
 import { ChannelType, GuildScheduledEventEntityType, PermissionFlagsBits as permissionFlags } from "discord.js";
 import { z } from "zod";
 
@@ -320,7 +320,9 @@ const specificRules = {
       await Promise.all(channels.map(async (channelId) => checkChannel(member, channelId, permissionFlags.ReadMessageHistory)));
     },
   },
-  sendEmbed: channel(permissionFlags.SendMessages | permissionFlags.EmbedLinks),
+  sendEmbed: channel(permissionFlags.SendMessages | permissionFlags.EmbedLinks, (input) => input.channelId, ({ userId }) => {
+    if (userId !== undefined) throw denied();
+  }),
   sendFile: channel(permissionFlags.SendMessages | permissionFlags.AttachFiles),
   sendRichMessage: channel(permissionFlags.SendMessages | permissionFlags.EmbedLinks | permissionFlags.AttachFiles | permissionFlags.SendTTSMessages | permissionFlags.UseExternalStickers),
   editRichMessage: channel(permissionFlags.SendMessages | permissionFlags.ManageMessages | permissionFlags.EmbedLinks | permissionFlags.AttachFiles),
@@ -404,11 +406,6 @@ const dmTools = new Set<ToolName>([
   "getMessage",
   "getChannelMessages",
   "getPinnedMessages",
-  "sendEmbed",
-  "sendFile",
-  "sendVoiceMessage",
-  "createPoll",
-  "addReaction",
   "getReactions",
   "getReactionUsers",
   "getPollVoters",
@@ -460,7 +457,7 @@ export const validateDiscordApprovalAction = async (name: string, input: unknown
   if (!Object.hasOwn(discordTools, name) || !Object.hasOwn(rules, name)) throw denied();
   const toolName = name as ToolName;
   const rule = rules[toolName];
-  if (!discordToolsRequiringApproval.has(toolName) || rule === undefined) throw denied();
+  if (discordReadTools.has(toolName) || rule === undefined) throw denied();
 
   const args = parseToolArguments(getDiscordToolInputSchema(toolName).parse(input));
   await requireGuildToolPermission(args, requester, rule);
@@ -520,7 +517,7 @@ export const getDiscordToolsForMessage = (message: Message) => {
       const scope = rule.channel;
       if (scope !== undefined && !visibleChannels.some(({ target, permissions }) => permissions.has(permissionIn(target, scope)))) continue;
     }
-    if (discordToolsRequiringApproval.has(name)) {
+    if (!discordReadTools.has(name)) {
       if (!isDm) approvalToolNames.push(name);
       continue;
     }

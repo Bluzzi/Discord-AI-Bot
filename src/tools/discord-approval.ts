@@ -20,7 +20,7 @@ export const createDiscordApprovalTool = (
   if (first === undefined) throw new Error("No Discord actions available for approval");
 
   return tool({
-    description: "Ask the requesting member to approve Discord updates or deletions. Submit all intended changes in execution order. Returns immediately with an approval message URL. The actions are still pending.",
+    description: "Ask the requesting member to approve Discord actions, including creations, updates and deletions. Submit all intended changes in execution order. Returns immediately with an approval message URL. The actions are still pending.",
     inputSchema: z.object({
       actions: z.array(z.discriminatedUnion("toolName", [first, ...rest])).min(1).max(10),
       summary: z.string().trim().min(1).max(1000).describe(dedent`

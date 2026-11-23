@@ -98,7 +98,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
       Si on te demande des informations sauvegardés en mémoire concernant les utilisateurs, explique que c'est désormais <@1573860551610863766> et <@1574150367325855856> qui gèrent ceci.
 
-      Si proposeDiscordActions est disponible et que la demande nécessite des modifications, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les tâches indépendantes et précise dans ta réponse quelles actions restent à approuver.
+      Si proposeDiscordActions est disponible et que la demande nécessite des créations, des modifications ou des suppressions, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les autres tâches.
 
       Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
     `,
