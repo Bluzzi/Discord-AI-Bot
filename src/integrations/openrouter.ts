@@ -14,6 +14,7 @@ export type OpenRouterKeyData = GetCurrentKeyData;
 export type OpenRouterCreditsData = GetCreditsData;
 
 type OpenRouterModelPricing = {
+  acceptsImages: boolean;
   /** Price per input token, in USD */
   prompt: number;
   /** Price per output token, in USD */
@@ -56,6 +57,7 @@ const fetchModelPricing = async (): Promise<void> => {
       if (prompt === undefined || completion === undefined) continue;
 
       pricingByModelId.set(model.id, {
+        acceptsImages: model.architecture.inputModalities.includes("image"),
         prompt,
         completion,
         inputCacheRead: parsePrice(model.pricing.inputCacheRead),
@@ -90,6 +92,10 @@ export const openRouterApi = {
   fetchKey,
   /** Fetch the account credits balance (total credits and usage) from OpenRouter, or undefined when the key is not allowed to */
   fetchCredits,
+  acceptsImages: async (modelId: string): Promise<boolean> => {
+    if (pricingByModelId.size === 0) await fetchModelPricing();
+    return pricingByModelId.get(modelId)?.acceptsImages ?? true;
+  },
   /** Compute input and output prices (USD) from OpenRouter public pricing (fetched once and cached), or undefined when the model pricing is unknown */
   computeUsagePrices: async (modelId: string, usage: LanguageModelUsage): Promise<{ inputPrice: number | undefined; outputPrice: number | undefined }> => {
     if (pricingByModelId.size === 0) {
@@ -246,3 +252,16 @@ const openRouterProvider = createOpenRouter({
 });
 
 export const aiModel = openRouterProvider(env.OPENROUTER_MODEL);
+
+export const generateOpenRouterImage = async (prompt: string) => {
+  const response = await openRouterSdk.images.generate({
+    imageGenerationRequest: { model: env.OPENROUTER_MODEL_IMAGE, prompt },
+  }, { timeoutMs: 60_000 });
+  const image = response.data[0];
+  if (image === undefined || image.b64Json === "") throw new Error("OpenRouter returned no generated image");
+
+  const extension = image.mediaType?.split("/")[1]?.replace("+xml", "") ?? "png";
+  if (!(/^[a-z0-9]+$/u).test(extension)) throw new Error("OpenRouter returned an unsupported image format");
+
+  return { attachment: Buffer.from(image.b64Json, "base64"), name: `image.${extension}` };
+};

@@ -8,6 +8,7 @@ import { tableModelUsage } from "#/tables/model-usage";
 import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
+import { createImageTools } from "#/tools/image";
 import { replyContextTools } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
@@ -77,7 +78,8 @@ trigger.discordEvent("messageCreate", async (message) => {
   const channelId = channel.id;
   const guild = message.guild;
   const member = message.member;
-  const { tools, approvalToolNames } = getDiscordToolsForMessage(message);
+  const { tools: imageTools, resolveAttachment } = createImageTools();
+  const { tools, approvalToolNames } = getDiscordToolsForMessage(message, resolveAttachment);
   const approvalTools: ToolSet = {};
   if (member !== null && approvalToolNames.length > 0) {
     approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions, summary) => requestDiscordApproval(channel, member, actions, summary));
@@ -100,7 +102,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
       Si proposeDiscordActions est disponible et que la demande nécessite des créations, des modifications ou des suppressions, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les autres tâches.
 
-      Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
+      Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon. Si le demandeur veut créer une image, appelle d’abord \`generateImage\`, puis passe l’\`attachmentRef\` retourné à l’outil de réponse. Ajoute du texte si nécessaire.
     `,
     prompt: dedent`
       Contexte d'exécution :
@@ -123,6 +125,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     tools: {
       ...tools,
       ...approvalTools,
+      ...imageTools,
       ...replyContextTools,
       ...githubTools,
       ...webTools,

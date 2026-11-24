@@ -11,6 +11,7 @@ const schema = z.object({
 
   OPENROUTER_API_KEY: z.string().describe("OpenRouter API key used for model requests and quota checks."),
   OPENROUTER_MODEL: z.string().default("deepseek/deepseek-v4.1-flash-1017").describe("OpenRouter model ID used for replies."),
+  OPENROUTER_MODEL_IMAGE: z.string().trim().min(1).default("recraft/recraft-v4.1-flash-v2:free").describe("OpenRouter model ID used for image generation."),
 
   GITHUB_TOKEN: z.string().optional().describe("Greatly increases the GitHub API rate limit. A token with public-only access is recommended."),
   EXA_API_KEY: z.string().describe("Exa API key used for web search."),

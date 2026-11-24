@@ -30,6 +30,27 @@ const discordMessageContent = z.string().min(1).describe(dedent`
 
   ${discordNativeMessageSyntax}
 `);
+const replyAttachmentRef = z.uuid().optional().describe("Attachment reference returned by a tool");
+const replyContextSchema = z.object({
+  resolveAttachment: z.custom<(attachmentRef: string) => { attachment: Buffer; name: string }>((value) => typeof value === "function"),
+});
+
+const prepareReplyChunks = (
+  content: string | undefined,
+  attachmentRef: string | undefined,
+  context: z.infer<typeof replyContextSchema>,
+  options?: { prefixContinuations: boolean },
+) => {
+  if (content === undefined && attachmentRef === undefined) throw new Error("Reply requires text or an attachment");
+  const attachment = attachmentRef === undefined ? undefined : context.resolveAttachment(attachmentRef);
+
+  const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content), options);
+  return chunks.map((chunk, index) => ({
+    content: chunk,
+    files: attachment !== undefined && index === chunks.length - 1 ? [attachment] : undefined,
+  }));
+};
+
 const integer = z.number().int();
 const flag = z.boolean();
 const date = z.iso.datetime({ offset: true });
@@ -1558,18 +1579,21 @@ export const discordTools = {
     description: "Send a channel message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       channelId: z.string(),
-      content: discordMessageContent,
+      content: discordMessageContent.optional(),
+      attachmentRef: replyAttachmentRef,
     }),
+    contextSchema: replyContextSchema,
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
-    execute: async ({ channelId, content }) => {
+    execute: async ({ channelId, content, attachmentRef }, { context }) => {
+      const chunks = prepareReplyChunks(content, attachmentRef, context, { prefixContinuations: true });
       const channel = await fetchDiscordSendableChannel(channelId);
 
       const messageIds: string[] = [];
 
-      for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content), { prefixContinuations: true })) {
-        const message = await channel.send({ content: chunk, flags: MessageFlags.SuppressEmbeds });
+      for (const chunk of chunks) {
+        const message = await channel.send({ ...chunk, flags: MessageFlags.SuppressEmbeds });
         messageIds.push(message.id);
       }
 
@@ -1795,19 +1819,22 @@ export const discordTools = {
     inputSchema: z.object({
       channelId: z.string(),
       messageId: z.string(),
-      content: discordMessageContent,
+      content: discordMessageContent.optional(),
+      attachmentRef: replyAttachmentRef,
     }),
+    contextSchema: replyContextSchema,
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
-    execute: async ({ channelId, messageId, content }) => {
+    execute: async ({ channelId, messageId, content, attachmentRef }, { context }) => {
+      const chunks = prepareReplyChunks(content, attachmentRef, context);
       const channel = await fetchDiscordSendableChannel(channelId);
 
       const messageIds: string[] = [];
 
-      for (const chunk of splitDiscordMessage(sanitizeDiscordMessage(content))) {
+      for (const chunk of chunks) {
         const message = await channel.send({
-          content: chunk,
+          ...chunk,
           flags: MessageFlags.SuppressEmbeds,
           reply: { messageReference: messageId },
         });
