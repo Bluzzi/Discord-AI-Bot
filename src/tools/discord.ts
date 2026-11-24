@@ -31,23 +31,25 @@ const discordMessageContent = z.string().min(1).describe(dedent`
   ${discordNativeMessageSyntax}
 `);
 const replyAttachmentRef = z.uuid().optional().describe("Attachment reference returned by a tool");
+const replyAttachmentRefs = z.array(z.uuid()).max(10).optional().describe("Attachment references returned by tools when replying with multiple files");
 const replyContextSchema = z.object({
   resolveAttachment: z.custom<(attachmentRef: string) => { attachment: Buffer; name: string }>((value) => typeof value === "function"),
 });
 
 const prepareReplyChunks = (
   content: string | undefined,
-  attachmentRef: string | undefined,
+  attachmentRefs: string[],
   context: z.infer<typeof replyContextSchema>,
   options?: { prefixContinuations: boolean },
 ) => {
-  if (content === undefined && attachmentRef === undefined) throw new Error("Reply requires text or an attachment");
-  const attachment = attachmentRef === undefined ? undefined : context.resolveAttachment(attachmentRef);
+  if (content === undefined && attachmentRefs.length === 0) throw new Error("Reply requires text or an attachment");
+  if (attachmentRefs.length > 10) throw new Error("Reply supports at most 10 attachments");
+  const files = attachmentRefs.map(context.resolveAttachment);
 
   const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content), options);
   return chunks.map((chunk, index) => ({
     content: chunk,
-    files: attachment !== undefined && index === chunks.length - 1 ? [attachment] : undefined,
+    files: files.length > 0 && index === chunks.length - 1 ? files : undefined,
   }));
 };
 
@@ -1581,13 +1583,14 @@ export const discordTools = {
       channelId: z.string(),
       content: discordMessageContent.optional(),
       attachmentRef: replyAttachmentRef,
+      attachmentRefs: replyAttachmentRefs,
     }),
     contextSchema: replyContextSchema,
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
-    execute: async ({ channelId, content, attachmentRef }, { context }) => {
-      const chunks = prepareReplyChunks(content, attachmentRef, context, { prefixContinuations: true });
+    execute: async ({ channelId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
+      const chunks = prepareReplyChunks(content, attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs], context, { prefixContinuations: true });
       const channel = await fetchDiscordSendableChannel(channelId);
 
       const messageIds: string[] = [];
@@ -1821,13 +1824,14 @@ export const discordTools = {
       messageId: z.string(),
       content: discordMessageContent.optional(),
       attachmentRef: replyAttachmentRef,
+      attachmentRefs: replyAttachmentRefs,
     }),
     contextSchema: replyContextSchema,
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
-    execute: async ({ channelId, messageId, content, attachmentRef }, { context }) => {
-      const chunks = prepareReplyChunks(content, attachmentRef, context);
+    execute: async ({ channelId, messageId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
+      const chunks = prepareReplyChunks(content, attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs], context);
       const channel = await fetchDiscordSendableChannel(channelId);
 
       const messageIds: string[] = [];

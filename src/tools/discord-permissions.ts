@@ -498,7 +498,7 @@ export const getDiscordToolsForMessage = (
         const args = parseToolArguments(input);
         const toolOptions = isReply ? { ...options, context: { resolveAttachment } } : options;
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
-        if (name === "sendMessage" && args.attachmentRef !== undefined && args.channelId !== message.channelId) throw denied();
+        if (name === "sendMessage" && (args.attachmentRef !== undefined || args.attachmentRefs !== undefined) && args.channelId !== message.channelId) throw denied();
         const isConversationReply = isReply && args.channelId === message.channelId;
         if (isDm || isConversationReply) {
           if (args.channelId !== message.channelId || args.userId !== undefined) throw denied();

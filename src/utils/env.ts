@@ -14,6 +14,7 @@ const schema = z.object({
   OPENROUTER_MODEL_IMAGE: z.string().trim().min(1).default("recraft/recraft-v4.1-flash-v2:free").describe("OpenRouter model ID used for image generation."),
 
   GITHUB_TOKEN: z.string().optional().describe("Greatly increases the GitHub API rate limit. A token with public-only access is recommended."),
+  RAILWAY_TOKEN: z.string().trim().min(1).optional().describe("Railway project token for the sandbox environment."),
   EXA_API_KEY: z.string().describe("Exa API key used for web search."),
 });
 

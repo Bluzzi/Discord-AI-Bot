@@ -9,6 +9,7 @@ import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
 import { createImageTools } from "#/tools/image";
+import { createRailwayTools } from "#/tools/railway";
 import { replyContextTools } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
@@ -78,7 +79,20 @@ trigger.discordEvent("messageCreate", async (message) => {
   const channelId = channel.id;
   const guild = message.guild;
   const member = message.member;
-  const { tools: imageTools, resolveAttachment } = createImageTools();
+  const attachmentUrls = new Map<string, { url: string; size: number }>();
+  const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
+  const registerAttachment = (file: { attachment: Buffer; name: string }) => {
+    const attachmentRef = randomUUID();
+    replyAttachments.set(attachmentRef, file);
+    return attachmentRef;
+  };
+  const resolveAttachment = (attachmentRef: string) => {
+    const file = replyAttachments.get(attachmentRef);
+    if (file === undefined) throw new Error("Attachment not found in this conversation run");
+    return file;
+  };
+  const imageTools = createImageTools(registerAttachment);
+  const railway = createRailwayTools(env.RAILWAY_TOKEN, attachmentUrls, registerAttachment);
   const { tools, approvalToolNames } = getDiscordToolsForMessage(message, resolveAttachment);
   const approvalTools: ToolSet = {};
   if (member !== null && approvalToolNames.length > 0) {
@@ -126,15 +140,16 @@ trigger.discordEvent("messageCreate", async (message) => {
       ...tools,
       ...approvalTools,
       ...imageTools,
+      ...railway.tools,
       ...replyContextTools,
       ...githubTools,
       ...webTools,
     },
     toolsContext: {
-      getReplyContext: { channelId, messageId: message.id },
+      getReplyContext: { channelId, messageId: message.id, attachmentUrls },
     },
     onToolExecutionStart: ({ toolCall }) => {
-      if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
+      if (toolCall.toolName === "proposeDiscordActions" || toolCall.toolName === "railwaySandbox" || isReplyTool(toolCall.toolName)) {
         logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
         return;
       }
@@ -167,6 +182,8 @@ trigger.discordEvent("messageCreate", async (message) => {
   }
   finally {
     stopTyping();
+    const cleanup = await attempt(railway.destroy);
+    if (!cleanup.ok) logger.warn(`${logPrefix} Could not destroy Railway sandbox. Its idle timeout remains active.`);
   }
 
   // Log and save the metrics for all steps.

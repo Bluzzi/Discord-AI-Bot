@@ -50,6 +50,7 @@ export const replyContextTools = {
     contextSchema: z.object({
       channelId: z.string().describe("Discord channel ID of the current conversation, bound server-side"),
       messageId: z.string().describe("Discord ID of the target message, bound server-side"),
+      attachmentUrls: z.custom<Map<string, { url: string; size: number }>>((value) => value instanceof Map),
     }),
     outputSchema: replyContextOutputSchema,
     toModelOutput: async ({ output }) => {
@@ -89,6 +90,9 @@ export const replyContextTools = {
       const referencedMessageId = targetMessage.reference?.messageId ?? null;
       const referencedMessage = referencedMessageId === null ? undefined : previousMessages.get(referencedMessageId);
       const conversationItems = [...previousMessages.values(), targetMessage].sort((a, b) => a.createdTimestamp - b.createdTimestamp).map(toConversationMessage);
+      for (const { attachments } of conversationItems) {
+        for (const { id, url, size } of attachments) context.attachmentUrls.set(id, { url, size });
+      }
 
       return {
         channel: {
