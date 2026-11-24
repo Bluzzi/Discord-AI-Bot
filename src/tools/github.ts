@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { octokit } from "#/integrations/github";
+import { octokit } from "#/integrations/github.client";
 import { tool } from "ai";
 import dedent from "dedent";
 import { posix } from "node:path";

@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { exa } from "#/integrations/exa";
+import { exa } from "#/integrations/exa.client";
 import { attempt } from "#/utils/attempt";
 import { getPublicPage, parseWebUrl, PublicWebError, readPageBody } from "#/utils/public-web";
 import { extractWebContent } from "#/utils/web-content";

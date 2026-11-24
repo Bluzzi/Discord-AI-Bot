@@ -1,5 +1,5 @@
 import type { LanguageModelUsage } from "ai";
-import { openRouterSdk } from "#/integrations/openrouter-sdk";
+import { openRouterSdk } from "#/integrations/openrouter.client";
 
 type OpenRouterModelPricing = {
   acceptsImages: boolean;

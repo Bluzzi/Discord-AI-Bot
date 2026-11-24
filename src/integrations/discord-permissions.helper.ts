@@ -2,10 +2,10 @@ import type { DiscordToolName as ToolName } from "#/tools/discord";
 import type { RequestApproval } from "#/tools/discord-approval";
 import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
-import { discordClient } from "#/integrations/discord";
+import { discordClient } from "#/integrations/discord.client";
+import { findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord.helper";
 import { discordReadTools, discordTools, getDiscordToolInputSchema } from "#/tools/discord";
 import { discordApprovalTools } from "#/tools/discord-approval";
-import { findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/utils/discord";
 import { ChannelType, GuildScheduledEventEntityType, PermissionFlagsBits as permissionFlags } from "discord.js";
 import { z } from "zod";
 

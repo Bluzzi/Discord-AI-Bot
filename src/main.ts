@@ -1,7 +1,7 @@
-import { discordClient } from "#/integrations/discord";
+import { discordClient } from "#/integrations/discord.client";
+import { postgres } from "#/integrations/postgres.client";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { postgres } from "#/utils/postgres";
 import { ActivityType } from "discord.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { join } from "node:path";

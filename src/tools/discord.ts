@@ -1,7 +1,7 @@
 import type { ToolSet } from "ai";
 import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
-import { discordClient } from "#/integrations/discord";
-import { sanitizeDiscordMessage, splitDiscordMessage } from "#/utils/discord";
+import { discordClient } from "#/integrations/discord.client";
+import { sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord.helper";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";

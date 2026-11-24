@@ -1,10 +1,10 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
 import type { GuildMember, SendableChannels } from "discord.js";
+import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/integrations/discord-permissions.helper";
+import { postgres } from "#/integrations/postgres.client";
 import { tableWaitingApproval } from "#/tables/waiting-approval";
 import { attempt } from "#/utils/attempt";
-import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/utils/discord-permissions";
 import { logger } from "#/utils/logger";
-import { postgres } from "#/utils/postgres";
 import { trigger } from "#/utils/trigger";
 import dedent from "dedent";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } from "discord.js";

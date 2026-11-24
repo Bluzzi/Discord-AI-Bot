@@ -1,5 +1,5 @@
 import type { ClientEvents } from "discord.js";
-import { discordClient } from "#/integrations/discord";
+import { discordClient } from "#/integrations/discord.client";
 import { logger } from "#/utils/logger";
 import { Cron } from "croner";
 
