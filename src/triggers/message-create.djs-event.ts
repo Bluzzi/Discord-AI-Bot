@@ -13,7 +13,7 @@ import { postgres } from "#/integrations/postgres.client";
 import { tableDiscordReplyError } from "#/tables/discord-reply-error";
 import { tableModelUsage } from "#/tables/model-usage";
 import { githubTools } from "#/tools/github";
-import { bindRailwayTools } from "#/tools/railway";
+import { railwayTools } from "#/tools/railway";
 import { webTools } from "#/tools/web";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
@@ -119,27 +119,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
     const referencedMessageId = targetMessage.reference?.messageId ?? null;
 
-    // Render the conversation in order and neutralize forged author prefixes:
-    const conversation = [...previousMessages.values(), targetMessage]
-      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .map((message) => ({
-        id: message.id,
-        authorId: message.author.id,
-        authorLabel: message.member?.displayName ?? message.author.globalName ?? message.author.username,
-        content: message.content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
-        attachments: message.attachments.map(({ id, name, url, contentType, size }) => ({ id, name, url, mediaType: contentType, size })),
-        isSelf: message.author.id === env.DISCORD_BOT_ID,
-        isTarget: message.id === messageId,
-        createdAt: message.createdAt.toISOString(),
-      }));
-
-    // Register available attachments for the other tools in this run:
-    const attachmentUrls = new Map<string, { url: string; size: number }>();
-    for (const { attachments } of conversation) {
-      for (const { id, url, size } of attachments) attachmentUrls.set(id, { url, size });
-    }
-
-    // Prepare the channel, conversation and target references for the model:
+    // Prepare the channel and target references for the model:
     const historyGuild = "guild" in historyChannel ? historyChannel.guild : null;
     const replyContext = {
       channel: {
@@ -149,60 +129,84 @@ trigger.discordEvent("messageCreate", async (message) => {
         guildId: historyGuild?.id ?? null,
         guildName: historyGuild?.name ?? null,
       },
-      conversation,
       referencedMessageId,
       referencedAuthorId: referencedMessageId === null ? null : previousMessages.get(referencedMessageId)?.author.id ?? null,
       mentionedUserIds: [...targetMessage.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID).map((user) => user.id),
       mentionedChannelIds: [...targetMessage.mentions.channels.values()].map((mentionedChannel) => mentionedChannel.id),
     };
 
-    // Prefer images from the target message, then the referenced message, then the most recent messages:
-    const imagePriority = ({ id, isTarget }: (typeof conversation)[number]) => {
-      if (isTarget) return 0;
-      return id === referencedMessageId ? 1 : 2;
-    };
-    const images = conversation.toReversed()
-      .sort((a, b) => imagePriority(a) - imagePriority(b))
-      .flatMap(({ id: sourceMessageId, isTarget, attachments }) => attachments.flatMap(({ id, name, url, mediaType, size }) => {
-        if (mediaType === null || !supportedImageTypes.has(mediaType)) return [];
-        return { id, name, url, mediaType, size, sourceMessageId, isTarget };
+    // Keep each Discord message, its attachment metadata and its inline files together:
+    const conversation = [...previousMessages.values(), targetMessage]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .map((message) => ({
+        id: message.id,
+        text: JSON.stringify({
+          id: message.id,
+          authorId: message.author.id,
+          authorLabel: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+          content: message.content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
+          isSelf: message.author.id === env.DISCORD_BOT_ID,
+          isTarget: message.id === messageId,
+          createdAt: message.createdAt.toISOString(),
+        }),
+        attachments: message.attachments.map(({ id, name, url, contentType, size }) => ({
+          mediaType: contentType,
+          filename: name,
+          url,
+          size,
+          parts: [{ type: "text", text: JSON.stringify({ messageId: message.id, attachment: { id, name, url, mediaType: contentType, size } }) }] as ContextPart[],
+        })),
       }));
 
-    // Download images within the shared byte budget for inline delivery:
-    const imageParts: ContextPart[] = [];
-    if (images.length > 0 && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
-      const signal = AbortSignal.timeout(20_000);
-      let remainingBytes = 10 * 1024 * 1024;
-      for (const { id, name, url, mediaType, size, sourceMessageId, isTarget } of images) {
-        if (size > remainingBytes) continue;
-        // Continue the reply when an optional image cannot be downloaded:
-        let image;
-        try {
-          image = await downloadDiscordAttachment(url, remainingBytes, signal);
-        }
-        catch {
-          continue;
-        }
-        if (image.length === 0) continue;
-        remainingBytes -= image.length;
-        imageParts.push(
-          { type: "text", text: `Inline image from Discord message ${sourceMessageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
-          { type: "file", data: { type: "data", data: image.toString("base64") }, mediaType, filename: name },
-        );
+    // Spend the shared download budget on the target, then the quoted message, then recent history:
+    const attachmentPriority = ({ id }: (typeof conversation)[number]) => id === messageId ? 0 : Number(id !== referencedMessageId) + 1;
+    const attachments = conversation.toReversed()
+      .sort((a, b) => attachmentPriority(a) - attachmentPriority(b))
+      .flatMap(({ attachments }) => attachments);
+    const hasImages = attachments.some(({ mediaType }) => supportedImageTypes.has(mediaType ?? ""));
+    const includeImages = hasImages && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL);
+    const signal = AbortSignal.timeout(20_000);
+    let remainingBytes = 10 * 1024 * 1024;
+    let remainingTextBytes = 32 * 1024;
+    for (const { mediaType, filename, url, size, parts } of attachments) {
+      if (signal.aborted || remainingBytes === 0) break;
+      if (mediaType === null) continue;
+      const isImage = includeImages && supportedImageTypes.has(mediaType);
+      const isText = mediaType.startsWith("text/") || mediaType === "application/json";
+      if (!isImage && !isText && mediaType !== "application/pdf") continue;
+      const limit = isText ? Math.min(remainingTextBytes, remainingBytes) : remainingBytes;
+      if (limit === 0 || size > limit) continue;
+      let file;
+      try {
+        file = await downloadDiscordAttachment(url, limit, signal);
       }
+      catch {
+        continue;
+      }
+      if (file.length === 0) continue;
+      remainingBytes -= file.length;
+      if (isText) {
+        remainingTextBytes -= file.length;
+        parts.push({ type: "text", text: JSON.stringify({ attachmentText: file.toString("utf8") }) });
+        continue;
+      }
+      parts.push({ type: "file", data: { type: "data", data: file.toString("base64") }, mediaType, filename: isImage ? undefined : filename });
     }
-
-    // Bind tools and outgoing attachments to this conversation run:
-    const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
-    const requestApproval = member === null ? undefined : async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary);
-    const discordTools = getDiscordToolsForMessage(message, replyAttachments, requestApproval);
 
     // Represent the preloaded context as a completed tool call:
     const toolCallId = randomUUID();
-    const contextOutput = imageParts.length === 0 ? { type: "json" as const, value: replyContext } : {
-      type: "content" as const,
-      value: [{ type: "text" as const, text: JSON.stringify(replyContext) }, ...imageParts],
-    };
+    const contextParts: ContextPart[] = [
+      { type: "text", text: JSON.stringify(replyContext) },
+      ...conversation.flatMap(({ text, attachments }): ContextPart[] => [
+        { type: "text", text },
+        ...attachments.flatMap(({ parts }) => parts),
+      ]),
+    ];
+    const contextOutput = { type: "content" as const, value: contextParts };
+
+    // Select the tools available for this conversation:
+    const requestApproval = member === null ? undefined : async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary);
+    const discordTools = getDiscordToolsForMessage(message, requestApproval);
 
     // Start generation and log tool activity:
     const result = streamText({
@@ -233,7 +237,7 @@ trigger.discordEvent("messageCreate", async (message) => {
         - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
 
         La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
-        Chaque image intégrée est précédée de son ID de message et de son ID de pièce jointe. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
+        Les pièces jointes suivent leur message. Leurs métadonnées précèdent le contenu intégré quand il est disponible. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
       `,
       messages: [
         {
@@ -253,7 +257,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       },
       tools: {
         ...discordTools,
-        ...bindRailwayTools(attachmentUrls, replyAttachments),
+        ...(env.RAILWAY_TOKEN === undefined ? {} : railwayTools),
         ...githubTools,
         ...webTools,
       },
@@ -264,7 +268,7 @@ trigger.discordEvent("messageCreate", async (message) => {
           return;
         }
         const input: unknown = toolCall.input;
-        const loggedInput = toolCall.toolName === "writeRailwayFile" ? { path: input !== null && typeof input === "object" && "path" in input ? input.path : undefined } : input;
+        const loggedInput = toolCall.toolName === "writeRailwayFile" || toolCall.toolName === "uploadRailwayAttachment" ? { path: input !== null && typeof input === "object" && "path" in input ? input.path : undefined } : input;
         logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(loggedInput))}`);
       },
       onStepEnd: ({ stepNumber, text }) => {

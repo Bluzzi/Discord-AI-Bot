@@ -1,9 +1,9 @@
 ---
-name: skill
+name: skill-creator
 description: Create or update a skill directory (.agents/skills/<name>/SKILL.md, agentskills.io standard). MUST be loaded before creating, updating, renaming, moving or deleting any skill, and covers the frontmatter rules, the mandatory file structure and the writing conventions.
 ---
 
-# Skill
+# Skill creator
 
 A skill is an on-demand instruction file the agent loads when its `description` matches the task at hand. Skills hold procedures (how to create a route, how to verify changes) and rules (how keys work, when links are required), while `AGENTS.md` files hold always-loaded context.
 

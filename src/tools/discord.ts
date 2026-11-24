@@ -2,6 +2,7 @@ import type { ToolSet } from "ai";
 import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
 import { discordClient } from "#/integrations/discord.client";
 import { sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord.helper";
+import { railwayFileSchema, readRailwayReplyFiles } from "#/integrations/railway.helper";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
@@ -2036,25 +2037,15 @@ export const discordTools = {
         - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
         - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
       `).optional(),
-      attachmentRef: z.uuid().optional().describe("Attachment reference returned by a tool"),
-      attachmentRefs: z.array(z.uuid()).max(10).optional().describe("Attachment references returned by tools when replying with multiple files"),
-    }),
-    contextSchema: z.object({
-      replyAttachments: z.custom<ReadonlyMap<string, { attachment: Buffer; name: string }>>((value) => value instanceof Map),
+      attachments: z.array(railwayFileSchema).max(10).optional().describe("Files in a Railway sandbox. Keep the sandbox running until they are sent."),
     }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
-    execute: async ({ channelId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
-      // Resolve attachments and split outgoing text:
-      const requestedAttachmentRefs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
-      if (content === undefined && requestedAttachmentRefs.length === 0) throw new Error("Reply requires text or an attachment");
-      if (requestedAttachmentRefs.length > 10) throw new Error("Reply supports at most 10 attachments");
-      const files = requestedAttachmentRefs.map((ref) => {
-        const file = context.replyAttachments.get(ref);
-        if (file === undefined) throw new Error("Attachment not found in this conversation run");
-        return file;
-      });
+    execute: async ({ channelId, content, attachments = [] }, { messages }) => {
+      // Resolve the requested files and split outgoing text:
+      if (content === undefined && attachments.length === 0) throw new Error("Reply requires text or an attachment");
+      const files = await readRailwayReplyFiles(attachments, messages);
       const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content), { prefixContinuations: true });
 
       // Resolve a channel that can receive the message:
@@ -2352,25 +2343,15 @@ export const discordTools = {
         - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
         - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
       `).optional(),
-      attachmentRef: z.uuid().optional().describe("Attachment reference returned by a tool"),
-      attachmentRefs: z.array(z.uuid()).max(10).optional().describe("Attachment references returned by tools when replying with multiple files"),
-    }),
-    contextSchema: z.object({
-      replyAttachments: z.custom<ReadonlyMap<string, { attachment: Buffer; name: string }>>((value) => value instanceof Map),
+      attachments: z.array(railwayFileSchema).max(10).optional().describe("Files in a Railway sandbox. Keep the sandbox running until they are sent."),
     }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
-    execute: async ({ channelId, messageId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
-      // Resolve attachments and split outgoing text:
-      const requestedAttachmentRefs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
-      if (content === undefined && requestedAttachmentRefs.length === 0) throw new Error("Reply requires text or an attachment");
-      if (requestedAttachmentRefs.length > 10) throw new Error("Reply supports at most 10 attachments");
-      const files = requestedAttachmentRefs.map((ref) => {
-        const file = context.replyAttachments.get(ref);
-        if (file === undefined) throw new Error("Attachment not found in this conversation run");
-        return file;
-      });
+    execute: async ({ channelId, messageId, content, attachments = [] }, { messages }) => {
+      // Resolve the requested files and split outgoing text:
+      if (content === undefined && attachments.length === 0) throw new Error("Reply requires text or an attachment");
+      const files = await readRailwayReplyFiles(attachments, messages);
       const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content));
 
       // Resolve a channel that can receive the reply:

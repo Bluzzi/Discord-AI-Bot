@@ -486,7 +486,6 @@ export const executeApprovedDiscordAction = async (
 
 export const getDiscordToolsForMessage = (
   message: Message,
-  replyAttachments: ReadonlyMap<string, { attachment: Buffer; name: string }>,
   requestApproval: RequestApproval | undefined,
 ) => {
   // Resolve visible channels for the initial tool selection:
@@ -503,24 +502,22 @@ export const getDiscordToolsForMessage = (
     const isReply = name === "sendMessage" || name === "sendReply";
     return {
       ...definition,
-      contextSchema: isReply ? undefined : definition.contextSchema,
       execute: async (input, options) => {
-        // Bind reply attachments to the current conversation:
+        // Restrict replies and Railway attachments to the originating conversation:
         const args = parseToolArguments(input);
-        const toolOptions = isReply ? { ...options, context: { replyAttachments } } : options;
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
-        if (name === "sendMessage" && (args.attachmentRef !== undefined || args.attachmentRefs !== undefined) && args.channelId !== message.channelId) throw denied();
+        if (name === "sendMessage" && args.attachments !== undefined && args.channelId !== message.channelId) throw denied();
         // Allow responses in the originating channel under the conversation rules:
         const isConversationReply = isReply && args.channelId === message.channelId;
         if (isDm || isConversationReply) {
           if (args.channelId !== message.channelId || args.userId !== undefined) throw denied();
-          const result: unknown = await execute(input, toolOptions);
+          const result: unknown = await execute(input, options);
           return result;
         }
 
         // Check the requester's permissions on every other server target:
         const requester = await requireGuildToolPermission(args, message.member, rule);
-        const result: unknown = await execute(input, toolOptions);
+        const result: unknown = await execute(input, options);
         return filterChannelResults(name, result, requester, args);
       },
     };
