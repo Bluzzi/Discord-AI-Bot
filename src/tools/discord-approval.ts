@@ -5,7 +5,7 @@ import dedent from "dedent";
 import { z } from "zod";
 
 export type DiscordApprovalAction = { toolName: DiscordToolName; input: Record<string, unknown> };
-type RequestApproval = (actions: DiscordApprovalAction[], summary: string) => Promise<{ status: "waiting_approval"; approvalMessageUrl: string }>;
+export type RequestApproval = (actions: DiscordApprovalAction[], summary: string) => Promise<{ status: "waiting_approval"; approvalMessageUrl: string }>;
 
 export const discordApprovalTools = {
   proposeDiscordActions: {
@@ -37,9 +37,6 @@ export const discordApprovalTools = {
         `),
       });
     })(),
-    contextSchema: z.object({
-      requestApproval: z.custom<RequestApproval>((value) => typeof value === "function"),
-    }),
     execute: async ({ actions, summary }: { actions: DiscordApprovalAction[]; summary: string }, { context }: { context: { requestApproval: RequestApproval } }) => context.requestApproval(actions, summary.replace(/\s*[\r\n]+\s*/gu, " ")),
   },
 } satisfies ToolSet;

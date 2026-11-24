@@ -1,4 +1,5 @@
 import type { DiscordToolName as ToolName } from "#/tools/discord";
+import type { RequestApproval } from "#/tools/discord-approval";
 import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
 import { discordClient, findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord";
@@ -489,6 +490,7 @@ export const executeApprovedDiscordAction = async (
 export const getDiscordToolsForMessage = (
   message: Message,
   replyAttachments: ReadonlyMap<string, { attachment: Buffer; name: string }>,
+  requestApproval: RequestApproval | undefined,
 ) => {
   const isDm = message.guildId === null;
   const member = message.member;
@@ -554,12 +556,13 @@ export const getDiscordToolsForMessage = (
     if (action === undefined) throw new Error(`No schema for Discord approval action ${name}`);
     return action;
   });
-  if (firstAction !== undefined) {
+  if (firstAction !== undefined && requestApproval !== undefined) {
     available.proposeDiscordActions = {
       ...approvalTool,
       inputSchema: approvalTool.inputSchema.extend({
         actions: z.array(z.discriminatedUnion("toolName", [firstAction, ...otherActions])).min(1).max(10),
       }),
+      execute: async (input: Parameters<typeof approvalTool.execute>[0], options) => approvalTool.execute(input, { ...options, context: { requestApproval } }),
     };
   }
 

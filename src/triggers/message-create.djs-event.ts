@@ -1,5 +1,4 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
-import type { RailwayRunState } from "#/tools/railway";
 import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
 import { discordClient, startDiscordTyping } from "#/integrations/discord";
@@ -8,8 +7,8 @@ import { tableDiscordReplyError } from "#/tables/discord-reply-error";
 import { tableModelUsage } from "#/tables/model-usage";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
-import { railwayTools } from "#/tools/railway";
-import { replyContextTools } from "#/tools/reply-context";
+import { bindRailwayTools } from "#/tools/railway";
+import { getReplyContext } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
 import { attempt } from "#/utils/attempt";
@@ -77,91 +76,87 @@ trigger.discordEvent("messageCreate", async (message) => {
     return;
   }
 
-  // Prepare tools and attachment references for this conversation run:
-  const channelId = channel.id;
-  const guild = message.guild;
-  const member = message.member;
-  const attachmentUrls = new Map<string, { url: string; size: number }>();
-  const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
-  const discordTools = getDiscordToolsForMessage(message, replyAttachments);
-  const railwayState: RailwayRunState = { exportedBytes: 0 };
-  const railwayContext = { state: railwayState, attachmentUrls, replyAttachments };
-  const railwayToolsContext = Object.fromEntries(Object.keys(railwayTools).map((name) => [name, railwayContext]));
-
-  // Start generation and log tool activity:
-  const result = streamText({
-    model: aiModel,
-    stopWhen: [stepCountIs(maxSteps), ({ steps }) => steps.at(-1)?.toolResults.some(({ toolName }) => isReplyTool(toolName)) ?? false],
-    instructions: dedent`
-      Tu es ${env.DISCORD_BOT_NAME} (ce nom ne défini pas ton comportement), l’assistant Discord de la communauté « Le Royaume ».
-
-      Donne la réponse dès la première phrase. Ajoute seulement les détails utiles. Écris en texte simple, avec des paragraphes courts séparés par une ligne vide. Utilise une liste à puces pour une énumération si elle facilite la lecture. Par défaut, évite les titres, le gras et les séparateurs comme \`---\`.
-
-      Mets les noms de fichiers, chemins, commandes, identifiants de code et autre si pertinent entre backticks, par exemple \`GuildAdminPolicy\`, \`missingPermissions\` et \`access-policy.ts\`.
-
-      Utilise des liens Markdown avec un libellé court et précis, par exemple [Communiqué de Nvidia](https://example.com/communique). Intègre chaque lien au passage qu’il documente, sur les mots concernés ou à la fin du paragraphe (ou de la puce) qu’il appuie. N’affiche pas d’URL brute et ne regroupe pas les sources en bas du message, sauf si l’utilisateur le demande.
-
-      Évite les salutations, les emojis décoratifs, les tirets (—, -) et les offres d’aide génériques.
-
-      Si on te demande des informations sauvegardés en mémoire concernant les utilisateurs, explique que c'est désormais <@1573860551610863766> et <@1574150367325855856> qui gèrent ceci.
-
-      Si proposeDiscordActions est disponible et que la demande nécessite des créations, des modifications ou des suppressions, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les autres tâches.
-
-      Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
-    `,
-    prompt: dedent`
-      Contexte d'exécution :
-      - Ton ID Discord : ${env.DISCORD_BOT_ID}
-      - Channel ID : ${channelId}
-      - Message cible : ID ${message.id} (auteur ID ${message.author.id})
-      ${guild ? `- Guild ID : ${guild.id}` : "- Message privé (pas de guild)"}
-      - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
-
-      Commence par \`getReplyContext\` pour lire le channel, la conversation récente (le message cible y est marqué "isTarget"), le message auquel il répond et les mentions.
-    `,
-    prepareStep: ({ stepNumber, steps }) => {
-      if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "getReplyContext" } };
-      if (stepNumber === maxSteps - 1) {
-        const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
-        return { toolChoice: { type: "tool", toolName: triedReply ? "sendMessage" : "sendReply" } };
-      }
-      return { toolChoice: "required" };
-    },
-    tools: {
-      ...discordTools,
-      ...railwayTools,
-      ...replyContextTools,
-      ...githubTools,
-      ...webTools,
-    },
-    toolsContext: {
-      getReplyContext: { channelId, messageId: message.id, attachmentUrls },
-      ...(member === null ? {} : {
-        proposeDiscordActions: { requestApproval: async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary) },
-      }),
-      ...railwayToolsContext,
-    },
-    onToolExecutionStart: ({ toolCall }) => {
-      if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
-        logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
-        return;
-      }
-      const input: unknown = toolCall.input;
-      const loggedInput = toolCall.toolName === "writeRailwayFile" ? { path: input !== null && typeof input === "object" && "path" in input ? input.path : undefined } : input;
-      logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(loggedInput))}`);
-    },
-    onStepEnd: ({ stepNumber, text }) => {
-      if (text) logger.info(`${logPrefix} Step ${String(stepNumber + 1)} text: ${redactWebhookTokens(text)}`);
-    },
-    // Let the Discord handler record stream errors:
-    onError: () => undefined,
-  });
-
-  // Keep typing until the reply is sent or the stream ends:
+  // Keep typing while preparing the conversation and generating the reply:
   const stopTyping = startDiscordTyping(channel, () => logger.warn(`${logPrefix} Could not send the typing indicator`));
 
-  const sentReplies: string[] = [];
   try {
+    // Prepare tools and attachment references for this conversation run:
+    const channelId = channel.id;
+    const guild = message.guild;
+    const member = message.member;
+    const { content, attachmentUrls } = await getReplyContext(channelId, message.id);
+    const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
+    const requestApproval = member === null ? undefined : async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary);
+    const discordTools = getDiscordToolsForMessage(message, replyAttachments, requestApproval);
+
+    // Start generation and log tool activity:
+    const result = streamText({
+      model: aiModel,
+      stopWhen: [stepCountIs(maxSteps), ({ steps }) => steps.at(-1)?.toolResults.some(({ toolName }) => isReplyTool(toolName)) ?? false],
+      instructions: dedent`
+        Tu es ${env.DISCORD_BOT_NAME} (ce nom ne défini pas ton comportement), l’assistant Discord de la communauté « Le Royaume ».
+
+        Donne la réponse dès la première phrase. Ajoute seulement les détails utiles. Écris en texte simple, avec des paragraphes courts séparés par une ligne vide. Utilise une liste à puces pour une énumération si elle facilite la lecture. Par défaut, évite les titres, le gras et les séparateurs comme \`---\`.
+
+        Mets les noms de fichiers, chemins, commandes, identifiants de code et autre si pertinent entre backticks, par exemple \`GuildAdminPolicy\`, \`missingPermissions\` et \`access-policy.ts\`.
+
+        Utilise des liens Markdown avec un libellé court et précis, par exemple [Communiqué de Nvidia](https://example.com/communique). Intègre chaque lien au passage qu’il documente, sur les mots concernés ou à la fin du paragraphe (ou de la puce) qu’il appuie. N’affiche pas d’URL brute et ne regroupe pas les sources en bas du message, sauf si l’utilisateur le demande.
+
+        Évite les salutations, les emojis décoratifs, les tirets (—, -) et les offres d’aide génériques.
+
+        Si on te demande des informations sauvegardés en mémoire concernant les utilisateurs, explique que c'est désormais <@1573860551610863766> et <@1574150367325855856> qui gèrent ceci.
+
+        Si proposeDiscordActions est disponible et que la demande nécessite des créations, des modifications ou des suppressions, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les autres tâches.
+
+        Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
+      `,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: dedent`
+            Contexte d'exécution :
+            - Ton ID Discord : ${env.DISCORD_BOT_ID}
+            - Channel ID : ${channelId}
+            - Message cible : ID ${message.id} (auteur ID ${message.author.id})
+            ${guild ? `- Guild ID : ${guild.id}` : "- Message privé (pas de guild)"}
+            - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
+
+            La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
+            Chaque image intégrée est précédée de son ID de message et de son ID de pièce jointe. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
+          ` },
+          ...content,
+        ],
+      }],
+      prepareStep: ({ stepNumber, steps }) => {
+        if (stepNumber === maxSteps - 1) {
+          const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
+          return { toolChoice: { type: "tool", toolName: triedReply ? "sendMessage" : "sendReply" } };
+        }
+        return { toolChoice: "required" };
+      },
+      tools: {
+        ...discordTools,
+        ...bindRailwayTools(attachmentUrls, replyAttachments),
+        ...githubTools,
+        ...webTools,
+      },
+      onToolExecutionStart: ({ toolCall }) => {
+        if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
+          logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
+          return;
+        }
+        const input: unknown = toolCall.input;
+        const loggedInput = toolCall.toolName === "writeRailwayFile" ? { path: input !== null && typeof input === "object" && "path" in input ? input.path : undefined } : input;
+        logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(loggedInput))}`);
+      },
+      onStepEnd: ({ stepNumber, text }) => {
+        if (text) logger.info(`${logPrefix} Step ${String(stepNumber + 1)} text: ${redactWebhookTokens(text)}`);
+      },
+      // Let the Discord handler record stream errors:
+      onError: () => undefined,
+    });
+
+    const sentReplies: string[] = [];
     for await (const part of result.stream) {
       if (part.type === "error") throw new Error(`${logPrefix} Reply stream failed`, { cause: part.error });
       if (part.type === "tool-error") {
@@ -175,38 +170,39 @@ trigger.discordEvent("messageCreate", async (message) => {
         }
       }
     }
+    stopTyping();
+
+    // Log the reply and save usage for all steps:
+    const durationMs = Date.now() - startedAt;
+    const [steps, usage] = await Promise.all([result.steps, result.usage]);
+    const replied = steps.some((step) => step.toolResults.some(({ toolName }) => isReplyTool(toolName)));
+
+    if (!replied) {
+      logger.warn(`${logPrefix} No reply was sent in ${String(steps.length)} steps`);
+    }
+
+    logger.info(`${logPrefix} Context: ${aiUsage.formatTokens(usage)}`);
+    logger.info(`${logPrefix} Reply: ${sentReplies.length ? JSON.stringify(redactWebhookTokens(sentReplies.join("\n"))) : "(none)"}`);
+    logger.info(`${logPrefix} Reply finished in ${String(durationMs)}ms`);
+
+    const modelUsed = steps.at(-1)?.model.modelId;
+    if (modelUsed === undefined) {
+      throw new Error(`${logPrefix} Cannot resolve the used model: no step available`);
+    }
+
+    const prices = await openRouterApi.computeUsagePrices(modelUsed, usage);
+
+    await postgres.insert(tableModelUsage).values({
+      cause: "reply_to_message",
+      stepCount: steps.length,
+      inputTokenCount: usage.inputTokens ?? 0,
+      outputTokenCount: usage.outputTokens ?? 0,
+      inputPrice: prices.inputPrice,
+      outputPrice: prices.outputPrice,
+      modelUsed,
+    });
   }
   finally {
     stopTyping();
   }
-
-  // Log the reply and save usage for all steps:
-  const durationMs = Date.now() - startedAt;
-  const [steps, usage] = await Promise.all([result.steps, result.usage]);
-  const replied = steps.some((step) => step.toolResults.some(({ toolName }) => isReplyTool(toolName)));
-
-  if (!replied) {
-    logger.warn(`${logPrefix} No reply was sent in ${String(steps.length)} steps`);
-  }
-
-  logger.info(`${logPrefix} Context: ${aiUsage.formatTokens(usage)}`);
-  logger.info(`${logPrefix} Reply: ${sentReplies.length ? JSON.stringify(redactWebhookTokens(sentReplies.join("\n"))) : "(none)"}`);
-  logger.info(`${logPrefix} Reply finished in ${String(durationMs)}ms`);
-
-  const modelUsed = steps.at(-1)?.model.modelId;
-  if (modelUsed === undefined) {
-    throw new Error(`${logPrefix} Cannot resolve the used model: no step available`);
-  }
-
-  const prices = await openRouterApi.computeUsagePrices(modelUsed, usage);
-
-  await postgres.insert(tableModelUsage).values({
-    cause: "reply_to_message",
-    stepCount: steps.length,
-    inputTokenCount: usage.inputTokens ?? 0,
-    outputTokenCount: usage.outputTokens ?? 0,
-    inputPrice: prices.inputPrice,
-    outputPrice: prices.outputPrice,
-    modelUsed,
-  });
 }, async (error, message) => saveReplyError(error, message, "Discord reply failed"));
