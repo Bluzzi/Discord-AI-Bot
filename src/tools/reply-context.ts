@@ -35,6 +35,7 @@ const replyContextOutputSchema = z.object({
     isTarget: z.boolean().describe("Whether this is the target message, the one this run is about"),
     createdAt: z.string().describe("Creation date (ISO)"),
   })).describe("Recent conversation, oldest first"),
+  referencedMessageId: z.string().nullable().describe("ID of the message the target message directly replies to"),
   referencedAuthorId: z.string().nullable().describe("Author ID of the message the target message directly replies to, when available"),
   mentionedUserIds: z.array(z.string()).describe("User IDs mentioned by the target message, excluding yourself"),
   mentionedChannelIds: z.array(z.string()).describe("Channel IDs mentioned by the target message"),
@@ -45,6 +46,7 @@ export const replyContextTools = {
   getReplyContext: tool({
     description: dedent`
       Get the channel, recent messages with their file attachments, and the target message's mentions. The target message is flagged with isTarget.
+      Each inline image is preceded by its message ID and attachment ID. When the request refers to an image without specifying which one, prefer images attached to the target message, then images on the message it directly replies to.
 
       Call this tool FIRST, at the very beginning of every run, before anything else.
     `,
@@ -56,8 +58,14 @@ export const replyContextTools = {
     }),
     outputSchema: replyContextOutputSchema,
     toModelOutput: async ({ output }) => {
-      const attachments = output.conversation.flatMap((message) => message.attachments);
-      const images = attachments.filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
+      const imagePriority = ({ id, isTarget }: (typeof output.conversation)[number]) => {
+        if (isTarget) return 0;
+        return id === output.referencedMessageId ? 1 : 2;
+      };
+      const images = output.conversation.toReversed()
+        .sort((a, b) => imagePriority(a) - imagePriority(b))
+        .flatMap(({ id: messageId, isTarget, attachments }) => attachments.map((attachment) => ({ ...attachment, messageId, isTarget })))
+        .filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
       if (images.length === 0 || !await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
         return { type: "json", value: output };
       }
@@ -66,17 +74,20 @@ export const replyContextTools = {
       const files = [];
       const signal = AbortSignal.timeout(20_000);
       let remainingBytes = maxContextImageBytes;
-      for (const { name, url, mediaType, size } of images.reverse()) {
+      for (const { id, name, url, mediaType, size, messageId, isTarget } of images) {
         if (mediaType === null || size > remainingBytes) continue;
         const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
         if (!image.ok || image.value.length === 0) continue;
         remainingBytes -= image.value.length;
-        files.push({ type: "file" as const, data: { type: "data" as const, data: image.value.toString("base64") }, mediaType, filename: name });
+        files.push(
+          { type: "text" as const, text: `Inline image from Discord message ${messageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
+          { type: "file" as const, data: { type: "data" as const, data: image.value.toString("base64") }, mediaType, filename: name },
+        );
       }
 
       if (files.length === 0) return { type: "json", value: output };
       const context = { type: "text" as const, text: JSON.stringify(output) };
-      return { type: "content", value: [context, ...files.reverse()] };
+      return { type: "content", value: [context, ...files] };
     },
     execute: async (_input, { context }) => {
       const channel = await discordClient.channels.fetch(context.channelId);
@@ -119,6 +130,7 @@ export const replyContextTools = {
           guildName: guild?.name ?? null,
         },
         conversation: conversationItems,
+        referencedMessageId,
         referencedAuthorId: referencedMessage?.author.id ?? null,
         mentionedUserIds: [...targetMessage.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID).map((user) => user.id),
         mentionedChannelIds: [...targetMessage.mentions.channels.values()].map((mentionedChannel) => mentionedChannel.id),
