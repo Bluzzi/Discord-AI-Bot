@@ -3,24 +3,6 @@ import { ChannelType, DiscordAPIError, PermissionFlagsBits, PermissionsBitField,
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
-export const downloadDiscordAttachment = async (url: string, maxBytes: number, signal: AbortSignal) => {
-  // Open the attachment without following redirects:
-  const response = await fetch(url, { redirect: "error", signal });
-  if (!response.ok || response.body === null) {
-    throw new Error(`Discord attachment download failed (HTTP ${String(response.status)})`);
-  }
-
-  // Enforce the download budget as bytes arrive:
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of response.body.values()) {
-    size += chunk.byteLength;
-    if (size > maxBytes) throw new Error("Discord attachment exceeds the download budget");
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks, size);
-};
-
 const splitDiscordText = (text: string, maxLength: number, boundaries: RegExp, continuationPrefix = ""): string[] => {
   const chunks: string[] = [];
   const splitWrappedMatch = (groups: Record<string, string | undefined>, chunkLength: number) => {

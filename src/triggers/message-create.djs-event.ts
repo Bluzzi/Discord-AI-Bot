@@ -1,17 +1,17 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
-import type { ToolResultPart } from "ai";
 import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
 import { aiModel } from "#/integrations/ai-sdk.client";
 import { aiUsage } from "#/integrations/ai-sdk.helper-usage";
 import { discordClient } from "#/integrations/discord.client";
-import { downloadDiscordAttachment } from "#/integrations/discord.helper";
+import { getDiscordChannelPermissions } from "#/integrations/discord.helper";
 import { getDiscordToolsForMessage } from "#/integrations/discord.helper-permissions";
 import { openRouterApi } from "#/integrations/openrouter.helper-pricing";
 import { openRouterQuota } from "#/integrations/openrouter.helper-quota";
 import { postgres } from "#/integrations/postgres.client";
 import { tableDiscordReplyError } from "#/tables/discord-reply-error";
 import { tableModelUsage } from "#/tables/model-usage";
+import { fileTools } from "#/tools/file";
 import { githubTools } from "#/tools/github";
 import { railwayTools } from "#/tools/railway";
 import { webTools } from "#/tools/web";
@@ -21,7 +21,7 @@ import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import { stepCountIs, streamText } from "ai";
 import dedent from "dedent";
-import { MessageType } from "discord.js";
+import { MessageType, PermissionFlagsBits } from "discord.js";
 import { randomInt, randomUUID } from "node:crypto";
 import { inspect } from "node:util";
 
@@ -30,12 +30,6 @@ const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement 
 const maxSteps = 50;
 const replyCodeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
-const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-
-type ContextPart = Extract<
-  Extract<ToolResultPart["output"], { type: "content" }>["value"][number],
-  { type: "text" | "file" }
->;
 
 const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
 
@@ -135,74 +129,25 @@ trigger.discordEvent("messageCreate", async (message) => {
       mentionedChannelIds: [...targetMessage.mentions.channels.values()].map((mentionedChannel) => mentionedChannel.id),
     };
 
-    // Keep each Discord message, its attachment metadata and its inline files together:
+    // List attachment metadata from the target and readable channel history:
+    const canReadHistory = !("guild" in historyChannel) || (member !== null
+      && getDiscordChannelPermissions(member, historyChannel).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]));
     const conversation = [...previousMessages.values(), targetMessage]
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
       .map((message) => ({
         id: message.id,
-        text: JSON.stringify({
-          id: message.id,
-          authorId: message.author.id,
-          authorLabel: message.member?.displayName ?? message.author.globalName ?? message.author.username,
-          content: message.content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
-          isSelf: message.author.id === env.DISCORD_BOT_ID,
-          isTarget: message.id === messageId,
-          createdAt: message.createdAt.toISOString(),
-        }),
-        attachments: message.attachments.map(({ id, name, url, contentType, size }) => ({
-          mediaType: contentType,
-          filename: name,
-          url,
-          size,
-          parts: [{ type: "text", text: JSON.stringify({ messageId: message.id, attachment: { id, name, url, mediaType: contentType, size } }) }] as ContextPart[],
-        })),
+        authorId: message.author.id,
+        authorLabel: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+        content: message.content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
+        isSelf: message.author.id === env.DISCORD_BOT_ID,
+        isTarget: message.id === messageId,
+        createdAt: message.createdAt.toISOString(),
+        attachments: canReadHistory || message.id === messageId ? message.attachments.map(({ id, name, url, contentType, size }) => ({ id, name, url, mediaType: contentType, size })) : [],
       }));
-
-    // Spend the shared download budget on the target, then the quoted message, then recent history:
-    const attachmentPriority = ({ id }: (typeof conversation)[number]) => id === messageId ? 0 : Number(id !== referencedMessageId) + 1;
-    const attachments = conversation.toReversed()
-      .sort((a, b) => attachmentPriority(a) - attachmentPriority(b))
-      .flatMap(({ attachments }) => attachments);
-    const hasImages = attachments.some(({ mediaType }) => supportedImageTypes.has(mediaType ?? ""));
-    const includeImages = hasImages && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL);
-    const signal = AbortSignal.timeout(20_000);
-    let remainingBytes = 10 * 1024 * 1024;
-    let remainingTextBytes = 32 * 1024;
-    for (const { mediaType, filename, url, size, parts } of attachments) {
-      if (signal.aborted || remainingBytes === 0) break;
-      if (mediaType === null) continue;
-      const isImage = includeImages && supportedImageTypes.has(mediaType);
-      const isText = mediaType.startsWith("text/") || mediaType === "application/json";
-      if (!isImage && !isText && mediaType !== "application/pdf") continue;
-      const limit = isText ? Math.min(remainingTextBytes, remainingBytes) : remainingBytes;
-      if (limit === 0 || size > limit) continue;
-      let file;
-      try {
-        file = await downloadDiscordAttachment(url, limit, signal);
-      }
-      catch {
-        continue;
-      }
-      if (file.length === 0) continue;
-      remainingBytes -= file.length;
-      if (isText) {
-        remainingTextBytes -= file.length;
-        parts.push({ type: "text", text: JSON.stringify({ attachmentText: file.toString("utf8") }) });
-        continue;
-      }
-      parts.push({ type: "file", data: { type: "data", data: file.toString("base64") }, mediaType, filename: isImage ? undefined : filename });
-    }
 
     // Represent the preloaded context as a completed tool call:
     const toolCallId = randomUUID();
-    const contextParts: ContextPart[] = [
-      { type: "text", text: JSON.stringify(replyContext) },
-      ...conversation.flatMap(({ text, attachments }): ContextPart[] => [
-        { type: "text", text },
-        ...attachments.flatMap(({ parts }) => parts),
-      ]),
-    ];
-    const contextOutput = { type: "content" as const, value: contextParts };
+    const contextOutput = { type: "json" as const, value: { ...replyContext, conversation } };
 
     // Select the tools available for this conversation:
     const requestApproval = member === null ? undefined : async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary);
@@ -237,7 +182,7 @@ trigger.discordEvent("messageCreate", async (message) => {
         - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
 
         La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
-        Les pièces jointes suivent leur message. Leurs métadonnées précèdent le contenu intégré quand il est disponible. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
+        Chaque message liste les métadonnées de ses pièces jointes. Utilise \`readFile\` avec l’ID de la pièce jointe si tu as besoin de lire son contenu. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
       `,
       messages: [
         {
@@ -257,6 +202,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       },
       tools: {
         ...discordTools,
+        ...fileTools,
         ...(env.RAILWAY_TOKEN === undefined ? {} : railwayTools),
         ...githubTools,
         ...webTools,

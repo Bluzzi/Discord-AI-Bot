@@ -1,4 +1,3 @@
-import { downloadDiscordAttachment } from "#/integrations/discord.helper";
 import { connectRailwaySandbox, railwayFileSchema } from "#/integrations/railway.helper";
 import { env } from "#/utils/env";
 import { tool } from "ai";
@@ -7,7 +6,6 @@ import { z } from "zod";
 
 const sandboxInput = railwayFileSchema.pick({ sandboxId: true });
 const fileInput = railwayFileSchema.pick({ sandboxId: true, path: true });
-const discordAttachment = z.object({ attachment: z.object({ url: z.string(), size: z.number() }) });
 
 export const railwayTools = {
   createRailwaySandbox: tool({
@@ -30,25 +28,19 @@ export const railwayTools = {
     },
   }),
   uploadRailwayAttachment: tool({
-    description: "Copy a Discord attachment into the Railway VM. Use its URL from getReplyContext. Max 10 MiB.",
-    inputSchema: fileInput.extend({ url: z.url() }),
-    execute: async ({ sandboxId, url, path }, { messages }) => {
-      // Limit downloads to Discord attachments listed in the preloaded conversation:
-      const maxBytes = 10 * 1024 * 1024;
-      const isAvailable = messages.some((message) => message.role === "tool" && message.content.some((part) => part.type === "tool-result" && part.toolName === "getReplyContext"
-        && part.output.type === "content" && part.output.value.some((item) => {
-        if (!("text" in item)) return false;
-        const metadata: unknown = JSON.parse(item.text);
-        const result = discordAttachment.safeParse(metadata);
-        return result.success && result.data.attachment.url === url && result.data.attachment.size <= maxBytes;
-      }),
-      ));
-      if (!isAvailable) throw new Error("Attachment is missing from this conversation or exceeds 10 MiB");
+    description: "Copy a file into the Railway VM using the fileId returned by readFile.",
+    inputSchema: fileInput.extend({ fileId: z.string().min(1) }),
+    execute: async ({ sandboxId, fileId, path }, { messages }) => {
+      // Recover the original bytes from the readFile result in this conversation:
+      const result = messages.flatMap((message) => message.role === "tool" ? message.content : [])
+        .find((part) => part.type === "tool-result" && part.toolName === "readFile" && part.toolCallId === fileId);
+      const metadata = result?.type === "tool-result" && result.output.type === "content" ? result.output.value[0] : undefined;
+      const data = metadata?.providerOptions?.readFile?.data;
+      if (typeof data !== "string") throw new Error("File ID not returned by readFile in this conversation");
 
-      // Download the attachment within the size limit and write it to the VM:
+      // Write the file directly to the VM:
       const sandbox = await connectRailwaySandbox(sandboxId, messages);
-      const bytes = await downloadDiscordAttachment(url, maxBytes, AbortSignal.timeout(20_000));
-      await sandbox.files.write(path, bytes);
+      await sandbox.files.write(path, Buffer.from(data, "base64"));
       return { path };
     },
   }),
