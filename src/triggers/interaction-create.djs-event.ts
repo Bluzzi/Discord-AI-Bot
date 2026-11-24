@@ -1,8 +1,8 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
 import type { GuildMember, SendableChannels } from "discord.js";
 import { tableWaitingApproval } from "#/tables/waiting-approval";
-import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/tools/discord-permissions";
 import { attempt } from "#/utils/attempt";
+import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/utils/discord-permissions";
 import { logger } from "#/utils/logger";
 import { postgres } from "#/utils/postgres";
 import { trigger } from "#/utils/trigger";
