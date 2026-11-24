@@ -3,7 +3,6 @@ import type { GuildMember, SendableChannels } from "discord.js";
 import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/integrations/discord.helper-permissions";
 import { postgres } from "#/integrations/postgres.client";
 import { tableWaitingApproval } from "#/tables/waiting-approval";
-import { attempt } from "#/utils/attempt";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import dedent from "dedent";
@@ -55,17 +54,23 @@ export const requestDiscordApproval = async (
   });
 
   // Save the request or remove the message if it cannot be approved:
-  const saved = await attempt(() => postgres.insert(tableWaitingApproval).values({
-    requesterMember: requester.id,
-    validatingMessageId: message.id,
-    channelId: channel.id,
-    actions,
-    expiresAt,
-  }));
-  if (!saved.ok) {
-    const removed = await attempt(async () => message.delete());
-    if (!removed.ok) logger.warn(`Could not delete Discord approval message ${message.id}`);
-    throw new Error("Could not save the Discord approval request", { cause: saved.error });
+  try {
+    await postgres.insert(tableWaitingApproval).values({
+      requesterMember: requester.id,
+      validatingMessageId: message.id,
+      channelId: channel.id,
+      actions,
+      expiresAt,
+    });
+  }
+  catch (error) {
+    try {
+      await message.delete();
+    }
+    catch {
+      logger.warn(`Could not delete Discord approval message ${message.id}`);
+    }
+    throw new Error("Could not save the Discord approval request", { cause: error });
   }
 
   return { status: "waiting_approval" as const, approvalMessageUrl: message.url };
@@ -113,19 +118,23 @@ trigger.discordEvent("interactionCreate", async (interaction) => {
   }
 
   // Reload the requester and recheck permissions as each action runs:
-  const member = await attempt(async () => guild.members.fetch({ user: user.id, force: true }));
-  if (!member.ok) {
+  let member: GuildMember;
+  try {
+    member = await guild.members.fetch({ user: user.id, force: true });
+  }
+  catch (error) {
     await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Plan interrompu · Impossible de vérifier le membre demandeur." })], components: [] });
-    return;
+    throw error;
   }
   let completed = 0;
   for (const { toolName, input } of approval.actions) {
-    const result = await attempt(async () => executeApprovedDiscordAction(toolName, input, member.value, `${approval.id}-${String(completed)}`));
-    if (!result.ok) {
-      logger.warn(`Discord approval ${approval.id} stopped at ${toolName}`);
+    try {
+      await executeApprovedDiscordAction(toolName, input, member, `${approval.id}-${String(completed)}`);
+    }
+    catch (error) {
       const text = `Plan interrompu · ${String(completed)}/${String(approval.actions.length)} actions exécutées. Arrêt sur ${toolName}.`;
       await approvalMessage.edit({ embeds: [embed.setFooter({ text })], components: [] });
-      return;
+      throw error;
     }
     completed += 1;
   }

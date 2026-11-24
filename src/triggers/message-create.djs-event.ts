@@ -15,7 +15,6 @@ import { tableModelUsage } from "#/tables/model-usage";
 import { githubTools } from "#/tools/github";
 import { bindRailwayTools } from "#/tools/railway";
 import { webTools } from "#/tools/web";
-import { attempt } from "#/utils/attempt";
 import { day } from "#/utils/day";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
@@ -48,14 +47,20 @@ const redactWebhookTokens = (text: string) => text.replace(
 const saveReplyError = async (error: unknown, message: Message, label: string) => {
   // Save the error with webhook tokens redacted:
   const id = randomUUID();
-  const saved = await attempt(() => postgres.insert(tableDiscordReplyError).values({
-    id,
-    messageId: message.id,
-    messageContent: message.content,
-    errorContent: redactWebhookTokens(inspect(error, { depth: null, customInspect: false })),
-  }));
+  try {
+    await postgres.insert(tableDiscordReplyError).values({
+      id,
+      messageId: message.id,
+      messageContent: message.content,
+      errorContent: redactWebhookTokens(inspect(error, { depth: null, customInspect: false })),
+    });
+  }
+  catch {
+    logger.error(`${label} (could not save error ${id})`);
+    return;
+  }
 
-  logger.error(saved.ok ? `${label} (error ID ${id})` : `${label} (could not save error ${id})`);
+  logger.error(`${label} (error ID ${id})`);
 };
 
 trigger.discordEvent("messageCreate", async (message) => {
@@ -170,12 +175,19 @@ trigger.discordEvent("messageCreate", async (message) => {
       let remainingBytes = 10 * 1024 * 1024;
       for (const { id, name, url, mediaType, size, sourceMessageId, isTarget } of images) {
         if (size > remainingBytes) continue;
-        const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
-        if (!image.ok || image.value.length === 0) continue;
-        remainingBytes -= image.value.length;
+        // Continue the reply when an optional image cannot be downloaded:
+        let image;
+        try {
+          image = await downloadDiscordAttachment(url, remainingBytes, signal);
+        }
+        catch {
+          continue;
+        }
+        if (image.length === 0) continue;
+        remainingBytes -= image.length;
         imageParts.push(
           { type: "text", text: `Inline image from Discord message ${sourceMessageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
-          { type: "file", data: { type: "data", data: image.value.toString("base64") }, mediaType, filename: name },
+          { type: "file", data: { type: "data", data: image.toString("base64") }, mediaType, filename: name },
         );
       }
     }

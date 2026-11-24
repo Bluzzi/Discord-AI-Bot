@@ -1,6 +1,5 @@
 import type { ToolSet } from "ai";
 import { exa } from "#/integrations/exa.client";
-import { attempt } from "#/utils/attempt";
 import { getPublicPage, parseWebUrl, PublicWebError, readPageBody } from "#/utils/public-web";
 import { extractWebContent } from "#/utils/web-content";
 import { tool } from "ai";
@@ -59,7 +58,7 @@ export const webTools = {
       const initialUrl = parseWebUrl(url);
       if (initialUrl === null) return failure("invalid_url");
       const signal = AbortSignal.timeout(10000);
-      const result = await attempt(async () => {
+      try {
         let target = initialUrl;
         for (let redirects = 0; redirects <= 5; redirects += 1) {
           const response = await getPublicPage(target, headers, signal);
@@ -115,10 +114,12 @@ export const webTools = {
           };
         }
         return failure("redirect_limit");
-      });
-      if (result.ok) return result.value;
-      if (signal.aborted) return failure("timeout");
-      return failure(result.error instanceof PublicWebError ? result.error.code : "fetch_failed");
+      }
+      catch (error) {
+        if (signal.aborted) return failure("timeout");
+        if (error instanceof PublicWebError) return failure(error.code);
+        throw error;
+      }
     },
   }),
 } satisfies ToolSet;

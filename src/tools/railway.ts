@@ -1,5 +1,4 @@
 import type { ToolSet } from "ai";
-import { attempt } from "#/utils/attempt";
 import { env } from "#/utils/env";
 import { tool } from "ai";
 import dedent from "dedent";
@@ -41,10 +40,12 @@ export const bindRailwayTools = (
           networkIsolation: "ISOLATED",
         });
         const creation = sandbox;
-        const result = await attempt(async () => creation);
-        if (!result.ok) {
+        try {
+          await creation;
+        }
+        catch (error) {
           if (sandbox === creation) sandbox = undefined;
-          throw result.error;
+          throw error;
         }
         return { status: "ready" };
       },

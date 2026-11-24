@@ -17,6 +17,7 @@ Consult [README.md](README.md) for details about the bot's features and service 
 
 ## Code rules
 
+- **Let errors throw by default.** Catch errors as high as possible in the existing event, job, or SDK error handler. Catch locally only when the current operation can recover, clean up partial work, or report a specific outcome. After cleanup, rethrow if the failure still needs handling.
 - **Keep the full workflow in the function that implements it (*locality of behavior*).** Write the steps in execution order. A long function is fine if it reads clearly from top to bottom. Extract a function only when a genuinely generic utility is essential or a technical constraint requires it. Length alone is insufficient reason to extract a block.
 - **Use guard clauses (*early return*, *fail fast*).** Handle cases that interrupt the flow as soon as you detect them, using `return`, `throw`, `continue`, or `break`. Keep the happy path at the outermost indentation level, avoid `else` and `else if`, and end the function with its intended result or action.
 - **Name intermediate values when the name adds meaning.** Introduce a `const` when its name clarifies what the result represents or when several steps use the same value. Keep short, obvious expressions inline. A multi-step calculation can stay in the function as a sequence of statements.
