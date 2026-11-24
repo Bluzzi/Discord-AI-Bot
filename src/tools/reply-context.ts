@@ -1,13 +1,15 @@
 import type { ToolSet } from "ai";
 import type { Message } from "discord.js";
-import { discordClient, conversation } from "#/integrations/discord";
+import { discordClient, conversation, downloadDiscordAttachment } from "#/integrations/discord";
 import { openRouterApi } from "#/integrations/openrouter";
+import { attempt } from "#/utils/attempt";
 import { env } from "#/utils/env";
 import { tool } from "ai";
 import dedent from "dedent";
 import { z } from "zod";
 
 const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const maxContextImageBytes = 10 * 1024 * 1024;
 
 const replyContextOutputSchema = z.object({
   channel: z.object({
@@ -55,12 +57,26 @@ export const replyContextTools = {
     outputSchema: replyContextOutputSchema,
     toModelOutput: async ({ output }) => {
       const attachments = output.conversation.flatMap((message) => message.attachments);
-      const files = attachments.flatMap(({ name, url, mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType) ? [{ type: "file" as const, data: { type: "url" as const, url: new URL(url) }, mediaType, filename: name }] : []);
-      if (files.length === 0 || !await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
+      const images = attachments.filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
+      if (images.length === 0 || !await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
         return { type: "json", value: output };
       }
+
+      // Some OpenRouter endpoints accept inline images but reject remote URLs.
+      const files = [];
+      const signal = AbortSignal.timeout(20_000);
+      let remainingBytes = maxContextImageBytes;
+      for (const { name, url, mediaType, size } of images.reverse()) {
+        if (mediaType === null || size > remainingBytes) continue;
+        const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
+        if (!image.ok || image.value.length === 0) continue;
+        remainingBytes -= image.value.length;
+        files.push({ type: "file" as const, data: { type: "data" as const, data: image.value.toString("base64") }, mediaType, filename: name });
+      }
+
+      if (files.length === 0) return { type: "json", value: output };
       const context = { type: "text" as const, text: JSON.stringify(output) };
-      return { type: "content", value: [context, ...files] };
+      return { type: "content", value: [context, ...files.reverse()] };
     },
     execute: async (_input, { context }) => {
       const channel = await discordClient.channels.fetch(context.channelId);
