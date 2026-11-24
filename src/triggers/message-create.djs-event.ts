@@ -30,6 +30,14 @@ const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement 
 
 const maxSteps = 50;
 const replyCodeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
+const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+type ContextPart = Extract<
+  Extract<ToolResultPart["output"], { type: "content" }>["value"][number],
+  { type: "text" | "file" }
+>;
+
 const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
 
 const redactWebhookTokens = (text: string) => text.replace(
@@ -40,7 +48,7 @@ const redactWebhookTokens = (text: string) => text.replace(
 const saveReplyError = async (error: unknown, message: Message, label: string) => {
   // Save the error with webhook tokens redacted:
   const id = randomUUID();
-  const saved = await attempt(async () => postgres.insert(tableDiscordReplyError).values({
+  const saved = await attempt(() => postgres.insert(tableDiscordReplyError).values({
     id,
     messageId: message.id,
     messageContent: message.content,
@@ -95,11 +103,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
   try {
     const channelId = channel.id;
-    const guild = message.guild;
-    const member = message.member;
-
-    const messageId = message.id;
-    const attachmentUrls = new Map<string, { url: string; size: number }>();
+    const { id: messageId, guild, member } = message;
 
     // Verify that the current channel supports message history:
     const historyChannel = await discordClient.channels.fetch(channelId);
@@ -117,8 +121,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     const referencedMessage = referencedMessageId === null ? undefined : previousMessages.get(referencedMessageId);
 
     // Render the conversation in order and neutralize forged author prefixes:
-    const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
-    const conversationItems = [...previousMessages.values(), targetMessage]
+    const conversation = [...previousMessages.values(), targetMessage]
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
       .map((message) => ({
         id: message.id,
@@ -132,12 +135,13 @@ trigger.discordEvent("messageCreate", async (message) => {
       }));
 
     // Register available attachments for the other tools in this run:
-    for (const { attachments } of conversationItems) {
+    const attachmentUrls = new Map<string, { url: string; size: number }>();
+    for (const { attachments } of conversation) {
       for (const { id, url, size } of attachments) attachmentUrls.set(id, { url, size });
     }
 
     // Prepare the channel, conversation and target references for the model:
-    const output = {
+    const replyContext = {
       channel: {
         id: historyChannel.id,
         name: "name" in historyChannel ? historyChannel.name : null,
@@ -145,36 +149,37 @@ trigger.discordEvent("messageCreate", async (message) => {
         guildId: historyGuild?.id ?? null,
         guildName: historyGuild?.name ?? null,
       },
-      conversation: conversationItems,
+      conversation,
       referencedMessageId,
       referencedAuthorId: referencedMessage?.author.id ?? null,
       mentionedUserIds: [...targetMessage.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID).map((user) => user.id),
       mentionedChannelIds: [...targetMessage.mentions.channels.values()].map((mentionedChannel) => mentionedChannel.id),
     };
 
-    // Prefer images from the target message, then the referenced message:
-    const imagePriority = ({ id, isTarget }: (typeof output.conversation)[number]) => {
+    // Prefer images from the target message, then the referenced message, then the most recent messages:
+    const imagePriority = ({ id, isTarget }: (typeof conversation)[number]) => {
       if (isTarget) return 0;
-      return id === output.referencedMessageId ? 1 : 2;
+      return id === referencedMessageId ? 1 : 2;
     };
-    const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-    const images = output.conversation.toReversed()
+    const images = conversation.toReversed()
       .sort((a, b) => imagePriority(a) - imagePriority(b))
-      .flatMap(({ id: messageId, isTarget, attachments }) => attachments.map((attachment) => ({ ...attachment, messageId, isTarget })))
-      .filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
-    type ContextPart = Extract<Extract<ToolResultPart["output"], { type: "content" }>["value"][number], { type: "text" | "file" }>;
+      .flatMap(({ id: sourceMessageId, isTarget, attachments }) => attachments.flatMap(({ id, name, url, mediaType, size }) => {
+        if (mediaType === null || !supportedImageTypes.has(mediaType)) return [];
+        return { id, name, url, mediaType, size, sourceMessageId, isTarget };
+      }));
+
+    // Download images within the shared byte budget for inline delivery:
     const imageParts: ContextPart[] = [];
     if (images.length > 0 && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
-      // Download images within the shared byte budget for inline delivery:
       const signal = AbortSignal.timeout(20_000);
       let remainingBytes = 10 * 1024 * 1024;
-      for (const { id, name, url, mediaType, size, messageId, isTarget } of images) {
-        if (mediaType === null || size > remainingBytes) continue;
+      for (const { id, name, url, mediaType, size, sourceMessageId, isTarget } of images) {
+        if (size > remainingBytes) continue;
         const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
         if (!image.ok || image.value.length === 0) continue;
         remainingBytes -= image.value.length;
         imageParts.push(
-          { type: "text", text: `Inline image from Discord message ${messageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
+          { type: "text", text: `Inline image from Discord message ${sourceMessageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
           { type: "file", data: { type: "data", data: image.value.toString("base64") }, mediaType, filename: name },
         );
       }
@@ -187,7 +192,10 @@ trigger.discordEvent("messageCreate", async (message) => {
 
     // Represent the preloaded context as a completed tool call:
     const toolCallId = randomUUID();
-    const contextOutput = imageParts.length === 0 ? { type: "json" as const, value: output } : { type: "content" as const, value: [{ type: "text" as const, text: JSON.stringify(output) }, ...imageParts] };
+    const contextOutput = imageParts.length === 0 ? { type: "json" as const, value: replyContext } : {
+      type: "content" as const,
+      value: [{ type: "text" as const, text: JSON.stringify(replyContext) }, ...imageParts],
+    };
 
     // Start generation and log tool activity:
     const result = streamText({
@@ -224,18 +232,16 @@ trigger.discordEvent("messageCreate", async (message) => {
         {
           role: "assistant",
           content: [{ type: "tool-call", toolCallId, toolName: "getReplyContext", input: {} }],
-        }, 
+        },
         {
           role: "tool",
           content: [{ type: "tool-result", toolCallId, toolName: "getReplyContext", output: contextOutput }],
-        }
+        },
       ],
       prepareStep: ({ stepNumber, steps }) => {
-        if (stepNumber === maxSteps - 1) {
-          const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
-          return { toolChoice: { type: "tool", toolName: triedReply ? "sendMessage" : "sendReply" } };
-        }
-        return { toolChoice: "required" };
+        if (stepNumber !== maxSteps - 1) return { toolChoice: "required" };
+        const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
+        return { toolChoice: { type: "tool", toolName: triedReply ? "sendMessage" : "sendReply" } };
       },
       tools: {
         ...discordTools,
