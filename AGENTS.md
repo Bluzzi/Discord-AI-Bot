@@ -1,72 +1,44 @@
-# Discord AI Bot – Tool-Driven
+# Discord Agent
 
-An AI bot for Discord designed to act freely using various tools.  
+Discord Agent is a conversational bot. Mention it to get a concise answer that follows the conversation and uses Discord Markdown for links, mentions, and code.
 
-## Key Patterns
+Consult [README.md](README.md) for details about the bot's features and service architecture, including cloud infrastructure and external services.
 
-- **Triggered by anything** – messages, voice activity, scheduled tasks…  
-- **Tool-driven code** – the AI uses code and APIs as tools to act, instead of being constrained by pre-written scripts.  
-- **Acts freely** – minimal constraints, sometimes too free.  
-- **Natural behavior** – integrates seamlessly, reacts like a real user.  
+## Feature requirements
 
-> The focus is on giving the AI tools to solve problems, not writing code to control the AI.
+- Require an explicit `@` mention of the bot in the message to start an AI response. This also applies to replies. Discord's automatic reply ping, role mentions, and `@everyone` are insufficient.
+- Change prompts sent to the model only when the user explicitly requests the change. When adding or updating a tool, keep its model-facing descriptions and schema text as concise and direct as possible. Preserve the bot's behavior unless the user explicitly requests a behavior change.
+- When adding or changing a Discord tool, keep its input schema and permission rule aligned in [src/tools/discord.ts](src/tools/discord.ts) and [src/tools/discord-permissions.ts](src/tools/discord-permissions.ts). Use the shared rules to filter the tools offered to the model and enforce the original requester's effective Discord permissions on the actual targets. Check the relevant server, channel or thread, and role or member hierarchy where applicable. The bot's own permissions cannot authorize an action on the requester's behalf.
+- Route all Discord tools that create, modify, or delete resources other than messages through `proposeDiscordActions`. Validate the exact inputs and the requester's permissions before presenting the plan. Wait for the original requester to click **Approve** on the pending request, then fetch their current membership and recheck permissions for each action before executing it. Reject the action if the permission check fails. Message operations are exempt from the mandatory approval rule and still follow their applicable Discord permission and conversation checks. [Approval handler](src/triggers/interaction-create.djs-event.ts)
 
-## Agent approach
+## Development approach
+
 - Be ultra-pragmatic: never over-engineer, never build anything that was not asked for, always prefer absolute simplicity.
 - Read the existing code before implementing: rely on the content of the files and folders mentioned in the request, and search the codebase for similar examples to follow their syntax, structure and logic.
 - If something extra genuinely deserves to be added (technical, security, optimization or clarity reasons) but is not part of the request and requires more code than asked: do not implement it, recommend it to the user instead and let them decide.
 
-## Project Stack
+## Code rules
 
-- **Node.js v24.11.0 (LTS)** is used as the runtime.
-  Node.js-specific APIs are therefore allowed and expected.
+- **Keep the full workflow in the function that implements it (*locality of behavior*).** Write the steps in execution order. A long function is fine if it reads clearly from top to bottom. Extract a function only when a genuinely generic utility is essential or a technical constraint requires it. Length alone is insufficient reason to extract a block.
+- **Use guard clauses (*early return*, *fail fast*).** Handle cases that interrupt the flow as soon as you detect them, using `return`, `throw`, `continue`, or `break`. Keep the happy path at the outermost indentation level, avoid `else` and `else if`, and end the function with its intended result or action.
+- **Name intermediate values when the name adds meaning.** Introduce a `const` when its name clarifies what the result represents or when several steps use the same value. Keep short, obvious expressions inline. A multi-step calculation can stay in the function as a sequence of statements.
+- **Prefer duplication to premature abstraction (*AHA*, *Avoid Hasty Abstractions*).** Keep separate implementations for behaviors that can evolve independently. Similar blocks can stay duplicated. Avoid merging them behind a `mode`, `variant`, or `isEdit` parameter.
+- **Initialize dependencies separately and use them directly.** Configure and export each SDK, ORM, or library instance from a dedicated module with the minimum setup required. Import the instance where the feature is implemented and call its API directly. Write feature-specific queries and calls at the point of use, without repositories, predefined query helpers, or service wrappers.
+- **Type the contracts and let TypeScript infer the details.** Annotate signatures when the type expresses a contract the implementation must satisfy. Let TypeScript infer local variable types when their initializers provide enough information. Check explicitly for `null` or `undefined` when that is how the API represents absence.
+- **Structure functions around clear intent.** Introduce each logical block with a short English comment that describes its purpose and ends with a colon, such as `// Check whether the item is already archived:`. Use English names that say what each value represents, such as `totalProducts` or `passwordIsValid`.
 
-- **PNPM** is the only package manager used in this project.  
-  Other package managers MUST NOT be used.
+## Continuous Integration
 
-- **TypeScript** and **ESLint** are used to enforce code quality.  
-  After any codebase update, the following commands MUST be executed and all reported errors MUST be fixed:
-  - `pnpm run ts:check` — checks for TypeScript errors.
-  - `pnpm run lint:fix` — automatically fixes ESLint errors when possible and reports remaining ones.
+Run both commands after changing code and fix any errors they report.
 
-## Project Structure
+- `pnpm run ts:check`
+- `pnpm run lint:fix`
 
-Flat layout under `/src`: only folders, only `.ts` files inside them, one `main.ts` at the root.
+## Stack
 
-- `src/tables` — Drizzle schema, one file per table.
-- `src/integrations` — One file per external system (Discord, OpenRouter, GitHub, Steam, RSS, web search, PDF): clients, SDK singletons and low-level helpers.
-- `src/tools` — Toolsets the AI can call (`satisfies ToolSet`). Thin: describe the tool, delegate the work.
-- `src/triggers` — Entry points (Discord events, CRON, webhooks), AI generation flows and their usage tracking.
-- `src/utils` — Shared helpers, including `postgres` for the Drizzle client, migrations and reusable columns.
-
-Where a new file goes:
-- Entry point or AI generation flow → `triggers` · `tool()` callable by the AI → `tools`
-- External API or SDK call → `integrations` · Drizzle table definition → `tables` · shared helper → `utils`
-
-Dependencies flow one way: `triggers → tools / tables / integrations → utils`. No file-level import cycles.
-
-## Global Guidelines
-
-- **No `try` / `catch` blocks are allowed in high-level functions.**  
-  Error handling is intentionally centralized in a small number of low-level functions written by human developers.  
-  In high-level functions, errors MUST be propagated using:
-  ```ts
-  throw new Error("Details");
-  ```
-
-- **Naming conventions**
-  - Folder and file names MUST use `kebab-case`
-  - Variable names MUST use `camelCase`
-
-- Use of `dedent` for multi-line strings, allowing clean and consistent indentation to be preserved.
-
-## Discord Agent Rules
-
-- Inside the **AGENTS** category (`1574094410830844105`), you may perform any action without restriction.
-- Outside the **AGENTS** category, do not intervene unless explicitly mentioned with `@` by a user.
-- Never perform create, update, or delete actions via the Discord API unless:
-  1. You verify that the requesting user has the required permissions for the target actions.
-  2. You present a complete action plan beforehand listing the Discord API requests to execute.
-  3. You receive explicit user confirmation to run that action plan.
-- Enforce this workflow through real, deterministic security checks rather than relying solely on model decisions.
-- Only message users in direct messages (DMs) after having an initial interaction with them.
+- The project uses TypeScript and pnpm. It uses Discord.js (`discord.js`) to interact with Discord. [Discord.js documentation](https://discordjs.dev/docs/packages/discord.js/main)
+- Vercel AI SDK (`ai`) handles AI generation and tool calling. Model calls go through OpenRouter. [AI SDK documentation](https://ai-sdk.dev/docs/getting-started/nodejs) · [OpenRouter documentation](https://openrouter.ai/docs/quickstart)
+- Use Zod (`zod`) to define schemas for AI interactions, such as tool inputs and structured model outputs, and wherever else runtime validation is needed. For responses with a reliable contract, such as those from a trusted API SDK, rely on the SDK's types unless there is a specific reason to validate at runtime. [Zod documentation](https://zod.dev/)
+- The `webfetch` and `websearch` tools follow OpenCode's implementations. Use OpenCode as the preferred open-source reference when maintaining these tools. [OpenCode tools documentation](https://opencode.ai/docs/tools/#web)
+- Environment variables are listed and documented in [src/utils/env.ts](src/utils/env.ts).
+- The project uses PostgreSQL with Drizzle ORM (`drizzle-orm`). The database connection is configured in [src/utils/postgres.ts](src/utils/postgres.ts), and [src/tables](src/tables) defines one table per file. Treat the database used during development as production. Migrations are applied automatically at startup. Create new migrations with `pnpm run db:migration:create`. [Drizzle PostgreSQL documentation](https://orm.drizzle.team/docs/get-started-postgresql)
