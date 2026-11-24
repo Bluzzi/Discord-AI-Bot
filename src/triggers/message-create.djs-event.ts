@@ -1,5 +1,5 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
-import type { UserContent } from "ai";
+import type { ToolResultPart } from "ai";
 import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
 import { discordClient } from "#/integrations/discord";
@@ -162,19 +162,20 @@ trigger.discordEvent("messageCreate", async (message) => {
       .sort((a, b) => imagePriority(a) - imagePriority(b))
       .flatMap(({ id: messageId, isTarget, attachments }) => attachments.map((attachment) => ({ ...attachment, messageId, isTarget })))
       .filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
-    const imageParts: Exclude<UserContent, string> = [];
+    type ContextPart = Extract<Extract<ToolResultPart["output"], { type: "content" }>["value"][number], { type: "text" | "file" }>;
+    const imageParts: ContextPart[] = [];
     if (images.length > 0 && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
       // Download images within the shared byte budget for inline delivery:
       const signal = AbortSignal.timeout(20_000);
       let remainingBytes = 10 * 1024 * 1024;
-      for (const { id, url, mediaType, size, messageId, isTarget } of images) {
+      for (const { id, name, url, mediaType, size, messageId, isTarget } of images) {
         if (mediaType === null || size > remainingBytes) continue;
         const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
         if (!image.ok || image.value.length === 0) continue;
         remainingBytes -= image.value.length;
         imageParts.push(
           { type: "text", text: `Inline image from Discord message ${messageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
-          { type: "image", image: image.value, mediaType },
+          { type: "file", data: { type: "data", data: image.value.toString("base64") }, mediaType, filename: name },
         );
       }
     }
@@ -183,6 +184,10 @@ trigger.discordEvent("messageCreate", async (message) => {
     const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
     const requestApproval = member === null ? undefined : async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary);
     const discordTools = getDiscordToolsForMessage(message, replyAttachments, requestApproval);
+
+    // Represent the preloaded context as a completed tool call:
+    const toolCallId = randomUUID();
+    const contextOutput = imageParts.length === 0 ? { type: "json" as const, value: output } : { type: "content" as const, value: [{ type: "text" as const, text: JSON.stringify(output) }, ...imageParts] };
 
     // Start generation and log tool activity:
     const result = streamText({
@@ -215,10 +220,16 @@ trigger.discordEvent("messageCreate", async (message) => {
         La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
         Chaque image intégrée est précédée de son ID de message et de son ID de pièce jointe. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
       `,
-      messages: [{
-        role: "user",
-        content: [{ type: "text", text: JSON.stringify(output) }, ...imageParts],
-      }],
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId, toolName: "getReplyContext", input: {} }],
+        }, 
+        {
+          role: "tool",
+          content: [{ type: "tool-result", toolCallId, toolName: "getReplyContext", output: contextOutput }],
+        }
+      ],
       prepareStep: ({ stepNumber, steps }) => {
         if (stepNumber === maxSteps - 1) {
           const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
