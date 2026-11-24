@@ -246,7 +246,7 @@ export const replaceDiscordAudio = (connection: VoiceConnection, resource: Audio
 export const discordClientStart = async (loadEvents: () => Promise<void>) => {
   discordClient.once("clientReady", (readyClient) => {
     readyClient.user.setPresence({
-      activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "📜 Je respecte le règlement" }],
+      activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "📜 Je respecte le règlement." }],
     });
     logger.info(`Discord bot successfully started!! Logged in as ${readyClient.user.tag}`);
   });
