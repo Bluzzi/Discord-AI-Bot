@@ -7,12 +7,6 @@ import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import dedent from "dedent";
 
-/** Current API key information (usage, credit limit, free models daily quota) */
-export type OpenRouterKeyData = GetCurrentKeyData;
-
-/** Account credits balance (total credits purchased and used) */
-export type OpenRouterCreditsData = GetCreditsData;
-
 type OpenRouterModelPricing = {
   acceptsImages: boolean;
   /** Price per input token, in USD */
@@ -67,31 +61,7 @@ const fetchModelPricing = async (): Promise<void> => {
   }
 };
 
-const fetchKey = async (): Promise<OpenRouterKeyData> => {
-  const response = await openRouterSdk.apiKeys.getCurrentKeyMetadata();
-
-  return response.data;
-};
-
-const fetchCredits = async (): Promise<OpenRouterCreditsData | undefined> => {
-  try {
-    const response = await openRouterSdk.credits.getCredits();
-
-    return response.data;
-  }
-  catch (error) {
-    // Endpoint reserved to management keys: undefined is expected when using a plain inference key:
-    if (error instanceof OpenRouterError && error.statusCode === 403) return undefined;
-
-    throw error;
-  }
-};
-
 export const openRouterApi = {
-  /** Fetch the current API key state (usage, credit limit, free models daily quota) from OpenRouter */
-  fetchKey,
-  /** Fetch the account credits balance (total credits and usage) from OpenRouter, or undefined when the key is not allowed to */
-  fetchCredits,
   acceptsImages: async (modelId: string): Promise<boolean> => {
     if (pricingByModelId.size === 0) await fetchModelPricing();
     return pricingByModelId.get(modelId)?.acceptsImages ?? true;
@@ -162,7 +132,7 @@ const isExhausted = (): boolean => {
     || quotaState.insufficientCreditsUntilTimestamp > now;
 };
 
-const formatQuotaDetails = (keyData: OpenRouterKeyData, creditsData: OpenRouterCreditsData | undefined): string => {
+const formatQuotaDetails = (keyData: GetCurrentKeyData, creditsData: GetCreditsData | undefined): string => {
   const keyCredits = keyData.limitRemaining === null ? "no key credit limit" : `${String(keyData.limitRemaining)} credits remaining under the key limit`;
   const accountCredits = creditsData === undefined ? "credit balance unknown (management key required)" : `${(creditsData.totalCredits - creditsData.totalUsage).toFixed(9)} credits remaining (${String(creditsData.totalUsage)}/${String(creditsData.totalCredits)} credits used)`;
 
@@ -176,10 +146,21 @@ const formatQuotaDetails = (keyData: OpenRouterKeyData, creditsData: OpenRouterC
 const refresh = async (): Promise<void> => {
   const wasExhausted = isExhausted();
 
-  const [keyData, creditsData] = await Promise.all([
-    openRouterApi.fetchKey(),
-    openRouterApi.fetchCredits(),
+  // Fetch the key and account limits in parallel:
+  const [{ data: keyData }, creditsResponse] = await Promise.all([
+    openRouterSdk.apiKeys.getCurrentKeyMetadata(),
+    (async () => {
+      try {
+        return await openRouterSdk.credits.getCredits();
+      }
+      catch (error) {
+        // Treat the account balance as unknown when the key cannot read it:
+        if (error instanceof OpenRouterError && error.statusCode === 403) return undefined;
+        throw error;
+      }
+    })(),
   ]);
+  const creditsData = creditsResponse?.data;
 
   // Key credit limit reached (limitRemaining is null when the key has no limit):
   const keyLimitReached = keyData.limitRemaining !== null && keyData.limitRemaining <= 0;
@@ -190,6 +171,7 @@ const refresh = async (): Promise<void> => {
   quotaState.creditsExhausted = keyLimitReached || accountBalanceEmpty;
   quotaState.freeDailyExhausted = usesFreeModel && keyData.freeModelDailyRequests.remaining <= 0;
 
+  // Log only transitions into or out of exhaustion:
   const nowExhausted = isExhausted();
 
   if (!wasExhausted && nowExhausted) {
@@ -229,8 +211,6 @@ export const openRouterQuota = {
   isExhausted,
   /** Re-check the quota state from OpenRouter management endpoints (no model call involved, safe to run every minute) */
   refresh,
-  /** Report a quota failure raised by a real AI call (429 rate limit or 402 insufficient credits) */
-  reportFailure,
 };
 
 // ── Model ─────────────────────────────────────────────────────────────────────────────────────────
@@ -240,7 +220,7 @@ const quotaAwareFetch: typeof fetch = async (input, init) => {
   const response = await fetch(input, init);
 
   if (response.status === 429 || response.status === 402) {
-    openRouterQuota.reportFailure(response.status, response.headers.get("x-ratelimit-reset"));
+    reportFailure(response.status, response.headers.get("x-ratelimit-reset"));
   }
 
   return response;

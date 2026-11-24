@@ -1,8 +1,8 @@
 import type { ToolSet } from "ai";
-import { createRailwaySandbox } from "#/integrations/railway";
 import { attempt } from "#/utils/attempt";
 import { tool } from "ai";
 import dedent from "dedent";
+import { Sandbox } from "railway";
 import { z } from "zod";
 
 const maxFileBytes = 10 * 1024 * 1024;
@@ -15,7 +15,8 @@ export const createRailwayTools = (
   registerAttachment: (file: { attachment: Buffer; name: string }) => string,
 ): ToolSet => {
   if (token === undefined) return {};
-  let sandbox: ReturnType<typeof createRailwaySandbox> | undefined;
+  // Keep one pending or active VM per request:
+  let sandbox: ReturnType<typeof Sandbox.create> | undefined;
   let exportedBytes = 0;
 
   const getSandbox = async () => {
@@ -31,13 +32,20 @@ export const createRailwayTools = (
       `,
       inputSchema: z.object({}),
       execute: async () => {
+        // Reuse the current VM while it is still available:
         const previous = sandbox;
         if (previous !== undefined) {
           const vm = await previous;
           await vm.refresh();
           if (vm.status === "DESTROYED" && sandbox === previous) sandbox = undefined;
         }
-        sandbox ??= createRailwaySandbox(token);
+        // Start an isolated VM and release the cached promise if creation fails:
+        sandbox ??= Sandbox.create({
+          token,
+          authType: "project-token",
+          idleTimeoutMinutes: 5,
+          networkIsolation: "ISOLATED",
+        });
         const creation = sandbox;
         const result = await attempt(async () => creation);
         if (!result.ok) {

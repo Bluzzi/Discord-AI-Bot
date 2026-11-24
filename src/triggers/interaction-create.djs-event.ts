@@ -20,10 +20,12 @@ export const requestDiscordApproval = async (
   proposedActions: DiscordApprovalAction[],
   summary: string,
 ) => {
+  // Validate all proposed actions before presenting them:
   const actions = await Promise.all(proposedActions.map(async ({ toolName, input }) => ({
     toolName,
     input: await validateDiscordApprovalAction(toolName, input, requester),
   })));
+  // Build the approval message with the exact action parameters:
   const now = new Date();
   const expiresAt = new Date(now.getTime() + approvalLifetimeMs);
   const overview = dedent`
@@ -43,6 +45,7 @@ export const requestDiscordApproval = async (
     new ButtonBuilder().setCustomId(applyButtonId).setLabel("Approuver").setStyle(ButtonStyle.Success),
   );
 
+  // Remove expired requests and send the new approval message:
   await postgres.delete(tableWaitingApproval).where(lt(tableWaitingApproval.expiresAt, now));
   const message = await channel.send({
     embeds: [embed],
@@ -51,6 +54,7 @@ export const requestDiscordApproval = async (
     allowedMentions: { parse: [] },
   });
 
+  // Save the request or remove the message if it cannot be approved:
   const saved = await attempt(() => postgres.insert(tableWaitingApproval).values({
     requesterMember: requester.id,
     validatingMessageId: message.id,
@@ -68,10 +72,12 @@ export const requestDiscordApproval = async (
 };
 
 trigger.discordEvent("interactionCreate", async (interaction) => {
+  // Accept approval buttons in a server:
   if (!interaction.isButton() || (interaction.customId !== applyButtonId && interaction.customId !== cancelButtonId)) return;
   const { guild, message, user } = interaction;
   if (guild === null) return;
 
+  // Claim the request once and only for its author:
   await interaction.deferUpdate();
   const [approval] = await postgres.delete(tableWaitingApproval).where(and(
     eq(tableWaitingApproval.validatingMessageId, message.id),
@@ -83,6 +89,7 @@ trigger.discordEvent("interactionCreate", async (interaction) => {
     return;
   }
 
+  // Reject edited, expired or cancelled plans:
   const approvalMessage = await message.fetch();
   if (approvalMessage.editedTimestamp !== null) {
     await approvalMessage.edit({
@@ -105,6 +112,7 @@ trigger.discordEvent("interactionCreate", async (interaction) => {
     return;
   }
 
+  // Reload the requester and recheck permissions as each action runs:
   const member = await attempt(async () => guild.members.fetch({ user: user.id, force: true }));
   if (!member.ok) {
     await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Plan interrompu · Impossible de vérifier le membre demandeur." })], components: [] });

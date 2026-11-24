@@ -6,7 +6,7 @@ Discord Agent is a conversational bot. Mention it or reply to it to get a concis
 
 - 🛠️ Manage channels, threads, roles, events, and more, with permission checks and approval for server changes.
 - 🔎 Search the web, read source pages, and get answers with citations.
-- 🐙 Explore public GitHub repositories, code, issues, and pull requests.
+- 🐙 Explore GitHub repositories, code, issues, and pull requests. 
 - 🔍 Get code reviews with concrete findings and suggested fixes.
 - 💻 Run code in a virtual machine.
 - 🖼️ Read and analyze images shared in Discord.

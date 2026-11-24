@@ -82,17 +82,26 @@ const webhook = (permission: bigint, check?: Check): Rule => ({
   },
 });
 
-const scheduledEvent = (modify = false) => guild(modify ? permissionFlags.ManageEvents : 0n, async (input, member) => {
+const readScheduledEvent = guild(0n, async (input, member) => {
+  // Check visibility in the channel hosting the event:
+  const event = await member.guild.scheduledEvents.fetch(id.parse(input.eventId));
+  if (event.channelId === null) return;
+  await checkChannel(member, event.channelId, 0n);
+});
+
+const manageScheduledEvent = guild(permissionFlags.ManageEvents, async (input, member) => {
+  // Check permissions in the existing event channel:
   const event = await member.guild.scheduledEvents.fetch(id.parse(input.eventId));
   if (event.channelId !== null) {
     const voicePermission = event.entityType === GuildScheduledEventEntityType.StageInstance ? stageModerator : permissionFlags.Connect;
-    await checkChannel(member, event.channelId, modify ? permissionFlags.ManageEvents | voicePermission : 0n);
+    await checkChannel(member, event.channelId, permissionFlags.ManageEvents | voicePermission);
   }
+
+  // Check permissions in the new channel when moving the event:
   const newChannelId = input.body === undefined ? undefined : bodyChannel(input);
-  if (isPresent(newChannelId)) {
-    const target = await checkChannel(member, newChannelId, permissionFlags.ManageEvents);
-    await requireDiscordChannelPermissions(member, target, target.type === ChannelType.GuildStageVoice ? stageModerator : permissionFlags.Connect);
-  }
+  if (!isPresent(newChannelId)) return;
+  const target = await checkChannel(member, newChannelId, permissionFlags.ManageEvents);
+  await requireDiscordChannelPermissions(member, target, target.type === ChannelType.GuildStageVoice ? stageModerator : permissionFlags.Connect);
 });
 
 type ToolsByPermission = Partial<Record<keyof typeof permissionFlags | "Everyone", readonly ToolName[]>>;
@@ -385,10 +394,10 @@ const specificRules = {
   editWebhookMessage: webhook(permissionFlags.ManageWebhooks | permissionFlags.SendMessages),
   deleteWebhookMessage: webhook(permissionFlags.ManageWebhooks | permissionFlags.ManageMessages),
 
-  getGuildEvent: scheduledEvent(),
-  editGuildEvent: scheduledEvent(true),
-  deleteGuildEvent: scheduledEvent(true),
-  getGuildEventSubscribers: scheduledEvent(),
+  getGuildEvent: readScheduledEvent,
+  editGuildEvent: manageScheduledEvent,
+  deleteGuildEvent: manageScheduledEvent,
+  getGuildEventSubscribers: readScheduledEvent,
 } satisfies Partial<Record<ToolName, Rule>>;
 
 const rules: Partial<Record<ToolName, Rule>> = { ...specificRules };
@@ -499,6 +508,7 @@ export const getDiscordToolsForMessage = (
         const toolOptions = isReply ? { ...options, context: { resolveAttachment } } : options;
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
         if (name === "sendMessage" && (args.attachmentRef !== undefined || args.attachmentRefs !== undefined) && args.channelId !== message.channelId) throw denied();
+        // Allow responses in the originating channel under the conversation rules:
         const isConversationReply = isReply && args.channelId === message.channelId;
         if (isDm || isConversationReply) {
           if (args.channelId !== message.channelId || args.userId !== undefined) throw denied();
@@ -506,6 +516,7 @@ export const getDiscordToolsForMessage = (
           return result;
         }
 
+        // Check the requester's permissions on every other server target:
         const requester = await requireGuildToolPermission(args, message.member, rule);
         const result: unknown = await execute(input, toolOptions);
         return filterChannelResults(name, result, requester);
@@ -516,16 +527,20 @@ export const getDiscordToolsForMessage = (
   const available: Partial<Record<ToolName, ToolSet[string]>> = {};
   const approvalToolNames: ToolName[] = [];
   for (const [name, rule] of Object.entries(rules) as [ToolName, Rule][]) {
+    // Expose only the conversation's read tools in DMs:
     if (isDm) {
-      if (!dmTools.has(name)) continue;
+      if (dmTools.has(name) && discordReadTools.has(name)) available[name] = wrap(name, rule);
+      continue;
     }
-    else {
-      if (member === null || !hasGuildPermission(member, rule.guild ?? 0n)) continue;
-      const scope = rule.channel;
-      if (scope !== undefined && !visibleChannels.some(({ target, permissions }) => permissions.has(permissionIn(target, scope)))) continue;
-    }
+
+    // Screen server tools against the requester's capabilities:
+    if (member === null || !hasGuildPermission(member, rule.guild ?? 0n)) continue;
+    const scope = rule.channel;
+    if (scope !== undefined && !visibleChannels.some(({ target, permissions }) => permissions.has(permissionIn(target, scope)))) continue;
+
+    // Offer mutations as approval actions and reads as executable tools:
     if (!discordReadTools.has(name)) {
-      if (!isDm) approvalToolNames.push(name);
+      approvalToolNames.push(name);
       continue;
     }
     available[name] = wrap(name, rule);

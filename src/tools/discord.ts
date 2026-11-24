@@ -1,7 +1,7 @@
 import type { ToolSet } from "ai";
 import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
 import { createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
-import { discordClient, fetchDiscordChannel, fetchDiscordTextChannel, fetchDiscordSendableChannel, fetchDiscordVoiceConnection, getDiscordAudioPlayer, replaceDiscordAudio, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
+import { discordClient, fetchDiscordVoiceConnection, getDiscordAudioPlayer, replaceDiscordAudio, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
@@ -1043,7 +1043,8 @@ export const discordTools = {
       topic: z.string().nullable(),
     }),
     execute: async ({ channelId }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
 
       return {
         id: channel.id,
@@ -1109,7 +1110,8 @@ export const discordTools = {
       newName: z.string(),
     }),
     execute: async ({ channelId, newName }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
       if (!("setName" in channel)) {
         throw new Error("This channel type cannot be renamed");
       }
@@ -1136,7 +1138,8 @@ export const discordTools = {
       topic: z.string(),
     }),
     execute: async ({ channelId, topic }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
       if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement && channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildMedia) {
         throw new Error("Channel does not support topics");
       }
@@ -1168,7 +1171,9 @@ export const discordTools = {
       threadName: z.string(),
     }),
     execute: async ({ channelId, name, messageId, autoArchiveMinutes = ThreadAutoArchiveDuration.OneDay }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
       if (!("threads" in channel)) {
         throw new Error("This channel type does not support threads");
       }
@@ -1213,21 +1218,14 @@ export const discordTools = {
     execute: async ({ guildId, nameFilter, inVoice }) => {
       const guild = await discordClient.guilds.fetch(guildId);
 
-      let members;
+      // Select members by ID, name, voice presence or the default server list:
+      const hasNameFilter = nameFilter !== undefined && nameFilter !== "";
+      const memberById = hasNameFilter && (/^\d+$/u).test(nameFilter) ? await guild.members.fetch(nameFilter) : undefined;
+      const membersInVoice = !hasNameFilter && inVoice === true ? guild.members.cache.filter((member) => member.voice.channelId !== null) : undefined;
+      const memberQuery = hasNameFilter ? { query: nameFilter, limit: 100 } : { limit: 100 };
+      const members = memberById === undefined ? [...(membersInVoice ?? await guild.members.fetch(memberQuery)).values()] : [memberById];
 
-      if (nameFilter !== undefined && (/^\d+$/u).test(nameFilter)) {
-        members = [await guild.members.fetch(nameFilter)];
-      }
-      else if (nameFilter !== undefined && nameFilter !== "") {
-        members = Array.from((await guild.members.fetch({ query: nameFilter, limit: 100 })).values());
-      }
-      else if (inVoice === true) {
-        members = Array.from(guild.members.cache.filter((member) => member.voice.channelId !== null).values());
-      }
-      else {
-        members = Array.from((await guild.members.fetch({ limit: 100 })).values());
-      }
-
+      // Return the member details with their current presence:
       return members.map((member) => ({
         id: member.id,
         username: member.user.username,
@@ -1456,7 +1454,7 @@ export const discordTools = {
 
       const member = await guild.members.fetch(memberId);
       const role = await guild.roles.fetch(roleId);
-      if (!role) {
+      if (role === null) {
         throw new Error("Role not found");
       }
 
@@ -1485,7 +1483,7 @@ export const discordTools = {
 
       const member = await guild.members.fetch(memberId);
       const role = await guild.roles.fetch(roleId);
-      if (!role) {
+      if (role === null) {
         throw new Error("Role not found");
       }
 
@@ -1514,7 +1512,7 @@ export const discordTools = {
       const guild = await discordClient.guilds.fetch(guildId);
 
       const role = await guild.roles.fetch(roleId);
-      if (!role) {
+      if (role === null) {
         throw new Error("Role not found");
       }
 
@@ -1557,7 +1555,9 @@ export const discordTools = {
       if ([before, after, around].filter((cursor) => cursor !== undefined).length > 1) {
         throw new Error("Use one cursor: before, after or around");
       }
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const messages = await channel.messages.fetch({ limit, before, after, around });
 
@@ -1591,7 +1591,9 @@ export const discordTools = {
     }),
     execute: async ({ channelId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
       const chunks = prepareReplyChunks(content, attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs], context, { prefixContinuations: true });
-      const channel = await fetchDiscordSendableChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
       const messageIds: string[] = [];
 
@@ -1658,7 +1660,9 @@ export const discordTools = {
       };
 
       if (channelId !== undefined) {
-        const channel = await fetchDiscordSendableChannel(channelId);
+        const channel = await discordClient.channels.fetch(channelId);
+        if (channel === null) throw new Error("Channel not found");
+        if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
         const message = await channel.send(payload);
         return { messageId: message.id };
@@ -1706,7 +1710,9 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId, emoji }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const message = await channel.messages.fetch(messageId);
       await message.react(emoji);
@@ -1726,7 +1732,9 @@ export const discordTools = {
     }),
     outputSchema: z.object({ messageId: z.string() }),
     execute: async ({ channelId, question, answers, duration = 24, allowMultiselect = false }) => {
-      const channel = await fetchDiscordSendableChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
       const message = await channel.send({
         poll: {
@@ -1753,7 +1761,9 @@ export const discordTools = {
       messageId: z.string(),
     }),
     execute: async ({ channelId, url, name, content }) => {
-      const channel = await fetchDiscordSendableChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -1783,7 +1793,9 @@ export const discordTools = {
       messageId: z.string(),
     }),
     execute: async ({ channelId, messageId, newContent }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const message = await channel.messages.fetch(messageId);
       if (!message.editable) {
@@ -1804,7 +1816,9 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const message = await channel.messages.fetch(messageId);
       if (!message.deletable) {
@@ -1832,7 +1846,9 @@ export const discordTools = {
     }),
     execute: async ({ channelId, messageId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
       const chunks = prepareReplyChunks(content, attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs], context);
-      const channel = await fetchDiscordSendableChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
       const messageIds: string[] = [];
 
@@ -1865,7 +1881,9 @@ export const discordTools = {
       })),
     })),
     execute: async ({ channelId, messageId }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const message = await channel.messages.fetch(messageId);
 
@@ -1895,7 +1913,9 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const message = await channel.messages.fetch(messageId);
       await message.pin();
@@ -1920,7 +1940,9 @@ export const discordTools = {
       pinnedAt: z.string(),
     })),
     execute: async ({ channelId, before, limit }) => {
-      const channel = await fetchDiscordTextChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
+      if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
       const pinned = await channel.messages.fetchPins({ before, limit });
 
@@ -1945,7 +1967,8 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, guildId }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
       if (!channel.isVoiceBased()) {
         throw new Error("Channel not found or not a voice channel");
       }
@@ -2265,7 +2288,8 @@ export const discordTools = {
       maxUses: z.number(),
     }),
     execute: async ({ channelId, maxAge = 86_400, maxUses = 0, temporary, unique, reason }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
       if (!("createInvite" in channel)) {
         throw new Error("This channel type does not support invites");
       }
@@ -2292,7 +2316,8 @@ export const discordTools = {
       avatarUrl: z.string().nullable(),
     })),
     execute: async ({ channelId }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
       if (!("fetchWebhooks" in channel)) {
         throw new Error("This channel type does not support webhooks");
       }
@@ -2319,7 +2344,8 @@ export const discordTools = {
       name: z.string().nullable(),
     }),
     execute: async ({ channelId, name, avatarUrl }) => {
-      const channel = await fetchDiscordChannel(channelId);
+      const channel = await discordClient.channels.fetch(channelId);
+      if (channel === null) throw new Error("Channel not found");
       if (!("createWebhook" in channel)) {
         throw new Error("This channel type does not support webhooks");
       }
@@ -2535,24 +2561,21 @@ export const discordTools = {
         custom: ActivityType.Custom,
       } as const;
 
-      let activities: ActivitiesOptions[];
+      // Keep the current activities for status-only updates:
+      const activities: ActivitiesOptions[] = activityName === undefined ? selfUser.presence.activities.map((activity) => ({
+        name: activity.name,
+        type: activity.type,
+        state: activity.state ?? undefined,
+        url: activity.url ?? undefined,
+      })) : [];
 
-      if (activityName === null) {
-        activities = [];
-      }
-      else if (activityName !== undefined) {
+      // Set the requested activity, or clear it when the name is null:
+      if (typeof activityName === "string") {
         const resolvedType = activityType ?? "playing";
-        activities = [resolvedType === "custom" ? { name: "Custom Status", type: activityTypes.custom, state: activityName } : { name: activityName, type: activityTypes[resolvedType], url: resolvedType === "streaming" ? url : undefined }];
-      }
-      else {
-        activities = selfUser.presence.activities.map((activity) => ({
-          name: activity.name,
-          type: activity.type,
-          state: activity.state ?? undefined,
-          url: activity.url ?? undefined,
-        }));
+        activities.push(resolvedType === "custom" ? { name: "Custom Status", type: activityTypes.custom, state: activityName } : { name: activityName, type: activityTypes[resolvedType], url: resolvedType === "streaming" ? url : undefined });
       }
 
+      // Apply the presence and report the requested values:
       selfUser.setPresence({
         status,
         activities,

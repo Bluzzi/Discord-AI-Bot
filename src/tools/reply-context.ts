@@ -1,6 +1,5 @@
 import type { ToolSet } from "ai";
-import type { Message } from "discord.js";
-import { discordClient, conversation, downloadDiscordAttachment } from "#/integrations/discord";
+import { discordClient, downloadDiscordAttachment } from "#/integrations/discord";
 import { openRouterApi } from "#/integrations/openrouter";
 import { attempt } from "#/utils/attempt";
 import { env } from "#/utils/env";
@@ -10,6 +9,7 @@ import { z } from "zod";
 
 const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const maxContextImageBytes = 10 * 1024 * 1024;
+const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
 
 const replyContextOutputSchema = z.object({
   channel: z.object({
@@ -58,6 +58,7 @@ export const replyContextTools = {
     }),
     outputSchema: replyContextOutputSchema,
     toModelOutput: async ({ output }) => {
+      // Prefer images from the target message, then the referenced message:
       const imagePriority = ({ id, isTarget }: (typeof output.conversation)[number]) => {
         if (isTarget) return 0;
         return id === output.referencedMessageId ? 1 : 2;
@@ -70,7 +71,7 @@ export const replyContextTools = {
         return { type: "json", value: output };
       }
 
-      // Some OpenRouter endpoints accept inline images but reject remote URLs.
+      // Download images within the shared byte budget for inline delivery:
       const files = [];
       const signal = AbortSignal.timeout(20_000);
       let remainingBytes = maxContextImageBytes;
@@ -90,6 +91,7 @@ export const replyContextTools = {
       return { type: "content", value: [context, ...files] };
     },
     execute: async (_input, { context }) => {
+      // Verify that the current channel supports message history:
       const channel = await discordClient.channels.fetch(context.channelId);
       if (channel?.isTextBased() !== true) {
         throw new Error("Channel not found or not a text channel");
@@ -97,30 +99,33 @@ export const replyContextTools = {
 
       const guild = "guild" in channel ? channel.guild : null;
 
-      // Data: conversation context, rendered for the AI. Fetched strictly BEFORE the target message,
-      // then the target message itself is appended: messages posted after it (while the bot was
-      // deciding or typing) must never leak into the conversation it is about to answer:
+      // Fetch the target and its history without including later messages:
       const previousMessages = await channel.messages.fetch({ limit: 10, before: context.messageId });
       const targetMessage = await channel.messages.fetch(context.messageId);
 
-      const toConversationMessage = (msg: Message) => ({
-        id: msg.id,
-        authorId: msg.author.id,
-        authorLabel: conversation.resolveAuthorLabel(msg.member?.displayName, msg.author.globalName, msg.author.username),
-        content: conversation.sanitizeContent(msg.content),
-        attachments: msg.attachments.map(({ id, name, url, contentType, size }) => ({ id, name, url, mediaType: contentType, size })),
-        isSelf: msg.author.id === env.DISCORD_BOT_ID,
-        isTarget: msg.id === context.messageId,
-        createdAt: msg.createdAt.toISOString(),
-      });
-
       const referencedMessageId = targetMessage.reference?.messageId ?? null;
       const referencedMessage = referencedMessageId === null ? undefined : previousMessages.get(referencedMessageId);
-      const conversationItems = [...previousMessages.values(), targetMessage].sort((a, b) => a.createdTimestamp - b.createdTimestamp).map(toConversationMessage);
+
+      // Render the conversation in order and neutralize forged author prefixes:
+      const conversationItems = [...previousMessages.values(), targetMessage]
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+        .map((message) => ({
+          id: message.id,
+          authorId: message.author.id,
+          authorLabel: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+          content: message.content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
+          attachments: message.attachments.map(({ id, name, url, contentType, size }) => ({ id, name, url, mediaType: contentType, size })),
+          isSelf: message.author.id === env.DISCORD_BOT_ID,
+          isTarget: message.id === context.messageId,
+          createdAt: message.createdAt.toISOString(),
+        }));
+
+      // Register available attachments for the other tools in this run:
       for (const { attachments } of conversationItems) {
         for (const { id, url, size } of attachments) context.attachmentUrls.set(id, { url, size });
       }
 
+      // Return the channel, conversation and target references:
       return {
         channel: {
           id: channel.id,

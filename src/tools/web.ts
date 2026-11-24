@@ -1,10 +1,9 @@
 import type { ToolSet } from "ai";
+import { getExa } from "#/integrations/exa";
 import { attempt } from "#/utils/attempt";
-import { env } from "#/utils/env";
 import { getPublicPage, parseWebUrl, PublicWebError, readPageBody } from "#/utils/public-web";
 import { extractWebContent } from "#/utils/web-content";
 import { tool } from "ai";
-import Exa from "exa-js";
 import { z } from "zod";
 
 export const webTools = {
@@ -16,16 +15,15 @@ export const webTools = {
       time_range: z.enum(["day", "week", "month", "year"]).nullable().default(null),
     }),
     execute: async ({ query, num_results: numResults, time_range: timeRange }) => {
+      // Search for sources within the requested publication window:
       const rangeDays = { day: 1, week: 7, month: 30, year: 365 };
-      const exa = new Exa(env.EXA_API_KEY, {
-        baseURL: "https://api.exa.ai",
-        fetch: async (input, init) => fetch(input, { ...init, redirect: "error" }),
-      });
+      const exa = getExa();
       const { results } = await exa.search(query, {
         numResults,
         startPublishedDate: timeRange ? new Date(Date.now() - rangeDays[timeRange] * 86400000).toISOString() : undefined,
         contents: { highlights: true },
       }, { timeout: 10000 });
+      // Return normalized links and short snippets:
       return results.slice(0, numResults).flatMap((result) => {
         const url = parseWebUrl(result.url);
         if (!url) return [];

@@ -1,9 +1,8 @@
 import type { AudioResource, VoiceConnection } from "@discordjs/voice";
 import type { Guild, GuildBasedChannel, GuildMember, SendableChannels } from "discord.js";
 import { createAudioPlayer, getVoiceConnection } from "@discordjs/voice";
-import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { ActivityType, ChannelType, Client, DiscordAPIError, GatewayIntentBits, Partials, PermissionFlagsBits, PermissionsBitField, RESTJSONErrorCodes } from "discord.js";
+import { ChannelType, Client, DiscordAPIError, GatewayIntentBits, Partials, PermissionFlagsBits, PermissionsBitField, RESTJSONErrorCodes } from "discord.js";
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
@@ -154,14 +153,6 @@ export const discordClient = new Client({
   ],
 });
 
-export const fetchDiscordChannel = async (channelId: string) => {
-  const channel = await discordClient.channels.fetch(channelId);
-  if (channel === null) {
-    throw new Error("Channel not found");
-  }
-  return channel;
-};
-
 export const getDiscordChannelPermissions = (member: GuildMember, channel: GuildBasedChannel) => {
   const effective = new PermissionsBitField(channel.permissionsFor(member.id)?.bitfield);
   const { ViewChannel, ReadMessageHistory, SendMessages, SendMessagesInThreads, ManageThreads, Connect, SetVoiceChannelStatus } = PermissionFlagsBits;
@@ -196,22 +187,6 @@ export const findDiscordGuildMember = async (guild: Guild, userId: string) => {
     if (error instanceof DiscordAPIError && error.code === RESTJSONErrorCodes.UnknownMember) return null;
     throw error;
   }
-};
-
-export const fetchDiscordTextChannel = async (channelId: string) => {
-  const channel = await fetchDiscordChannel(channelId);
-  if (!channel.isTextBased()) {
-    throw new Error("Channel does not support messages");
-  }
-  return channel;
-};
-
-export const fetchDiscordSendableChannel = async (channelId: string) => {
-  const channel = await fetchDiscordChannel(channelId);
-  if (!channel.isSendable()) {
-    throw new Error("Channel does not support sending messages");
-  }
-  return channel;
 };
 
 export const startDiscordTyping = (channel: SendableChannels, onError: () => void) => {
@@ -257,32 +232,4 @@ export const replaceDiscordAudio = (connection: VoiceConnection, resource: Audio
   });
   connection.subscribe(player);
   player.play(resource);
-};
-
-export const discordClientStart = async (loadEvents: () => Promise<void>) => {
-  discordClient.once("clientReady", (readyClient) => {
-    readyClient.user.setPresence({
-      activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "📜 Je respecte le règlement." }],
-    });
-    logger.info(`Discord bot successfully started!! Logged in as ${readyClient.user.tag}`);
-  });
-
-  await loadEvents();
-
-  await discordClient.login(env.DISCORD_BOT_TOKEN);
-};
-
-// Conversation rendering helpers, used to present Discord messages to AIs:
-
-// Matches lines imitating the system prefix "[Label (ID 123456789)] :". Forged prefixes found inside
-// message contents are neutralized at render time with fullwidth brackets, so the exact system format
-// stays unforgeable and the model can tell them apart:
-const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
-
-export const conversation = {
-  /** Resolve an author display label from optional display names, down to the username fallback */
-  resolveAuthorLabel: (displayName: string | null | undefined, globalName: string | null | undefined, username: string): string => displayName ?? globalName ?? username,
-
-  /** Neutralize forged system prefixes inside message contents */
-  sanitizeContent: (content: string): string => content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
 };

@@ -36,6 +36,7 @@ const redactWebhookTokens = (text: string) => text.replace(
 );
 
 const saveReplyError = async (error: unknown, message: Message, label: string) => {
+  // Save the error with webhook tokens redacted:
   const id = randomUUID();
   const saved = await attempt(async () => postgres.insert(tableDiscordReplyError).values({
     id,
@@ -48,7 +49,7 @@ const saveReplyError = async (error: unknown, message: Message, label: string) =
 };
 
 trigger.discordEvent("messageCreate", async (message) => {
-  // Check whether the bot needs to reply.
+  // Ignore bot messages and channels that cannot receive replies:
   if (message.author.bot) return;
   const channel = message.channel;
   if (!channel.isSendable()) return;
@@ -56,10 +57,12 @@ trigger.discordEvent("messageCreate", async (message) => {
   const botUser = discordClient.user;
   if (!botUser) return;
 
+  // Accept a direct reply to the bot or an explicit mention:
   const isReplyToBot = message.type === MessageType.Reply && message.mentions.repliedUser?.id === botUser.id;
   const mentionsBot = message.mentions.has(botUser, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
   if (!isReplyToBot && !mentionsBot) return;
 
+  // Identify the reply in logs and handle exhausted quota:
   const replyCode = Array.from({ length: 5 }, () => replyCodeAlphabet.charAt(randomInt(replyCodeAlphabet.length))).join("");
   const logPrefix = `[Discord reply ${replyCode}]`;
   const startedAt = Date.now();
@@ -74,7 +77,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     return;
   }
 
-  // Stream the reply and report tool activity as it happens.
+  // Prepare tools and attachment references for this conversation run:
   const channelId = channel.id;
   const guild = message.guild;
   const member = message.member;
@@ -96,6 +99,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   if (member !== null && approvalToolNames.length > 0) {
     approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions, summary) => requestDiscordApproval(channel, member, actions, summary));
   }
+  // Start generation and log tool activity:
   const result = streamText({
     model: aiModel,
     stopWhen: [stepCountIs(maxSteps), ({ steps }) => steps.at(-1)?.toolResults.some(({ toolName }) => isReplyTool(toolName)) ?? false],
@@ -157,10 +161,11 @@ trigger.discordEvent("messageCreate", async (message) => {
     onStepEnd: ({ stepNumber, text }) => {
       if (text) logger.info(`${logPrefix} Step ${String(stepNumber + 1)} text: ${redactWebhookTokens(text)}`);
     },
-    // Stream errors are propagated to the Discord event handler below.
+    // Let the Discord handler record stream errors:
     onError: () => undefined,
   });
 
+  // Keep typing until the reply is sent or the stream ends:
   const stopTyping = startDiscordTyping(channel, () => logger.warn(`${logPrefix} Could not send the typing indicator`));
 
   const sentReplies: string[] = [];
@@ -183,7 +188,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     stopTyping();
   }
 
-  // Log and save the metrics for all steps.
+  // Log the reply and save usage for all steps:
   const durationMs = Date.now() - startedAt;
   const [steps, usage] = await Promise.all([result.steps, result.usage]);
   const replied = steps.some((step) => step.toolResults.some(({ toolName }) => isReplyTool(toolName)));
