@@ -1,14 +1,10 @@
 import type { ToolSet } from "ai";
 import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
-import { createAudioPlayer, createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
 import { discordClient } from "#/integrations/discord";
 import { sanitizeDiscordMessage, splitDiscordMessage } from "#/utils/discord";
-import { fetchDiscordVoiceConnection, getDiscordAudioPlayer } from "#/utils/discord-voice";
-import { logger } from "#/utils/logger";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
-import { Readable } from "node:stream";
 import { z } from "zod";
 
 export const discordTools = {
@@ -713,31 +709,6 @@ export const discordTools = {
       body: { ...body, allowed_mentions: { parse: ["users", "roles"] } },
     }),
   }),
-  sendVoiceMessage: tool({
-    description: "Send a voice message using an Ogg Opus audio URL and its waveform.",
-    inputSchema: z.object({
-      channelId: z.string().regex(/^\d{1,20}$/u),
-      url: z.url({ protocol: /^https?$/u }),
-      durationSeconds: z.number().positive(),
-      waveform: z.string().min(1).max(344),
-    }),
-    execute: async ({ channelId, url, durationSeconds, waveform }) => {
-      // Download the audio before posting the voice message:
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Could not download the voice message (HTTP ${String(response.status)})`);
-      }
-
-      // Send the audio and its waveform to the channel:
-      return discordClient.rest.post(Routes.channelMessages(channelId), {
-        files: [{ data: Buffer.from(await response.arrayBuffer()), name: "voice-message.ogg", contentType: "audio/ogg" }],
-        body: {
-          flags: MessageFlags.IsVoiceMessage,
-          attachments: [{ id: 0, filename: "voice-message.ogg", duration_secs: durationSeconds, waveform }],
-        },
-      });
-    },
-  }),
   forwardMessage: tool({
     description: "Forward an existing message to another channel.",
     inputSchema: z.object({
@@ -1009,183 +980,6 @@ export const discordTools = {
     },
   }),
 
-  // Voice and Stage:
-  controlVoiceAudio: tool({
-    description: "Pause, resume or stop the bot's audio.",
-    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), operation: z.enum(["pause", "resume", "stop"]) }),
-    execute: ({ guildId, operation }) => {
-      // Require a subscribed player before applying the playback command:
-      const player = getDiscordAudioPlayer(fetchDiscordVoiceConnection(guildId));
-      if (player === undefined) {
-        throw new Error("No audio player in this guild");
-      }
-      const changed = operation === "pause" ? player.pause() : operation === "resume" ? player.unpause() : player.stop(true);
-      return { changed };
-    },
-  }),
-  setBotVoiceMute: tool({
-    description: "Set the bot's own mute or deafen state in voice.",
-    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), mute: z.boolean().optional(), deaf: z.boolean().optional() }),
-    execute: ({ guildId, mute, deaf }) => {
-      // Rejoin the active connection with the requested self-mute and self-deafen settings:
-      const connection = fetchDiscordVoiceConnection(guildId);
-      if (!connection.rejoin({
-        channelId: connection.joinConfig.channelId,
-        selfMute: mute ?? connection.joinConfig.selfMute,
-        selfDeaf: deaf ?? connection.joinConfig.selfDeaf,
-      })) {
-        throw new Error("Voice state update failed");
-      }
-      return {};
-    },
-  }),
-  getBotVoiceState: tool({
-    description: "Get the bot's voice state in a guild.",
-    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
-    execute: async ({ guildId }) => {
-      const result = await discordClient.rest.get(`/guilds/${guildId}/voice-states/@me`);
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  getMemberVoiceState: tool({
-    description: "Get a member's voice state.",
-    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
-    execute: async ({ guildId, userId }) => {
-      const result = await discordClient.rest.get(`/guilds/${guildId}/voice-states/${userId}`);
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  editBotStageVoiceState: tool({
-    description: "Suppress the bot on stage or request to speak.",
-    inputSchema: z.object({
-      guildId: z.string().regex(/^\d{1,20}$/u),
-      body: z.object({
-        channel_id: z.string().regex(/^\d{1,20}$/u),
-        suppress: z.boolean().optional(),
-        request_to_speak_timestamp: z.iso.datetime({ offset: true }).nullable().optional(),
-      }),
-    }),
-    execute: async ({ guildId, body }) => {
-      const result = await discordClient.rest.patch(`/guilds/${guildId}/voice-states/@me`, { body });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  setStageMemberSuppressed: tool({
-    description: "Set whether a stage member is suppressed.",
-    inputSchema: z.object({
-      guildId: z.string().regex(/^\d{1,20}$/u),
-      userId: z.string().regex(/^\d{1,20}$/u),
-      body: z.object({ channel_id: z.string().regex(/^\d{1,20}$/u), suppress: z.boolean() }),
-    }),
-    execute: async ({ guildId, userId, body }) => {
-      const result = await discordClient.rest.patch(`/guilds/${guildId}/voice-states/${userId}`, { body });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  setVoiceChannelStatus: tool({
-    description: "Set or clear a voice channel status.",
-    inputSchema: z.object({
-      channelId: z.string().regex(/^\d{1,20}$/u),
-      reason: z.string().max(512).optional(),
-      body: z.object({ status: z.string().max(500).nullable() }),
-    }),
-    execute: async ({ channelId, reason, body }) => {
-      const result = await discordClient.rest.put(`/channels/${channelId}/voice-status`, { reason, body });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  createStageInstance: tool({
-    description: "Open a stage with a topic.",
-    inputSchema: z.object({
-      reason: z.string().max(512).optional(),
-      body: z.object({
-        topic: z.string().min(1).max(120),
-        privacy_level: z.literal(2).optional(),
-        channel_id: z.string().regex(/^\d{1,20}$/u),
-        send_start_notification: z.boolean().optional(),
-        guild_scheduled_event_id: z.string().regex(/^\d{1,20}$/u).optional(),
-      }),
-    }),
-    execute: async ({ reason, body }) => {
-      const result = await discordClient.rest.post("/stage-instances", { reason, body });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  getStageInstance: tool({
-    description: "Get the active stage in a channel.",
-    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u) }),
-    execute: async ({ channelId }) => {
-      const result = await discordClient.rest.get(`/stage-instances/${channelId}`);
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  editStageInstance: tool({
-    description: "Edit a stage instance.",
-    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
-      topic: z.string().min(1).max(120),
-      privacy_level: z.literal(2).optional(),
-    }).partial() }),
-    execute: async ({ channelId, reason, body }) => {
-      const result = await discordClient.rest.patch(`/stage-instances/${channelId}`, { reason, body });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  deleteStageInstance: tool({
-    description: "Close a stage instance.",
-    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional() }),
-    execute: async ({ channelId, reason }) => {
-      const result = await discordClient.rest.delete(`/stage-instances/${channelId}`, { reason });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  sendSoundboardSound: tool({
-    description: "Play a soundboard sound in the bot's voice channel.",
-    inputSchema: z.object({
-      channelId: z.string().regex(/^\d{1,20}$/u),
-      body: z.object({ sound_id: z.string().regex(/^\d{1,20}$/u), source_guild_id: z.string().regex(/^\d{1,20}$/u).optional() }),
-    }),
-    execute: async ({ channelId, body }) => {
-      const result = await discordClient.rest.post(`/channels/${channelId}/send-soundboard-sound`, { body });
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  getDefaultSoundboardSounds: tool({
-    description: "List default Discord soundboard sounds.",
-    inputSchema: z.object({}),
-    execute: async () => {
-      const result = await discordClient.rest.get("/soundboard-default-sounds");
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  getGuildSoundboardSounds: tool({
-    description: "List guild soundboard sounds.",
-    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
-    execute: async ({ guildId }) => {
-      const result = await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds`);
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
-  getGuildSoundboardSound: tool({
-    description: "Get a guild soundboard sound.",
-    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), soundId: z.string().regex(/^\d{1,20}$/u) }),
-    execute: async ({ guildId, soundId }) => {
-      const result = await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds/${soundId}`);
-      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-      return result ?? {};
-    },
-  }),
   // Invites and Webhooks:
   getInvite: tool({
     description: "Get an invite by code.",
@@ -2696,86 +2490,49 @@ export const discordTools = {
     },
   }),
 
-  // Voice:
+  // Voice channel management:
 
-  joinVoiceChannel: tool({
-    description: "Join a voice or stage channel.",
-    inputSchema: z.object({
-      channelId: z.string(),
-      guildId: z.string(),
-    }),
-    outputSchema: z.object({}),
-    execute: async ({ channelId, guildId }) => {
-      // Resolve a voice channel in the requested guild:
-      const channel = await discordClient.channels.fetch(channelId);
-      if (channel === null) throw new Error("Channel not found");
-      if (!channel.isVoiceBased()) {
-        throw new Error("Channel not found or not a voice channel");
-      }
-
-      if (channel.guild.id !== guildId) {
-        throw new Error("Channel does not belong to the guild");
-      }
-
-      // Join the channel and wait for the voice connection:
-      const connection = joinVoiceChannel({
-        channelId: channel.id,
-        guildId,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-      });
-      await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
-
-      return {};
+  getMemberVoiceState: tool({
+    description: "Get a member's voice state.",
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, userId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/voice-states/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
     },
   }),
 
-  leaveVoiceChannel: tool({
-    description: "Leave voice in a guild.",
+  setVoiceChannelStatus: tool({
+    description: "Set or clear a voice channel status.",
     inputSchema: z.object({
-      guildId: z.string(),
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ status: z.string().max(500).nullable() }),
     }),
-    outputSchema: z.object({}),
-    execute: ({ guildId }) => {
-      // Destroy the existing voice connection:
-      const connection = fetchDiscordVoiceConnection(guildId);
-
-      connection.destroy();
-
-      return {};
+    execute: async ({ channelId, reason, body }) => {
+      const result = await discordClient.rest.put(`/channels/${channelId}/voice-status`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
     },
   }),
 
-  moveMember: tool({
-    description: "Move a member to another voice channel.",
-    inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-      channelId: z.string(),
-    }),
-    outputSchema: z.object({
-      memberName: z.string(),
-      channelName: z.string(),
-    }),
-    execute: async ({ guildId, memberId, channelId }) => {
-      // Resolve the connected member and the destination voice channel:
-      const guild = await discordClient.guilds.fetch(guildId);
+  getGuildSoundboardSounds: tool({
+    description: "List guild soundboard sounds.",
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
+  }),
 
-      const member = await guild.members.fetch(memberId);
-      if (member.voice.channelId === null) {
-        throw new Error("Member is not in a voice channel");
-      }
-
-      const channel = await guild.channels.fetch(channelId);
-      if (channel?.isVoiceBased() !== true) {
-        throw new Error("Voice channel not found");
-      }
-
-      await member.voice.setChannel(channel);
-
-      return {
-        memberName: member.displayName,
-        channelName: channel.name,
-      };
+  getGuildSoundboardSound: tool({
+    description: "Get a guild soundboard sound.",
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), soundId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, soundId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds/${soundId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
     },
   }),
 
@@ -2851,30 +2608,6 @@ export const discordTools = {
     },
   }),
 
-  deafenMember: tool({
-    description: "Server-deafen a member in voice.",
-    inputSchema: z.object({
-      guildId: z.string(),
-      memberId: z.string(),
-    }),
-    outputSchema: z.object({
-      memberName: z.string(),
-    }),
-    execute: async ({ guildId, memberId }) => {
-      // Require a connected member before deafening them:
-      const guild = await discordClient.guilds.fetch(guildId);
-
-      const member = await guild.members.fetch(memberId);
-      if (member.voice.channelId === null) {
-        throw new Error("Member is not in a voice channel");
-      }
-
-      await member.voice.setDeaf(true);
-
-      return { memberName: member.displayName };
-    },
-  }),
-
   undeafenMember: tool({
     description: "Remove a server deafen.",
     inputSchema: z.object({
@@ -2896,45 +2629,6 @@ export const discordTools = {
       await member.voice.setDeaf(false);
 
       return { memberName: member.displayName };
-    },
-  }),
-
-  playAudio: tool({
-    description: "Play audio from a URL. Replaces current playback.",
-    inputSchema: z.object({
-      guildId: z.string(),
-      url: z.url().describe("URL of the audio file or stream to play"),
-    }),
-    outputSchema: z.object({}),
-    execute: async ({ guildId, url }) => {
-      // Require an active voice connection and open the audio stream:
-      const connection = fetchDiscordVoiceConnection(guildId);
-
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch audio (HTTP ${String(response.status)})`);
-      }
-      if (response.body === null) {
-        throw new Error("Audio source returned an empty body");
-      }
-
-      // Start playback with the downloaded audio stream:
-      const resource = createAudioResource(Readable.from(response.body, { objectMode: false }), { inputType: StreamType.Arbitrary });
-      const existingPlayer = getDiscordAudioPlayer(connection);
-      if (existingPlayer !== undefined) {
-        existingPlayer.play(resource);
-        return {};
-      }
-
-      const player = createAudioPlayer();
-      player.on("error", (error) => logger.error(`Discord audio playback failed: ${error.message}`));
-      player.on("unsubscribe", () => {
-        player.stop(true);
-      });
-      connection.subscribe(player);
-      player.play(resource);
-
-      return {};
     },
   }),
 
@@ -3377,7 +3071,6 @@ export const discordReadTools: ReadonlySet<DiscordToolName> = new Set<DiscordToo
   "getAuditLog",
   "getAutoModerationRule",
   "getBotGuilds",
-  "getBotVoiceState",
   "getChannelDetails",
   "getChannelInfo",
   "getChannelInvites",
@@ -3385,7 +3078,6 @@ export const discordReadTools: ReadonlySet<DiscordToolName> = new Set<DiscordToo
   "getChannelMessages",
   "getChannelRolePermissions",
   "getChannels",
-  "getDefaultSoundboardSounds",
   "getGuildBan",
   "getGuildBans",
   "getGuildDetails",
@@ -3420,7 +3112,6 @@ export const discordReadTools: ReadonlySet<DiscordToolName> = new Set<DiscordToo
   "getRole",
   "getRoleMemberCounts",
   "getRoles",
-  "getStageInstance",
   "getSticker",
   "getThreadMember",
   "getThreadMembers",

@@ -64,7 +64,6 @@ const manageChannel = (check?: Check): Rule => ({
 });
 const bodyChannel = (input: Input) => object.parse(input.body).channel_id;
 const thread = (permission: bigint) => channel(permission, (input) => input.threadId);
-const botVoice = (permission: bigint) => channel(permission, (_input, member) => member.guild.voiceStates.cache.get(discordClient.user?.id ?? "")?.channelId);
 const memberVoice = (permission: bigint, check?: Check) => channel(permission, (input, member) => member.guild.voiceStates.cache.get(id.parse(input.memberId ?? input.userId))?.channelId, check);
 const checkModerationTarget: Check = async (input, member) => checkMemberHierarchy(member, input.memberId ?? input.userId);
 const stageModerator = permissionFlags.ManageChannels | permissionFlags.MuteMembers | permissionFlags.MoveMembers;
@@ -123,7 +122,6 @@ const guildToolsByPermission = {
     "getRoles",
     "getRole",
     "getRoleMemberCounts",
-    "getDefaultSoundboardSounds",
     "getGuildSoundboardSounds",
     "getGuildSoundboardSound",
     "getGuildEmojis",
@@ -175,10 +173,8 @@ const channelToolsByPermission = {
     "getChannelDetails",
     "getChannelMemberPermissions",
     "getChannelRolePermissions",
-    "getStageInstance",
   ],
   Administrator: ["deleteChannelPermission"],
-  Connect: ["joinVoiceChannel"],
   CreateInstantInvite: ["createInvite"],
   CreatePrivateThreads: ["createPrivateThread"],
   ManageChannels: ["setChannelTopic", "getChannelInvites"],
@@ -337,7 +333,6 @@ const specificRules = {
   sendFile: channel(permissionFlags.SendMessages | permissionFlags.AttachFiles),
   sendRichMessage: channel(permissionFlags.SendMessages | permissionFlags.EmbedLinks | permissionFlags.AttachFiles | permissionFlags.SendTTSMessages | permissionFlags.UseExternalStickers),
   editRichMessage: channel(permissionFlags.SendMessages | permissionFlags.ManageMessages | permissionFlags.EmbedLinks | permissionFlags.AttachFiles),
-  sendVoiceMessage: channel(permissionFlags.SendMessages | permissionFlags.SendVoiceMessages | permissionFlags.AttachFiles),
   forwardMessage: channel(permissionFlags.ReadMessageHistory, (input) => input.channelId, async ({ toChannelId }, member) => {
     await checkChannel(member, toChannelId, permissionFlags.SendMessages);
   }),
@@ -346,35 +341,21 @@ const specificRules = {
   addReaction: channel(permissionFlags.AddReactions | permissionFlags.ReadMessageHistory),
   createPoll: channel(permissionFlags.SendMessages | permissionFlags.SendPolls),
 
-  leaveVoiceChannel: botVoice(permissionFlags.Connect),
-  controlVoiceAudio: botVoice(permissionFlags.Connect | permissionFlags.Speak),
-  setBotVoiceMute: botVoice(permissionFlags.Connect),
-  playAudio: botVoice(permissionFlags.Connect | permissionFlags.Speak),
-  getBotVoiceState: botVoice(0n),
   getMemberVoiceState: memberVoice(0n),
-  moveMember: memberVoice(permissionFlags.MoveMembers, async ({ channelId }, member) => { await checkChannel(member, channelId, permissionFlags.MoveMembers | permissionFlags.Connect); }),
-  moveAllMembers: channel(permissionFlags.MoveMembers, (input) => input.fromChannelId, async ({ toChannelId }, member) => {
-    await checkChannel(member, toChannelId, permissionFlags.MoveMembers | permissionFlags.Connect);
+  moveAllMembers: channel(permissionFlags.MoveMembers, (input) => input.fromChannelId, async ({ fromChannelId, toChannelId }, member) => {
+    // Validate both voice channels and the members who will be moved:
+    const source = await checkChannel(member, fromChannelId, permissionFlags.MoveMembers);
+    const destination = await checkChannel(member, toChannelId, permissionFlags.MoveMembers | permissionFlags.Connect);
+    if (!source.isVoiceBased() || !destination.isVoiceBased()) throw denied();
+    await Promise.all([...source.members.keys()].filter((memberId) => memberId !== member.id).map(async (memberId) => checkMemberHierarchy(member, memberId)));
   }),
-  disconnectMember: memberVoice(permissionFlags.MoveMembers),
-  muteMember: memberVoice(permissionFlags.MuteMembers),
-  unmuteMember: memberVoice(permissionFlags.MuteMembers),
-  deafenMember: memberVoice(permissionFlags.DeafenMembers),
-  undeafenMember: memberVoice(permissionFlags.DeafenMembers),
+  disconnectMember: memberVoice(permissionFlags.MoveMembers, checkModerationTarget),
+  muteMember: memberVoice(permissionFlags.MuteMembers, checkModerationTarget),
+  unmuteMember: memberVoice(permissionFlags.MuteMembers, checkModerationTarget),
+  undeafenMember: memberVoice(permissionFlags.DeafenMembers, checkModerationTarget),
   startVoiceActivity: channel(permissionFlags.Connect | permissionFlags.CreateInstantInvite | permissionFlags.UseEmbeddedActivities),
-  editBotStageVoiceState: channel(permissionFlags.Connect | permissionFlags.RequestToSpeak, bodyChannel),
-  setStageMemberSuppressed: channel(permissionFlags.MuteMembers, bodyChannel, (input, member) => {
-    if (member.guild.voiceStates.cache.get(id.parse(input.userId))?.channelId !== bodyChannel(input)) throw denied();
-  }),
   setVoiceChannelStatus: channel(permissionFlags.SetVoiceChannelStatus, (input) => input.channelId, async ({ channelId }, member) => {
     if (member.voice.channelId !== channelId) await checkChannel(member, channelId, permissionFlags.ManageChannels);
-  }),
-  createStageInstance: channel(stageModerator, bodyChannel),
-  editStageInstance: channel(stageModerator),
-  deleteStageInstance: channel(stageModerator),
-  sendSoundboardSound: channel(permissionFlags.Connect | permissionFlags.UseSoundboard, (input) => input.channelId, ({ body }, member) => {
-    const sourceGuildId = object.parse(body).source_guild_id;
-    if (sourceGuildId !== undefined && sourceGuildId !== member.guild.id) throw denied();
   }),
 
   deleteInvite: {
@@ -422,7 +403,7 @@ const dmTools = new Set<ToolName>([
   "getPollVoters",
 ]);
 
-const filterChannelResults = (name: ToolName, result: unknown, member: GuildMember): unknown => {
+const filterChannelResults = (name: ToolName, result: unknown, member: GuildMember, args: Input): unknown => {
   const visible = (channelId: unknown, permission = 0n) => {
     if (typeof channelId !== "string") return false;
     const target = member.guild.channels.cache.get(channelId);
@@ -432,6 +413,16 @@ const filterChannelResults = (name: ToolName, result: unknown, member: GuildMemb
   if (name === "getGuildWebhooks") return z.array(object).parse(result).filter((item) => visible(item.channelId, permissionFlags.ManageWebhooks));
   if (name === "getGuildInvites") return z.array(object).parse(result).filter((item) => visible(object.safeParse(item.channel).data?.id, permissionFlags.ManageChannels));
   if (name === "getGuildEvents") return z.array(object).parse(result).filter((item) => item.channel_id === null || visible(item.channel_id));
+  if (name === "getMembers" || name === "getMemberInfo") {
+    // Hide voice channel details the requester cannot see:
+    const hideVoiceChannel = (item: Input) => visible(item.voiceChannelId) ? item : { ...item, voiceChannelId: null, voiceChannelName: null };
+    if (name === "getMemberInfo") return hideVoiceChannel(object.parse(result));
+    const members = z.array(object).parse(result);
+    if (args.inVoice === true && (args.nameFilter === undefined || args.nameFilter === "")) {
+      return members.filter((item) => visible(item.voiceChannelId));
+    }
+    return members.map(hideVoiceChannel);
+  }
   if (name === "getActiveThreads") {
     const data = z.object({ threads: z.array(object), members: z.array(object) }).parse(result);
     const threads = data.threads.filter((item) => visible(item.parent_id, item.type === ChannelType.PrivateThread ? permissionFlags.ManageThreads : 0n));
@@ -530,7 +521,7 @@ export const getDiscordToolsForMessage = (
         // Check the requester's permissions on every other server target:
         const requester = await requireGuildToolPermission(args, message.member, rule);
         const result: unknown = await execute(input, toolOptions);
-        return filterChannelResults(name, result, requester);
+        return filterChannelResults(name, result, requester, args);
       },
     };
   };
