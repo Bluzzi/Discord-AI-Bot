@@ -22,7 +22,7 @@ Use lowercase English kebab-case for filename stems. In the patterns below, each
 | Drizzle table definition | `src/tables/<table-name>.ts`. Use the singular table name in kebab-case for the file, snake_case for the SQL identifier, and `table<PascalCaseName>` for the exported table. Keep column definitions and table-specific enums with the table. |
 | Shared utility | `src/utils/<purpose>.ts`. Use a short name such as `attempt.ts` or `web-content.ts`. Shared runtime setup such as environment validation and logging lives in the existing `env.ts` and `logger.ts` modules. |
 
-Keep feature-specific workflow code in the function handling the feature. For example, a tool declares its schema and executes its action in the matching tool module, and message handling stays in the message event handler. Place reusable integration policy such as Discord tool permissions in the integration helper. For Discord approval and permission requirements, follow the root `AGENTS.md`.
+Keep feature-specific workflow code in the function handling the feature. For example, a tool declares its schema and executes its action in the matching tool module, and message handling stays in the message event handler. Place reusable integration policy such as Discord tool permissions in the integration helper. See [discord-tools](../discord-tools/SKILL.md) for Discord approval and permission requirements.
 
 Use the `#/` alias for source imports across folders. A trigger registers when its module is imported. Connect new triggers to the relevant startup import chain and preserve its timing. The message event is imported before Discord login and the quota job is imported after login. The interaction event is reached through the message event's import of the approval handler.
 
@@ -31,7 +31,7 @@ Use the `#/` alias for source imports across folders. A trigger registers when i
 | Path | Responsibility |
 | --- | --- |
 | `drizzle.config.ts` | Drizzle Kit configuration. Reads schema definitions from `src/tables/` and writes migrations to `drizzle/`. |
-| `drizzle/` and `drizzle/meta/` | Migration SQL, Drizzle snapshots, and the migration journal. Generate new migrations using the command in `AGENTS.md` and keep the generated files together. |
+| `drizzle/` and `drizzle/meta/` | Migration SQL, Drizzle snapshots, and the migration journal. See [database-migrations](../database-migrations/SKILL.md) for the migration workflow. |
 | `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml` | Package scripts and declarations, pnpm workspace settings, and resolved dependencies. |
 | `tsconfig.json`, `eslint.config.js` | TypeScript settings and source aliases, and ESLint configuration. |
 | `Dockerfile`, `.github/workflows/ci.yml` | Container build and automated CI workflow. |

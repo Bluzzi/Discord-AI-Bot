@@ -12,7 +12,7 @@ A skill is an on-demand instruction file the agent loads when its `description` 
 - One directory per skill: `.agents/skills/<name>/SKILL.md`, the name is kebab-case and matches the directory name exactly (Agent Skills standard, agentskills.io).
 - `SKILL.md` frontmatter with exactly two fields:
   - `name`: the skill name, identical to the directory name.
-  - `description`: the load trigger. It MUST state when the skill must be loaded ("MUST be loaded before ...", "Apply whenever ...") and what it covers. The agent decides to load the skill from this description alone: write it for the agent, name the systems and actions concerned, never the history or rationale.
+  - `description`: the load trigger. It MUST use "MUST be loaded before ..." to state when the skill applies and summarize what it covers. Name the relevant systems and actions so the description alone is sufficient to decide when to load the skill.
 - Supporting files (scripts, references, templates) live next to `SKILL.md` inside the skill directory.
 
 ## Structure (mandatory, in this order)
@@ -25,7 +25,7 @@ A skill is an on-demand instruction file the agent loads when its `description` 
 ## Writing rules
 
 - Rules are absolute and actionable (MUST, NEVER, ALWAYS); explain WHY when the reason is not obvious, with a real failure or a link to the mechanism.
-- Never duplicate another skill: cross-reference it instead (e.g. "see the `prefer-duplication` skill"), including from `AGENTS.md` files.
+- Cross-reference related skills from within skills to keep each rule in one place.
 - One skill = one system or one rule. Do not mix a procedure with an unrelated constraint set.
 
 ## Constraints
@@ -33,4 +33,4 @@ A skill is an on-demand instruction file the agent loads when its `description` 
 - Never create a skill for something an `AGENTS.md` already covers as always-loaded context; conversely, a step-by-step procedure never belongs in an `AGENTS.md`.
 - Every "Reference implementations" entry MUST be verified against the repository (the file exists and uses the documented pattern).
 - When a referenced file moves or is renamed, update every skill referencing it (grep `.agents/`, `.opencode/` and the `AGENTS.md` files for the old path).
-- A new skill that documents a system an agent touches regularly is registered in the root `AGENTS.md` conventions bullet.
+- NEVER add a skill link or loading instruction to an `AGENTS.md` file. Every skill MUST define its full loading trigger in its own description.
