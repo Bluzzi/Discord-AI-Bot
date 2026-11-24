@@ -13,6 +13,7 @@ export const githubTools = {
       repo: z.string().trim().regex(/^(?!\.{1,2}$)[a-z0-9_.-]+$/iu).describe("Repository name without the owner or URL"),
     }),
     execute: async ({ owner, repo }) => {
+      // Select the repository metadata and return the license as an SPDX identifier:
       const { data } = await octokit.rest.repos.get({ owner, repo });
       const { full_name, description, default_branch, language, stargazers_count, topics, license, pushed_at, open_issues_count } = data;
       return { full_name, description, default_branch, language, stargazers_count, topics, license: license?.spdx_id, pushed_at, open_issues_count };
@@ -49,7 +50,7 @@ export const githubTools = {
       end_line: z.number().int().positive().optional().describe("Last line to read, inclusive (1-based)"),
     }),
     execute: async ({ owner, repo, path, ref, start_line: startLine = 1, end_line: endLine }) => {
-      // Validate the requested range before fetching the file:
+      // Validate the requested range and require a Base64-encoded file:
       if (endLine !== undefined && endLine < startLine) throw new Error("end_line must be at least start_line.");
       const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref });
       if (Array.isArray(data) || data.type !== "file" || data.encoding !== "base64") {
@@ -78,6 +79,7 @@ export const githubTools = {
       limit: z.number().int().min(1).max(20).default(10),
     }),
     execute: async ({ owner, repo, query, limit }) => {
+      // Request matching excerpts and keep results from the requested repository:
       const { data } = await octokit.rest.search.code({
         q: `${query} repo:${owner}/${repo}`,
         per_page: limit,
@@ -98,8 +100,10 @@ export const githubTools = {
       limit: z.number().int().min(1).max(20).default(10),
     }),
     execute: async ({ owner, repo, query, state, type, limit }) => {
-      // Build the search query and handle discussions through GraphQL:
+      // Scope the search to the requested repository and state:
       const searchQuery = [query, `repo:${owner}/${repo}`, state === "all" ? undefined : `is:${state}`].filter(Boolean).join(" ");
+
+      // Use GraphQL for discussions and keep matches from the public repository:
       if (type === "discussion") {
         const { search } = await octokit.graphql<{ search: { nodes: ({ repository: { nameWithOwner: string; visibility: string } } | null)[] } }>(dedent`
           query($q: String!, $limit: Int!) {
@@ -184,10 +188,12 @@ export const githubTools = {
         return result.repository.discussion;
       }
 
-      // Read the issue or pull request, including comments and requested file summaries:
+      // Read the issue or pull request and paginate its comments:
       const issueParams = { owner, repo, issue_number: number };
       const { data: issue } = await octokit.rest.issues.get(issueParams);
       const comments = await octokit.paginate(octokit.rest.issues.listComments, issueParams, (page) => page.data.map(({ user, body, created_at, html_url }) => ({ author: user?.login, body, created_at, html_url })));
+
+      // Include changed files with bounded patch excerpts when requested:
       const files = issue.pull_request && includeFiles ? await octokit.paginate(octokit.rest.pulls.listFiles, { owner, repo, pull_number: number }, (page) => page.data.map(({ filename, status, additions, deletions, patch }) => ({
         filename,
         status,

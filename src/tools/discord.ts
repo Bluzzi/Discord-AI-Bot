@@ -12,6 +12,8 @@ import { Readable } from "node:stream";
 import { z } from "zod";
 
 export const discordTools = {
+  // For raw REST responses, decode any bytes and normalize empty bodies to an object:
+
   // Guilds and Members:
   getBotGuilds: tool({
     description: "List guilds the bot belongs to.",
@@ -279,6 +281,7 @@ export const discordTools = {
       }),
     }),
     execute: async ({ guildId, reason, body }) => {
+      // Pass the selected roles and count option to the prune endpoint:
       const result = await discordClient.rest.post(`/guilds/${guildId}/prune`, { reason, body });
       if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
       return result ?? {};
@@ -450,6 +453,7 @@ export const discordTools = {
     description: "Forward announcements to a destination channel.",
     inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), body: z.object({ webhook_channel_id: z.string().regex(/^\d{1,20}$/u) }) }),
     execute: async ({ channelId, body }) => {
+      // Register the destination channel as a follower of the announcement channel:
       const result = await discordClient.rest.post(`/channels/${channelId}/followers`, { body });
       if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
       return result ?? {};
@@ -492,6 +496,7 @@ export const discordTools = {
       sticker_ids: z.array(z.string().regex(/^\d{1,20}$/u)).max(3),
       flags: z.number().int().nonnegative(),
     }).partial(), applied_tags: z.array(z.string().regex(/^\d{1,20}$/u)).max(5).optional() }), reason: z.string().max(512).optional() }),
+    // Restrict mentions in the first message of the forum thread:
     execute: async ({ channelId, body, reason }) => discordClient.rest.post(Routes.threads(channelId), {
       body: { ...body, message: { ...body.message, allowed_mentions: { parse: ["users", "roles"] } } },
       reason,
@@ -541,6 +546,7 @@ export const discordTools = {
       query: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().regex(/^\d{1,20}$/u).optional() }).optional(),
     }),
     execute: async ({ channelId, query }) => {
+      // Query the archive for private threads the bot joined:
       const result = await discordClient.rest.get(`/channels/${channelId}/users/@me/threads/archived/private`, {
         query: makeURLSearchParams(query),
       });
@@ -683,6 +689,7 @@ export const discordTools = {
       })).max(10).optional() }),
     }),
     execute: async ({ channelId, body: { files, ...body } }) => {
+      // Pair multipart files with their attachment IDs and restrict mention parsing:
       return discordClient.rest.post(Routes.channelMessages(channelId), {
         body: { ...body, attachments: files?.map(({ name }, index) => ({ id: index, filename: name })), allowed_mentions: { parse: ["users", "roles"] } },
         files: files === undefined ? undefined : await Promise.all(files.map(async ({ url, name }) => MessagePayload.resolveFile({ attachment: url, name }))),
@@ -701,6 +708,7 @@ export const discordTools = {
       content: z.string().max(2000).nullable().optional(),
       attachments: z.array(z.object({ id: z.string().regex(/^\d{1,20}$/u), description: z.string().max(1024).optional() })).optional(),
     }) }),
+    // Restrict mention parsing when updating the message body:
     execute: async ({ channelId, messageId, body }) => discordClient.rest.patch(Routes.channelMessage(channelId, messageId), {
       body: { ...body, allowed_mentions: { parse: ["users", "roles"] } },
     }),
@@ -738,6 +746,7 @@ export const discordTools = {
       toChannelId: z.string().regex(/^\d{1,20}$/u),
       guildId: z.string().regex(/^\d{1,20}$/u).optional(),
     }),
+    // Send a forward reference to the original message:
     execute: async ({ channelId, messageId, toChannelId, guildId }) => discordClient.rest.post(Routes.channelMessages(toChannelId), {
       body: { message_reference: { type: 1, channel_id: channelId, message_id: messageId, guild_id: guildId }, allowed_mentions: { parse: [] } },
     }),
@@ -1287,6 +1296,7 @@ export const discordTools = {
       threadId: z.string().regex(/^\d{1,20}$/u).optional(),
     }),
     execute: async ({ webhookId, messageId, threadId }) => {
+      // Fetch the message through its webhook, using the thread when supplied:
       const webhook = await discordClient.fetchWebhook(webhookId);
       const message = await webhook.fetchMessage(messageId, { threadId });
       return { id: message.id, content: message.content, channelId: message.channelId, createdAt: message.createdAt.toISOString() };
@@ -1300,6 +1310,7 @@ export const discordTools = {
       threadId: z.string().regex(/^\d{1,20}$/u).optional(),
     }).extend({ content: z.string().max(2000).nullable() }),
     execute: async ({ webhookId, messageId, threadId, content }) => {
+      // Edit through the original webhook and restrict mention parsing:
       const webhook = await discordClient.fetchWebhook(webhookId);
       const message = await webhook.editMessage(messageId, { content, threadId, allowedMentions: { parse: ["users", "roles"] } });
       return { messageId: message.id };
@@ -1313,6 +1324,7 @@ export const discordTools = {
       threadId: z.string().regex(/^\d{1,20}$/u).optional(),
     }),
     execute: async ({ webhookId, messageId, threadId }) => {
+      // Delete through the original webhook, using the thread when supplied:
       const webhook = await discordClient.fetchWebhook(webhookId);
       await webhook.deleteMessage(messageId, threadId);
       return {};
@@ -1412,6 +1424,7 @@ export const discordTools = {
       reason: z.string().max(512).optional(),
     }),
     execute: async ({ guildId, url, name, tags, description, reason }) => {
+      // Upload the sticker file to the target guild and return its URL:
       const guild = await discordClient.guilds.fetch(guildId);
       const sticker = await guild.stickers.create({ file: url, name, tags, description, reason });
       return { id: sticker.id, name: sticker.name, url: sticker.url };
@@ -1551,6 +1564,7 @@ export const discordTools = {
       createdAt: z.string(),
     }),
     execute: async ({ guildId }) => {
+      // Fetch the guild and return its ownership and member count:
       const guild = await discordClient.guilds.fetch(guildId);
 
       return {
@@ -1653,6 +1667,7 @@ export const discordTools = {
       topic: z.string().nullable(),
     }),
     execute: async ({ channelId }) => {
+      // Fetch the channel and return the fields supported by its type:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
 
@@ -1876,6 +1891,7 @@ export const discordTools = {
       voiceChannelName: z.string().nullable(),
     }),
     execute: async ({ guildId, userId }) => {
+      // Fetch the member and summarize their guild permissions and voice state:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(userId);
@@ -2041,6 +2057,7 @@ export const discordTools = {
       color: z.string(),
     }),
     execute: async ({ guildId, name, color }) => {
+      // Convert the optional hex color when creating the role in the guild:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const role = await guild.roles.create({
@@ -2449,6 +2466,7 @@ export const discordTools = {
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
+      // Download the file and derive a fallback filename from its URL:
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to download file (HTTP ${String(response.status)})`);
@@ -3138,6 +3156,7 @@ export const discordTools = {
         throw new Error("Provide exactly one of webhookId or webhookUrl");
       }
 
+      // Resolve the webhook and post to the selected thread when supplied:
       const webhook = webhookId !== undefined ? await discordClient.fetchWebhook(webhookId) : new WebhookClient({ url: webhookUrl! });
       const message = await webhook.send({
         content: sanitizeDiscordMessage(content),
@@ -3167,6 +3186,7 @@ export const discordTools = {
       url: z.string(),
     })),
     execute: async ({ guildId }) => {
+      // Fetch guild emojis and return their display syntax and image URLs:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const emojis = await guild.emojis.fetch();
@@ -3195,6 +3215,7 @@ export const discordTools = {
       url: z.string(),
     }),
     execute: async ({ guildId, name, imageUrl }) => {
+      // Upload the image as a custom emoji in the target guild:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const emoji = await guild.emojis.create({ attachment: imageUrl, name });

@@ -1,5 +1,5 @@
 import type { ToolSet } from "ai";
-import { getExa } from "#/integrations/exa";
+import { exa } from "#/integrations/exa";
 import { attempt } from "#/utils/attempt";
 import { getPublicPage, parseWebUrl, PublicWebError, readPageBody } from "#/utils/public-web";
 import { extractWebContent } from "#/utils/web-content";
@@ -17,7 +17,6 @@ export const webTools = {
     execute: async ({ query, num_results: numResults, time_range: timeRange }) => {
       // Search for sources within the requested publication window:
       const rangeDays = { day: 1, week: 7, month: 30, year: 365 };
-      const exa = getExa();
       const { results } = await exa.search(query, {
         numResults,
         startPublishedDate: timeRange ? new Date(Date.now() - rangeDays[timeRange] * 86400000).toISOString() : undefined,
@@ -70,7 +69,7 @@ export const webTools = {
             response.destroy();
             if (redirects === 5) return failure("redirect_limit", status);
             const location = response.headers.location;
-            const next: URL | null = location === undefined || location === "" ? null : parseWebUrl(location, target);
+            const next = location === undefined || location === "" ? null : parseWebUrl(location, target);
             if (next === null) return failure("invalid_redirect", status);
             target = next;
             continue;

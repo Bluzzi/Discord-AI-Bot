@@ -61,13 +61,12 @@ const saveReplyError = async (error: unknown, message: Message, label: string) =
 trigger.discordEvent("messageCreate", async (message) => {
   // Ignore bot messages and channels that cannot receive replies:
   if (message.author.bot) return;
-  const channel = message.channel;
+  const { channel } = message;
   if (!channel.isSendable()) return;
 
+  // Accept a direct reply to the bot or an explicit mention:
   const botUser = discordClient.user;
   if (botUser === null) return;
-
-  // Accept a direct reply to the bot or an explicit mention:
   const isReplyToBot = message.type === MessageType.Reply && message.mentions.repliedUser?.id === botUser.id;
   const mentionsBot = message.mentions.has(botUser, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
   if (!isReplyToBot && !mentionsBot) return;
@@ -102,23 +101,18 @@ trigger.discordEvent("messageCreate", async (message) => {
   }, 8_000).unref();
 
   try {
-    const channelId = channel.id;
-    const { id: messageId, guild, member } = message;
-
     // Verify that the current channel supports message history:
+    const { channelId, id: messageId, guild, member } = message;
     const historyChannel = await discordClient.channels.fetch(channelId);
     if (historyChannel?.isTextBased() !== true) {
       throw new Error("Channel not found or not a text channel");
     }
-
-    const historyGuild = "guild" in historyChannel ? historyChannel.guild : null;
 
     // Fetch the target and its history without including later messages:
     const previousMessages = await historyChannel.messages.fetch({ limit: 10, before: messageId });
     const targetMessage = await historyChannel.messages.fetch(messageId);
 
     const referencedMessageId = targetMessage.reference?.messageId ?? null;
-    const referencedMessage = referencedMessageId === null ? undefined : previousMessages.get(referencedMessageId);
 
     // Render the conversation in order and neutralize forged author prefixes:
     const conversation = [...previousMessages.values(), targetMessage]
@@ -141,6 +135,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     }
 
     // Prepare the channel, conversation and target references for the model:
+    const historyGuild = "guild" in historyChannel ? historyChannel.guild : null;
     const replyContext = {
       channel: {
         id: historyChannel.id,
@@ -151,7 +146,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       },
       conversation,
       referencedMessageId,
-      referencedAuthorId: referencedMessage?.author.id ?? null,
+      referencedAuthorId: referencedMessageId === null ? null : previousMessages.get(referencedMessageId)?.author.id ?? null,
       mentionedUserIds: [...targetMessage.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID).map((user) => user.id),
       mentionedChannelIds: [...targetMessage.mentions.channels.values()].map((mentionedChannel) => mentionedChannel.id),
     };
@@ -239,6 +234,7 @@ trigger.discordEvent("messageCreate", async (message) => {
         },
       ],
       prepareStep: ({ stepNumber, steps }) => {
+        // Reserve the final step for sending a reply or its fallback:
         if (stepNumber !== maxSteps - 1) return { toolChoice: "required" };
         const triedReply = steps.some((step) => step.toolCalls.some(({ toolName }) => toolName === "sendReply"));
         return { toolChoice: { type: "tool", toolName: triedReply ? "sendMessage" : "sendReply" } };
@@ -250,6 +246,7 @@ trigger.discordEvent("messageCreate", async (message) => {
         ...webTools,
       },
       onToolExecutionStart: ({ toolCall }) => {
+        // Omit reply, approval and sandbox file contents from tool logs:
         if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
           logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
           return;
@@ -314,6 +311,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     });
   }
   finally {
+    // Stop the typing indicator on every exit, including stream failures:
     clearInterval(typingTimer);
   }
 }, async (error, message) => saveReplyError(error, message, "Discord reply failed"));

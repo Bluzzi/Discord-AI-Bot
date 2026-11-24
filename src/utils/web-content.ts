@@ -38,14 +38,17 @@ const trackingParam = /^(?:utm_.+|fbclid|gclid|dclid|msclkid|mc_[ce]id)$/iu;
 const compact = (text: string, max: number) => text.replace(/\s+/gu, " ").trim().slice(0, max);
 
 const collectLinks = (root: Element, navigation: HTMLAnchorElement[], pageUrl: URL, baseUrl: URL) => {
+  // Keep distinct, labeled links from the content and navigation:
   const links = new Map<string, { text: string; url: string }>();
   for (const anchor of [...root.querySelectorAll<HTMLAnchorElement>("a[href]"), ...navigation]) {
     const href = anchor.getAttribute("href")?.trim() ?? "";
     if (!href || href.startsWith("#") || anchor.hasAttribute("download")) continue;
     const url = parseWebUrl(href, baseUrl);
     if (url === null || url.port || socialHost.test(url.hostname) || unwantedPath.test(url.pathname)) continue;
-    const trackingKeys = [...url.searchParams.keys()].filter((key) => trackingParam.test(key));
-    for (const key of trackingKeys) url.searchParams.delete(key);
+    // Strip tracking parameters before comparing URLs:
+    for (const key of [...url.searchParams.keys()]) {
+      if (trackingParam.test(key)) url.searchParams.delete(key);
+    }
     if (url.href === pageUrl.href) continue;
 
     const text = compact(anchor.textContent, 140) || compact(anchor.getAttribute("aria-label") ?? "", 140);
