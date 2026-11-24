@@ -39,7 +39,7 @@ Run both commands after changing code and fix any errors they report.
 
 ## Stack
 
-- The project uses TypeScript and pnpm. It uses Discord.js (`discord.js`) to interact with Discord. [Discord.js documentation](https://discordjs.dev/docs/packages/discord.js/main)
+- The project uses TypeScript, Node and pnpm. It uses Discord.js (`discord.js`) to interact with Discord. [Discord.js documentation](https://discordjs.dev/docs/packages/discord.js/main)
 - Vercel AI SDK (`ai`) handles AI generation and tool calling. Model calls go through OpenRouter. [AI SDK documentation](https://ai-sdk.dev/docs/getting-started/nodejs) · [OpenRouter documentation](https://openrouter.ai/docs/quickstart)
 - Use Zod (`zod`) to define schemas for AI interactions, such as tool inputs and structured model outputs, and wherever else runtime validation is needed. For responses with a reliable contract, such as those from a trusted API SDK, rely on the SDK's types unless there is a specific reason to validate at runtime. [Zod documentation](https://zod.dev/)
 - The `webfetch` and `websearch` tools follow OpenCode's implementations. Use OpenCode as the preferred open-source reference when maintaining these tools. [OpenCode tools documentation](https://opencode.ai/docs/tools/#web)
