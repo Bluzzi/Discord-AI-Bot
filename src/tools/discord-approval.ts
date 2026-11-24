@@ -11,6 +11,7 @@ export const discordApprovalTools = {
   proposeDiscordActions: {
     description: "Ask the requesting member to approve Discord actions, including creations, updates and deletions. Submit all intended changes in execution order. Returns immediately with an approval message URL. The actions are still pending.",
     inputSchema: (() => {
+      // Derive the approval schema from the registered mutation tools:
       const [first, ...rest] = (Object.keys(discordTools) as DiscordToolName[]).filter((name) => !discordReadTools.has(name)).map((name) => {
         const description = discordTools[name].description;
         return z.object({

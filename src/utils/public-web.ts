@@ -43,12 +43,13 @@ export class PublicWebError extends Error {
 
 export const parseWebUrl = (value: string, base?: URL) => {
   const url = URL.parse(value, base);
-  if (!url || !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.href.length > 4096) return null;
+  if (url === null || !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.href.length > 4096) return null;
   url.hash = "";
   return url;
 };
 
 export const getPublicPage = async (url: URL, headers: OutgoingHttpHeaders, signal: AbortSignal): Promise<IncomingMessage> => {
+  // Reject non-public IP literals and explicit ports:
   const hostname = url.hostname.replace(/^\[|\]$/gu, "");
   if (isIP(hostname) !== 0 && !isPublicAddress(hostname)) throw new PublicWebError("non_public_url");
   if (url.port) throw new PublicWebError("invalid_url");
@@ -59,13 +60,13 @@ export const getPublicPage = async (url: URL, headers: OutgoingHttpHeaders, sign
       headers,
       signal,
       agent: false,
-      // Validate the same address the socket will connect to, including after each redirect.
+      // Validate the addresses that the socket can connect to:
       lookup: (host, options, callback) => {
         lookup(host, { ...options, all: true }, (error, addresses) => {
           if (error) return callback(error, "", 0);
           const candidates = addresses.filter(({ address }) => isPublicAddress(address));
           const first = candidates[0];
-          if (!first) return callback(new PublicWebError("non_public_url"), "", 0);
+          if (first === undefined) return callback(new PublicWebError("non_public_url"), "", 0);
           if (options.all === true) return callback(null, candidates);
           return callback(null, first.address, first.family);
         });
@@ -94,11 +95,14 @@ const collect = async (source: AsyncIterable<Buffer>) => {
 };
 
 export const readPageBody = async (response: IncomingMessage, signal: AbortSignal): Promise<Buffer> => {
+  // Reject oversized responses before reading their bodies:
   const encoding = response.headers["content-encoding"]?.toLowerCase() ?? "identity";
   if (Number(response.headers["content-length"]) > maxBytes) {
     response.destroy();
     throw new PublicWebError("body_too_large");
   }
+
+  // Apply the same size limit to plain and decompressed bytes:
   if (encoding === "identity") return collect(response as AsyncIterable<Buffer>);
   if (!Object.hasOwn(decompressors, encoding)) {
     response.destroy();

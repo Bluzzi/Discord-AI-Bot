@@ -11,8 +11,8 @@ export const bindRailwayTools = (
   attachmentUrls: ReadonlyMap<string, { url: string; size: number }>,
   replyAttachments: Map<string, { attachment: Buffer; name: string }>,
 ): ToolSet => {
-  const token = env.RAILWAY_TOKEN;
-  if (token === undefined) return {};
+  const railwayToken = env.RAILWAY_TOKEN;
+  if (railwayToken === undefined) return {};
 
   // Keep the sandbox and export budget scoped to this Discord request:
   let sandbox: ReturnType<typeof Sandbox.create> | undefined;
@@ -35,7 +35,7 @@ export const bindRailwayTools = (
         }
         // Start an isolated VM and release the cached promise if creation fails:
         sandbox ??= Sandbox.create({
-          token,
+          token: railwayToken,
           authType: "project-token",
           idleTimeoutMinutes: 5,
           networkIsolation: "ISOLATED",
@@ -69,10 +69,14 @@ export const bindRailwayTools = (
       execute: async ({ attachmentId, path }) => {
         if (sandbox === undefined) throw new Error("Call createRailwaySandbox first");
         const vm = await sandbox;
+
+        // Resolve the attachment and enforce its size limit:
         const maxFileBytes = 10 * 1024 * 1024;
         const file = attachmentUrls.get(attachmentId);
         if (file === undefined) throw new Error("Attachment ID not found in this reply context");
         if (file.size > maxFileBytes) throw new Error("Discord attachment exceeds 10 MiB");
+
+        // Download the attachment and write it to the VM:
         const response = await fetch(file.url, { redirect: "error", signal: AbortSignal.timeout(20_000) });
         if (!response.ok) throw new Error(`Discord attachment download failed (HTTP ${String(response.status)})`);
         const bytes = await response.bytes();
@@ -101,11 +105,15 @@ export const bindRailwayTools = (
       execute: async ({ path, name }) => {
         if (sandbox === undefined) throw new Error("Call createRailwaySandbox first");
         const vm = await sandbox;
+
+        // Read the output within the per-file and per-request limits:
         const maxFileBytes = 10 * 1024 * 1024;
         const maxExportedBytes = 25 * 1024 * 1024;
         const limit = Math.min(maxFileBytes, maxExportedBytes - exportedBytes);
         const bytes = await vm.files.read(path, { format: "bytes", length: limit + 1 });
         if (bytes.length > maxFileBytes || bytes.length + exportedBytes > maxExportedBytes) throw new Error("Sandbox output exceeds the file or request size limit");
+
+        // Register the exported file for this Discord response:
         exportedBytes += bytes.length;
         const attachmentRef = randomUUID();
         replyAttachments.set(attachmentRef, { attachment: Buffer.from(bytes), name });
@@ -116,12 +124,13 @@ export const bindRailwayTools = (
       description: "Destroy the current Railway VM. Call this once commands and exports are finished, before replying. Exported attachment references remain usable after destruction.",
       inputSchema: z.object({}),
       execute: async () => {
+        // Release the current VM without clearing a replacement created concurrently:
         const current = sandbox;
-        if (current !== undefined) {
-          const vm = await current;
-          await vm.destroy();
-          if (sandbox === current) sandbox = undefined;
-        }
+        if (current === undefined) return { status: "destroyed" };
+
+        const vm = await current;
+        await vm.destroy();
+        if (sandbox === current) sandbox = undefined;
         return { status: "destroyed" };
       },
     }),

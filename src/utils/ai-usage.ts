@@ -10,6 +10,7 @@ type AiContentPart = {
 };
 
 const formatToolNameCounts = (toolNames: readonly string[]): string => {
+  // Count repeated tools while preserving first-use order:
   const counts = new Map<string, number>();
 
   for (const toolName of toolNames) {
@@ -38,6 +39,7 @@ export const aiUsage = {
 
   /** Format token usage: "15320 input tokens (11200 cached) | 245 output tokens (31 reasoning)" */
   formatTokens: (usage: LanguageModelUsage): string => {
+    // Include cached input only when the provider reports a positive count:
     const inputDetails: string[] = [];
 
     const cacheReadTokens = usage.inputTokenDetails.cacheReadTokens;
@@ -46,6 +48,7 @@ export const aiUsage = {
     const cacheWriteTokens = usage.inputTokenDetails.cacheWriteTokens;
     if (cacheWriteTokens !== undefined && cacheWriteTokens > 0) inputDetails.push(`${String(cacheWriteTokens)} written`);
 
+    // Include reported reasoning tokens in the output breakdown:
     const outputDetails: string[] = [];
 
     const reasoningTokens = usage.outputTokenDetails.reasoningTokens;

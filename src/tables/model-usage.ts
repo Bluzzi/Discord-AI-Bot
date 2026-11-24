@@ -1,4 +1,4 @@
-import { columns } from "../utils/postgres";
+import { columns } from "#/utils/postgres-timestamps";
 import { integer, numeric, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 export const aiCauseEnum = pgEnum("ai_cause", [

@@ -26,7 +26,7 @@ export const webTools = {
       // Return normalized links and short snippets:
       return results.slice(0, numResults).flatMap((result) => {
         const url = parseWebUrl(result.url);
-        if (!url) return [];
+        if (url === null) return [];
         const highlight = Array.isArray(result.highlights) ? result.highlights[0] : undefined;
         return [{
           title: (result.title ?? "").trim() || url.hostname,
@@ -56,23 +56,27 @@ export const webTools = {
         "Accept-Encoding": "gzip, deflate, br",
       };
 
+      // Validate the URL and share one timeout across the request and redirects:
       const initialUrl = parseWebUrl(url);
-      if (!initialUrl) return failure("invalid_url");
+      if (initialUrl === null) return failure("invalid_url");
       const signal = AbortSignal.timeout(10000);
       const result = await attempt(async () => {
         let target = initialUrl;
         for (let redirects = 0; redirects <= 5; redirects += 1) {
           const response = await getPublicPage(target, headers, signal);
           const status = response.statusCode ?? 0;
+          // Handle redirects and close the previous response before following them:
           if ([301, 302, 303, 307, 308].includes(status)) {
             response.destroy();
             if (redirects === 5) return failure("redirect_limit", status);
             const location = response.headers.location;
             const next: URL | null = location === undefined || location === "" ? null : parseWebUrl(location, target);
-            if (!next) return failure("invalid_redirect", status);
+            if (next === null) return failure("invalid_redirect", status);
             target = next;
             continue;
           }
+
+          // Map access restrictions and HTTP failures to tool errors:
           if (status === 429 || status === 403 || response.headers["cf-mitigated"] === "challenge") {
             response.destroy();
             return failure(status === 429 ? "rate_limited" : "access_blocked", status);
@@ -82,6 +86,7 @@ export const webTools = {
             return failure("http_error", status);
           }
 
+          // Read supported content types and extract the readable text:
           const contentType = response.headers["content-type"] ?? "";
           if (!(/^(?:text\/[^;\s]+|application\/(?:xhtml\+xml|json|xml))(?:\s*;|\s*$)/iu).test(contentType)) {
             response.destroy();
@@ -90,6 +95,8 @@ export const webTools = {
 
           const { title, markdown, links } = extractWebContent(await readPageBody(response, signal), contentType, target);
           if (!markdown.trim() && links.length === 0) return failure("no_readable_content", status);
+
+          // Return a page of text without splitting a surrogate pair:
           const start = Math.min(offset, markdown.length);
           let end = Math.min(start + maxLength, markdown.length);
           if (end < markdown.length) {

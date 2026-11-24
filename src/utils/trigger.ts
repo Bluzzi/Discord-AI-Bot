@@ -5,16 +5,17 @@ import { Cron } from "croner";
 
 const discordEvent = <K extends keyof ClientEvents>(
   eventName: K,
-  fn: (...args: ClientEvents[K]) => void | Promise<void>,
+  handler: (...args: ClientEvents[K]) => void | Promise<void>,
   onError?: (error: unknown, ...args: ClientEvents[K]) => void | Promise<void>,
 ) => {
+  // Route event failures to the caller's handler or the default logger:
   discordClient.on(eventName, (...args) => {
     void (async () => {
       try {
-        await fn(...args);
+        await handler(...args);
       }
       catch (error) {
-        if (onError) {
+        if (onError !== undefined) {
           await onError(error, ...args);
           return;
         }
@@ -30,10 +31,11 @@ const discordEvent = <K extends keyof ClientEvents>(
 const cron = async (
   cronName: string,
   cronPattern: string,
-  fn: () => Promise<void> | void,
+  handler: () => Promise<void> | void,
   options: { triggerAtStartup: boolean },
 ) => {
-  const job = new Cron(cronPattern, async () => fn(), {
+  // Register the schedule and optionally trigger its first run immediately:
+  const job = new Cron(cronPattern, async () => handler(), {
     catch: (error) => {
       logger.error(
         `Cron \`${cronName}\` error:`,

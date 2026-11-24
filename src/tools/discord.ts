@@ -1,7 +1,10 @@
 import type { ToolSet } from "ai";
 import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIButtonComponentWithURL, GuildVoiceChannelResolvable } from "discord.js";
-import { createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
-import { discordClient, fetchDiscordVoiceConnection, getDiscordAudioPlayer, replaceDiscordAudio, sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord";
+import { createAudioPlayer, createAudioResource, entersState, joinVoiceChannel, StreamType, VoiceConnectionStatus } from "@discordjs/voice";
+import { discordClient } from "#/integrations/discord";
+import { sanitizeDiscordMessage, splitDiscordMessage } from "#/utils/discord";
+import { fetchDiscordVoiceConnection, getDiscordAudioPlayer } from "#/utils/discord-voice";
+import { logger } from "#/utils/logger";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
@@ -9,7 +12,7 @@ import { Readable } from "node:stream";
 import { z } from "zod";
 
 export const discordTools = {
-  // Guilds And Members
+  // Guilds and Members:
   getBotGuilds: tool({
     description: "List guilds the bot belongs to.",
     inputSchema: z.object({
@@ -297,7 +300,7 @@ export const discordTools = {
     },
   }),
 
-  // Channels And Threads
+  // Channels and Threads:
   getChannelDetails: tool({
     description: "Get full channel settings and permission overwrites.",
     inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u) }),
@@ -615,7 +618,7 @@ export const discordTools = {
     },
   }),
 
-  // Messages And Polls
+  // Messages and Polls:
   getMessage: tool({
     description: "Get a message by ID.",
     inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), messageId: z.string().regex(/^\d{1,20}$/u) }),
@@ -711,10 +714,13 @@ export const discordTools = {
       waveform: z.string().min(1).max(344),
     }),
     execute: async ({ channelId, url, durationSeconds, waveform }) => {
+      // Download the audio before posting the voice message:
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Could not download the voice message (HTTP ${String(response.status)})`);
       }
+
+      // Send the audio and its waveform to the channel:
       return discordClient.rest.post(Routes.channelMessages(channelId), {
         files: [{ data: Buffer.from(await response.arrayBuffer()), name: "voice-message.ogg", contentType: "audio/ogg" }],
         body: {
@@ -779,13 +785,16 @@ export const discordTools = {
       emoji: z.string().min(1).describe("Unicode emoji, name:id or custom emoji markup"),
     }).extend({ after: z.string().regex(/^\d{1,20}$/u).optional(), limit: z.number().int().min(1).max(100).optional(), type: z.union([z.literal(0), z.literal(1)]).optional().describe("0 normal, 1 super reaction") }),
     execute: async ({ channelId, messageId, emoji, after, limit, type }) => {
+      // Build the reaction pagination options:
       const query = new URLSearchParams();
       if (after !== undefined) query.set("after", after);
       if (limit !== undefined) query.set("limit", String(limit));
       if (type !== undefined) query.set("type", String(type));
-      const resolved = parseEmoji(emoji);
-      if (resolved === null) throw new Error("Invalid emoji");
-      const reaction = encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
+
+      // Resolve the emoji for the reaction route:
+      const parsedEmoji = parseEmoji(emoji);
+      if (parsedEmoji === null) throw new Error("Invalid emoji");
+      const reaction = encodeURIComponent(parsedEmoji.id === undefined ? parsedEmoji.name : `${parsedEmoji.name}:${parsedEmoji.id}`);
       return discordClient.rest.get(Routes.channelMessageReaction(channelId, messageId, reaction), { query });
     },
   }),
@@ -797,9 +806,12 @@ export const discordTools = {
       emoji: z.string().min(1).describe("Unicode emoji, name:id or custom emoji markup"),
     }).extend({ userId: z.string().regex(/^\d{1,20}$/u).optional() }),
     execute: async ({ channelId, messageId, emoji, userId }) => {
-      const resolved = parseEmoji(emoji);
-      if (resolved === null) throw new Error("Invalid emoji");
-      const reaction = encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
+      // Resolve the emoji for the reaction route:
+      const parsedEmoji = parseEmoji(emoji);
+      if (parsedEmoji === null) throw new Error("Invalid emoji");
+      const reaction = encodeURIComponent(parsedEmoji.id === undefined ? parsedEmoji.name : `${parsedEmoji.name}:${parsedEmoji.id}`);
+
+      // Choose the route for the bot's reaction or the specified user's reaction:
       const route = userId === undefined ? Routes.channelMessageOwnReaction(channelId, messageId, reaction) : Routes.channelMessageUserReaction(channelId, messageId, reaction, userId);
       await discordClient.rest.delete(route);
       return {};
@@ -813,9 +825,10 @@ export const discordTools = {
       emoji: z.string().min(1).describe("Unicode emoji, name:id or custom emoji markup"),
     }),
     execute: async ({ channelId, messageId, emoji }) => {
-      const resolved = parseEmoji(emoji);
-      if (resolved === null) throw new Error("Invalid emoji");
-      const reaction = encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
+      // Resolve the emoji for the reaction route:
+      const parsedEmoji = parseEmoji(emoji);
+      if (parsedEmoji === null) throw new Error("Invalid emoji");
+      const reaction = encodeURIComponent(parsedEmoji.id === undefined ? parsedEmoji.name : `${parsedEmoji.name}:${parsedEmoji.id}`);
       await discordClient.rest.delete(Routes.channelMessageReaction(channelId, messageId, reaction));
       return {};
     },
@@ -855,7 +868,7 @@ export const discordTools = {
     },
   }),
 
-  // Roles And Auto Mod
+  // Roles and Auto Mod:
   getRole: tool({
     description: "Get a guild role and its permissions.",
     inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), roleId: z.string().regex(/^\d{1,20}$/u) }),
@@ -987,11 +1000,12 @@ export const discordTools = {
     },
   }),
 
-  // Voice And Stage
+  // Voice and Stage:
   controlVoiceAudio: tool({
     description: "Pause, resume or stop the bot's audio.",
     inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), operation: z.enum(["pause", "resume", "stop"]) }),
     execute: ({ guildId, operation }) => {
+      // Require a subscribed player before applying the playback command:
       const player = getDiscordAudioPlayer(fetchDiscordVoiceConnection(guildId));
       if (player === undefined) {
         throw new Error("No audio player in this guild");
@@ -1004,6 +1018,7 @@ export const discordTools = {
     description: "Set the bot's own mute or deafen state in voice.",
     inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), mute: z.boolean().optional(), deaf: z.boolean().optional() }),
     execute: ({ guildId, mute, deaf }) => {
+      // Rejoin the active connection with the requested self-mute and self-deafen settings:
       const connection = fetchDiscordVoiceConnection(guildId);
       if (!connection.rejoin({
         channelId: connection.joinConfig.channelId,
@@ -1162,7 +1177,7 @@ export const discordTools = {
       return result ?? {};
     },
   }),
-  // Invites And Webhooks
+  // Invites and Webhooks:
   getInvite: tool({
     description: "Get an invite by code.",
     inputSchema: z.object({
@@ -1304,7 +1319,7 @@ export const discordTools = {
     },
   }),
 
-  // Expressions and events
+  // Expressions and events:
   getGuildEmoji: tool({
     description: "Get a custom guild emoji.",
     inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), emojiId: z.string().regex(/^\d{1,20}$/u) }),
@@ -1509,7 +1524,7 @@ export const discordTools = {
       return result ?? {};
     },
   }),
-  // Direct messages
+  // Direct messages:
   openDm: tool({
     description: "Open a direct message channel with a user.",
     inputSchema: z.object({ body: z.object({ recipient_id: z.string().regex(/^\d{1,20}$/u) }) }),
@@ -1570,6 +1585,7 @@ export const discordTools = {
       createdAt: z.string(),
     })),
     execute: async ({ guildId, limit = 10, actionType, userId, before, after }) => {
+      // Read the requested page of audit entries and report the actors and targets:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const auditLogs = await guild.fetchAuditLogs({ limit, type: actionType, user: userId, before, after });
@@ -1601,6 +1617,7 @@ export const discordTools = {
       type: z.string(),
     })),
     execute: async ({ guildId, nameFilter }) => {
+      // Read all guild channels before applying the optional name filter:
       const guild = await discordClient.guilds.fetch(guildId);
 
       let channels = (await guild.channels.fetch()).filter((channel) => channel !== null).map((channel) => ({
@@ -1665,6 +1682,7 @@ export const discordTools = {
       channelType: z.string(),
     }),
     execute: async ({ guildId, name, type, categoryId }) => {
+      // Create the channel with the requested Discord type and settings:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const channelTypes = {
@@ -1703,6 +1721,7 @@ export const discordTools = {
       newName: z.string(),
     }),
     execute: async ({ channelId, newName }) => {
+      // Resolve a renamable channel and record its previous name:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!("setName" in channel)) {
@@ -1731,6 +1750,7 @@ export const discordTools = {
       topic: z.string(),
     }),
     execute: async ({ channelId, topic }) => {
+      // Resolve a channel type that supports topics before updating it:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement && channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildMedia) {
@@ -1764,6 +1784,7 @@ export const discordTools = {
       threadName: z.string(),
     }),
     execute: async ({ channelId, name, messageId, autoArchiveMinutes = ThreadAutoArchiveDuration.OneDay }) => {
+      // Resolve the parent channel and validate the requested thread target:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -1889,6 +1910,7 @@ export const discordTools = {
       displayName: z.string().optional(),
     }),
     execute: async ({ userId, guildId }) => {
+      // Look up the optional guild display name before reading the Discord user:
       let displayName: string | undefined;
       if (guildId !== undefined) {
         const guild = await discordClient.guilds.fetch(guildId);
@@ -1923,6 +1945,7 @@ export const discordTools = {
       newNickname: z.string().nullable(),
     }),
     execute: async ({ guildId, memberId, nickname }) => {
+      // Resolve the member and retain the old nickname for the result:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -1950,6 +1973,7 @@ export const discordTools = {
       until: z.string(),
     }),
     execute: async ({ guildId, memberId, durationMinutes = 10, reason }) => {
+      // Apply the timeout and report its effective end time:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -1982,6 +2006,7 @@ export const discordTools = {
       position: z.number(),
     })),
     execute: async ({ guildId, nameFilter }) => {
+      // Read all guild roles before applying the optional name filter:
       const guild = await discordClient.guilds.fetch(guildId);
 
       let roles = (await guild.roles.fetch()).map((role) => ({
@@ -2043,6 +2068,7 @@ export const discordTools = {
       roleName: z.string(),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
+      // Resolve the member and role in the requested guild:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2051,6 +2077,7 @@ export const discordTools = {
         throw new Error("Role not found");
       }
 
+      // Grant the role and report the affected member:
       await member.roles.add(role);
 
       return {
@@ -2072,6 +2099,7 @@ export const discordTools = {
       roleName: z.string(),
     }),
     execute: async ({ guildId, memberId, roleId }) => {
+      // Resolve the member and role in the requested guild:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2080,6 +2108,7 @@ export const discordTools = {
         throw new Error("Role not found");
       }
 
+      // Remove the role and report the affected member:
       await member.roles.remove(role);
 
       return {
@@ -2102,6 +2131,7 @@ export const discordTools = {
       newPosition: z.number(),
     }),
     execute: async ({ guildId, roleId, position }) => {
+      // Resolve the role in the requested guild:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const role = await guild.roles.fetch(roleId);
@@ -2109,6 +2139,7 @@ export const discordTools = {
         throw new Error("Role not found");
       }
 
+      // Move the role and report the old and new positions:
       const oldPosition = role.position;
       const updatedRole = await role.setPosition(position);
 
@@ -2145,13 +2176,17 @@ export const discordTools = {
       })),
     })),
     execute: async ({ channelId, limit = 10, before, after, around }) => {
+      // Reject conflicting pagination cursors:
       if ([before, after, around].filter((cursor) => cursor !== undefined).length > 1) {
         throw new Error("Use one cursor: before, after or around");
       }
+
+      // Resolve a channel with message history:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
 
+      // Fetch and format the requested page:
       const messages = await channel.messages.fetch({ limit, before, after, around });
 
       return Array.from(messages.values()).map((message) => ({
@@ -2200,20 +2235,23 @@ export const discordTools = {
       messageIds: z.array(z.string()),
     }),
     execute: async ({ channelId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
-      // Prepare message chunks and attach files to the final chunk:
-      const refs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
-      if (content === undefined && refs.length === 0) throw new Error("Reply requires text or an attachment");
-      if (refs.length > 10) throw new Error("Reply supports at most 10 attachments");
-      const files = refs.map((ref) => {
+      // Resolve attachments and split outgoing text:
+      const requestedAttachmentRefs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
+      if (content === undefined && requestedAttachmentRefs.length === 0) throw new Error("Reply requires text or an attachment");
+      if (requestedAttachmentRefs.length > 10) throw new Error("Reply supports at most 10 attachments");
+      const files = requestedAttachmentRefs.map((ref) => {
         const file = context.replyAttachments.get(ref);
         if (file === undefined) throw new Error("Attachment not found in this conversation run");
         return file;
       });
       const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content), { prefixContinuations: true });
+
+      // Resolve a channel that can receive the message:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
+      // Send chunks in order and attach files to the final chunk:
       const messageIds: string[] = [];
 
       for (const [index, chunk] of chunks.entries()) {
@@ -2254,6 +2292,7 @@ export const discordTools = {
       messageId: z.string(),
     }),
     execute: async ({ channelId, userId, title, description, color, thumbnail, fields, buttons }) => {
+      // Require exactly one destination:
       if (channelId === undefined && userId === undefined) {
         throw new Error("Provide a target: channelId or userId");
       }
@@ -2261,6 +2300,7 @@ export const discordTools = {
         throw new Error("Provide only one target: channelId or userId");
       }
 
+      // Build the embed and its link buttons:
       const components: APIActionRowComponent<APIButtonComponent>[] = (buttons !== undefined && buttons.length > 0) ? [{
         type: ComponentType.ActionRow,
         components: buttons.map((button): APIButtonComponentWithURL => ({
@@ -2282,6 +2322,7 @@ export const discordTools = {
         components: components.length > 0 ? components : undefined,
       };
 
+      // Send the embed to the specified channel:
       if (channelId !== undefined) {
         const channel = await discordClient.channels.fetch(channelId);
         if (channel === null) throw new Error("Channel not found");
@@ -2291,6 +2332,7 @@ export const discordTools = {
         return { messageId: message.id };
       }
 
+      // Open a direct message and send the embed:
       const user = await discordClient.users.fetch(userId!);
       const dmChannel = await user.createDM();
 
@@ -2325,6 +2367,7 @@ export const discordTools = {
       messageIds: z.array(z.string()),
     }),
     execute: async ({ userId, content }) => {
+      // Open the recipient's DM and send the text in Discord-sized chunks:
       const user = await discordClient.users.fetch(userId);
       const dmChannel = await user.createDM();
 
@@ -2348,6 +2391,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId, emoji }) => {
+      // Resolve the target message before adding the requested reaction:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -2370,6 +2414,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({ messageId: z.string() }),
     execute: async ({ channelId, question, answers, duration = 24, allowMultiselect = false }) => {
+      // Resolve a sendable channel and post the poll:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
@@ -2399,6 +2444,7 @@ export const discordTools = {
       messageId: z.string(),
     }),
     execute: async ({ channelId, url, name, content }) => {
+      // Resolve the destination before downloading the file:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
@@ -2431,6 +2477,7 @@ export const discordTools = {
       messageId: z.string(),
     }),
     execute: async ({ channelId, messageId, newContent }) => {
+      // Resolve an editable message in the requested channel:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -2440,6 +2487,7 @@ export const discordTools = {
         throw new Error("Only messages sent by the bot itself can be edited");
       }
 
+      // Edit the message with mass mentions neutralized:
       await message.edit(sanitizeDiscordMessage(newContent));
 
       return { messageId: message.id };
@@ -2454,6 +2502,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId }) => {
+      // Resolve a deletable message in the requested channel:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -2463,6 +2512,7 @@ export const discordTools = {
         throw new Error("This message cannot be deleted (missing Manage Messages permission)");
       }
 
+      // Delete the selected message:
       await message.delete();
 
       return {};
@@ -2500,20 +2550,23 @@ export const discordTools = {
       messageIds: z.array(z.string()),
     }),
     execute: async ({ channelId, messageId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
-      // Prepare message chunks and attach files to the final chunk:
-      const refs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
-      if (content === undefined && refs.length === 0) throw new Error("Reply requires text or an attachment");
-      if (refs.length > 10) throw new Error("Reply supports at most 10 attachments");
-      const files = refs.map((ref) => {
+      // Resolve attachments and split outgoing text:
+      const requestedAttachmentRefs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
+      if (content === undefined && requestedAttachmentRefs.length === 0) throw new Error("Reply requires text or an attachment");
+      if (requestedAttachmentRefs.length > 10) throw new Error("Reply supports at most 10 attachments");
+      const files = requestedAttachmentRefs.map((ref) => {
         const file = context.replyAttachments.get(ref);
         if (file === undefined) throw new Error("Attachment not found in this conversation run");
         return file;
       });
       const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content));
+
+      // Resolve a channel that can receive the reply:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
+      // Send chunks in order and attach files to the final chunk:
       const messageIds: string[] = [];
 
       for (const [index, chunk] of chunks.entries()) {
@@ -2546,6 +2599,7 @@ export const discordTools = {
       })),
     })),
     execute: async ({ channelId, messageId }) => {
+      // Resolve the target message and read the users for each reaction:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -2578,6 +2632,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, messageId }) => {
+      // Resolve the target message before pinning it:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -2605,6 +2660,7 @@ export const discordTools = {
       pinnedAt: z.string(),
     })),
     execute: async ({ channelId, before, limit }) => {
+      // Resolve a channel with message history and read its pinned messages:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isTextBased()) throw new Error("Channel does not support messages");
@@ -2632,6 +2688,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ channelId, guildId }) => {
+      // Resolve a voice channel in the requested guild:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isVoiceBased()) {
@@ -2642,6 +2699,7 @@ export const discordTools = {
         throw new Error("Channel does not belong to the guild");
       }
 
+      // Join the channel and wait for the voice connection:
       const connection = joinVoiceChannel({
         channelId: channel.id,
         guildId,
@@ -2660,6 +2718,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: ({ guildId }) => {
+      // Destroy the existing voice connection:
       const connection = fetchDiscordVoiceConnection(guildId);
 
       connection.destroy();
@@ -2680,6 +2739,7 @@ export const discordTools = {
       channelName: z.string(),
     }),
     execute: async ({ guildId, memberId, channelId }) => {
+      // Resolve the connected member and the destination voice channel:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2711,6 +2771,7 @@ export const discordTools = {
       memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
+      // Require a connected member before disconnecting them:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2734,6 +2795,7 @@ export const discordTools = {
       memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
+      // Require a connected member before muting them:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2757,6 +2819,7 @@ export const discordTools = {
       memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
+      // Require a connected member before unmuting them:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2780,6 +2843,7 @@ export const discordTools = {
       memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
+      // Require a connected member before deafening them:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2803,6 +2867,7 @@ export const discordTools = {
       memberName: z.string(),
     }),
     execute: async ({ guildId, memberId }) => {
+      // Require a connected member before undeafening them:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const member = await guild.members.fetch(memberId);
@@ -2824,6 +2889,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({}),
     execute: async ({ guildId, url }) => {
+      // Require an active voice connection and open the audio stream:
       const connection = fetchDiscordVoiceConnection(guildId);
 
       const response = await fetch(url);
@@ -2834,8 +2900,21 @@ export const discordTools = {
         throw new Error("Audio source returned an empty body");
       }
 
+      // Start playback with the downloaded audio stream:
       const resource = createAudioResource(Readable.from(response.body, { objectMode: false }), { inputType: StreamType.Arbitrary });
-      replaceDiscordAudio(connection, resource);
+      const existingPlayer = getDiscordAudioPlayer(connection);
+      if (existingPlayer !== undefined) {
+        existingPlayer.play(resource);
+        return {};
+      }
+
+      const player = createAudioPlayer();
+      player.on("error", (error) => logger.error(`Discord audio playback failed: ${error.message}`));
+      player.on("unsubscribe", () => {
+        player.stop(true);
+      });
+      connection.subscribe(player);
+      player.play(resource);
 
       return {};
     },
@@ -2855,6 +2934,7 @@ export const discordTools = {
       channelName: z.string(),
     }),
     execute: async ({ guildId, channelId, activity, applicationId }) => {
+      // Resolve the voice channel before selecting the activity application:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const channel = await guild.channels.fetch(channelId);
@@ -2909,6 +2989,7 @@ export const discordTools = {
       toChannelName: z.string(),
     }),
     execute: async ({ guildId, fromChannelId, toChannelId }) => {
+      // Resolve the source and destination voice channels:
       const guild = await discordClient.guilds.fetch(guildId);
 
       const fromChannel = await guild.channels.fetch(fromChannelId);
@@ -2921,6 +3002,7 @@ export const discordTools = {
         throw new Error("Destination voice channel not found");
       }
 
+      // Move members present in the source channel:
       const members = [...fromChannel.members.values()];
       for (const member of members) {
         await member.voice.setChannel(toChannel);
@@ -2953,6 +3035,7 @@ export const discordTools = {
       maxUses: z.number(),
     }),
     execute: async ({ channelId, maxAge = 86_400, maxUses = 0, temporary, unique, reason }) => {
+      // Resolve a channel that supports invitations before creating the invite:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!("createInvite" in channel)) {
@@ -2981,6 +3064,7 @@ export const discordTools = {
       avatarUrl: z.string().nullable(),
     })),
     execute: async ({ channelId }) => {
+      // Resolve a channel that supports webhooks before listing them:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!("fetchWebhooks" in channel)) {
@@ -3009,12 +3093,14 @@ export const discordTools = {
       name: z.string().nullable(),
     }),
     execute: async ({ channelId, name, avatarUrl }) => {
+      // Resolve a channel that supports webhooks:
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!("createWebhook" in channel)) {
         throw new Error("This channel type does not support webhooks");
       }
 
+      // Download the optional avatar before creating the webhook:
       let avatar: Buffer | undefined;
       if (avatarUrl !== undefined) {
         const response = await fetch(avatarUrl);
@@ -3047,6 +3133,7 @@ export const discordTools = {
     }),
     outputSchema: z.object({ messageId: z.string() }),
     execute: async ({ webhookId, webhookUrl, content, username, avatarUrl, threadId, threadName, appliedTags }) => {
+      // Require exactly one webhook identifier or URL:
       if ((webhookId === undefined) === (webhookUrl === undefined)) {
         throw new Error("Provide exactly one of webhookId or webhookUrl");
       }
@@ -3142,17 +3229,20 @@ export const discordTools = {
       endAt: z.string(),
     }),
     execute: async ({ guildId, name, description, startAt, durationMinutes = 60, channelId, location }) => {
+      // Resolve the server and validate the event destination:
       const guild = await discordClient.guilds.fetch(guildId);
       if ((channelId === undefined) === (location === undefined)) {
         throw new Error("Provide exactly one of channelId or location");
       }
 
+      // Validate the start and calculate the end time:
       const startDate = new Date(startAt);
       if (Number.isNaN(startDate.getTime())) {
         throw new Error(`Invalid start date: ${startAt}`);
       }
       const endDate = new Date(startDate.getTime() + durationMinutes * 60_000);
 
+      // Resolve the Discord channel and event type when one was supplied:
       let eventChannel: GuildVoiceChannelResolvable | undefined;
       let entityType = GuildScheduledEventEntityType.External;
 
@@ -3169,6 +3259,7 @@ export const discordTools = {
         entityType = voiceChannel.type === ChannelType.GuildStageVoice ? GuildScheduledEventEntityType.StageInstance : GuildScheduledEventEntityType.Voice;
       }
 
+      // Create the scheduled event with the resolved destination:
       const event = await guild.scheduledEvents.create({
         name,
         description,
@@ -3205,6 +3296,7 @@ export const discordTools = {
       activityName: z.string().nullable(),
     }),
     execute: ({ status, activityType, activityName, url }) => {
+      // Validate the requested presence and streaming URL:
       if (status === undefined && activityName === undefined) {
         throw new Error("Provide a status or an activity");
       }
@@ -3212,6 +3304,7 @@ export const discordTools = {
         throw new Error("The streaming activity type requires a url");
       }
 
+      // Resolve the connected bot user:
       const selfUser = discordClient.user;
       if (selfUser === null) {
         throw new Error("Discord client is not ready yet");

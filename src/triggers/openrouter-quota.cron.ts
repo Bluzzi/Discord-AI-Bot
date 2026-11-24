@@ -1,4 +1,4 @@
-import { openRouterQuota } from "#/integrations/openrouter";
+import { openRouterQuota } from "#/utils/openrouter-quota";
 import { trigger } from "#/utils/trigger";
 
 await trigger.cron(

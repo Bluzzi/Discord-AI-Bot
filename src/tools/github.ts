@@ -28,6 +28,7 @@ export const githubTools = {
       pattern: z.string().optional().describe("Path substring or glob, for example **/*.ts"),
     }),
     execute: async ({ owner, repo, branch, path_prefix: pathPrefix, pattern }) => {
+      // Fetch the tree and select files matching the supplied path filters:
       const { data } = await octokit.rest.git.getTree({ owner, repo, tree_sha: branch ?? "HEAD", recursive: "1" });
       const prefix = pathPrefix?.replace(/\/+$/u, "") ?? "";
       const files = data.tree.filter(({ path, type }) => type === "blob"
@@ -48,11 +49,14 @@ export const githubTools = {
       end_line: z.number().int().positive().optional().describe("Last line to read, inclusive (1-based)"),
     }),
     execute: async ({ owner, repo, path, ref, start_line: startLine = 1, end_line: endLine }) => {
+      // Validate the requested range before fetching the file:
       if (endLine !== undefined && endLine < startLine) throw new Error("end_line must be at least start_line.");
       const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref });
       if (Array.isArray(data) || data.type !== "file" || data.encoding !== "base64") {
         throw new Error("GitHub did not return readable file content for this path.");
       }
+
+      // Decode text and number the requested lines:
       const content = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(data.content, "base64"));
       if (content.includes("\0")) throw new Error("GitHub file is binary.");
       const lines = content.split(/\r\n|\r|\n/u);
@@ -94,7 +98,8 @@ export const githubTools = {
       limit: z.number().int().min(1).max(20).default(10),
     }),
     execute: async ({ owner, repo, query, state, type, limit }) => {
-      const q = [query, `repo:${owner}/${repo}`, state === "all" ? undefined : `is:${state}`].filter(Boolean).join(" ");
+      // Build the search query and handle discussions through GraphQL:
+      const searchQuery = [query, `repo:${owner}/${repo}`, state === "all" ? undefined : `is:${state}`].filter(Boolean).join(" ");
       if (type === "discussion") {
         const { search } = await octokit.graphql<{ search: { nodes: ({ repository: { nameWithOwner: string; visibility: string } } | null)[] } }>(dedent`
           query($q: String!, $limit: Int!) {
@@ -110,13 +115,14 @@ export const githubTools = {
               }
             }
           }
-        `, { q, limit });
+        `, { q: searchQuery, limit });
         return search.nodes.filter((item) => item?.repository.visibility === "PUBLIC"
           && item.repository.nameWithOwner.toLowerCase() === `${owner}/${repo}`.toLowerCase());
       }
 
+      // Search issues and pull requests and keep matches from the requested repository:
       const { data } = await octokit.rest.search.issuesAndPullRequests({
-        q: type === "all" ? q : `${q} is:${type}`,
+        q: type === "all" ? searchQuery : `${searchQuery} is:${type}`,
         per_page: limit,
       });
       const repositoryUrl = `https://api.github.com/repos/${owner}/${repo}`.toLowerCase();
@@ -146,6 +152,7 @@ export const githubTools = {
       type: z.enum(["issue_or_pr", "discussion"]).default("issue_or_pr").describe("Select the GitHub resource to read"),
     }),
     execute: async ({ owner, repo, number, include_pr_files: includeFiles, type }) => {
+      // Read the discussion and check its repository visibility:
       if (type === "discussion") {
         const result = await octokit.graphql<{ repository: { visibility: string; discussion: unknown } | null }>(dedent`
           query($owner: String!, $repo: String!, $number: Int!) {
@@ -177,6 +184,7 @@ export const githubTools = {
         return result.repository.discussion;
       }
 
+      // Read the issue or pull request, including comments and requested file summaries:
       const issueParams = { owner, repo, issue_number: number };
       const { data: issue } = await octokit.rest.issues.get(issueParams);
       const comments = await octokit.paginate(octokit.rest.issues.listComments, issueParams, (page) => page.data.map(({ user, body, created_at, html_url }) => ({ author: user?.login, body, created_at, html_url })));

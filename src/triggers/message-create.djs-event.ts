@@ -1,8 +1,9 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
+import type { UserContent } from "ai";
 import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
-import { discordClient, startDiscordTyping } from "#/integrations/discord";
-import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
+import { discordClient } from "#/integrations/discord";
+import { aiModel } from "#/integrations/openrouter";
 import { tableDiscordReplyError } from "#/tables/discord-reply-error";
 import { tableModelUsage } from "#/tables/model-usage";
 import { githubTools } from "#/tools/github";
@@ -11,11 +12,13 @@ import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
 import { attempt } from "#/utils/attempt";
 import { day } from "#/utils/day";
+import { downloadDiscordAttachment } from "#/utils/discord";
 import { getDiscordToolsForMessage } from "#/utils/discord-permissions";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
+import { openRouterApi } from "#/utils/openrouter-pricing";
+import { openRouterQuota } from "#/utils/openrouter-quota";
 import { postgres } from "#/utils/postgres";
-import { getReplyContext } from "#/utils/reply-context";
 import { trigger } from "#/utils/trigger";
 import { stepCountIs, streamText } from "ai";
 import dedent from "dedent";
@@ -54,7 +57,7 @@ trigger.discordEvent("messageCreate", async (message) => {
   if (!channel.isSendable()) return;
 
   const botUser = discordClient.user;
-  if (!botUser) return;
+  if (botUser === null) return;
 
   // Accept a direct reply to the bot or an explicit mention:
   const isReplyToBot = message.type === MessageType.Reply && message.mentions.repliedUser?.id === botUser.id;
@@ -77,14 +80,106 @@ trigger.discordEvent("messageCreate", async (message) => {
   }
 
   // Keep typing while preparing the conversation and generating the reply:
-  const stopTyping = startDiscordTyping(channel, () => logger.warn(`${logPrefix} Could not send the typing indicator`));
+  const sendTyping = async () => {
+    try {
+      await channel.sendTyping();
+    }
+    catch {
+      logger.warn(`${logPrefix} Could not send the typing indicator`);
+    }
+  };
+  void sendTyping();
+  const typingTimer = setInterval(() => {
+    void sendTyping();
+  }, 8_000).unref();
 
   try {
-    // Prepare tools and attachment references for this conversation run:
     const channelId = channel.id;
     const guild = message.guild;
     const member = message.member;
-    const { content, attachmentUrls } = await getReplyContext(channelId, message.id);
+
+    const messageId = message.id;
+    const attachmentUrls = new Map<string, { url: string; size: number }>();
+
+    // Verify that the current channel supports message history:
+    const historyChannel = await discordClient.channels.fetch(channelId);
+    if (historyChannel?.isTextBased() !== true) {
+      throw new Error("Channel not found or not a text channel");
+    }
+
+    const historyGuild = "guild" in historyChannel ? historyChannel.guild : null;
+
+    // Fetch the target and its history without including later messages:
+    const previousMessages = await historyChannel.messages.fetch({ limit: 10, before: messageId });
+    const targetMessage = await historyChannel.messages.fetch(messageId);
+
+    const referencedMessageId = targetMessage.reference?.messageId ?? null;
+    const referencedMessage = referencedMessageId === null ? undefined : previousMessages.get(referencedMessageId);
+
+    // Render the conversation in order and neutralize forged author prefixes:
+    const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
+    const conversationItems = [...previousMessages.values(), targetMessage]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .map((message) => ({
+        id: message.id,
+        authorId: message.author.id,
+        authorLabel: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+        content: message.content.replace(forgedPrefixPattern, (match) => match.replaceAll("[", "［").replaceAll("]", "］")),
+        attachments: message.attachments.map(({ id, name, url, contentType, size }) => ({ id, name, url, mediaType: contentType, size })),
+        isSelf: message.author.id === env.DISCORD_BOT_ID,
+        isTarget: message.id === messageId,
+        createdAt: message.createdAt.toISOString(),
+      }));
+
+    // Register available attachments for the other tools in this run:
+    for (const { attachments } of conversationItems) {
+      for (const { id, url, size } of attachments) attachmentUrls.set(id, { url, size });
+    }
+
+    // Prepare the channel, conversation and target references for the model:
+    const output = {
+      channel: {
+        id: historyChannel.id,
+        name: "name" in historyChannel ? historyChannel.name : null,
+        isDm: historyGuild === null,
+        guildId: historyGuild?.id ?? null,
+        guildName: historyGuild?.name ?? null,
+      },
+      conversation: conversationItems,
+      referencedMessageId,
+      referencedAuthorId: referencedMessage?.author.id ?? null,
+      mentionedUserIds: [...targetMessage.mentions.users.values()].filter((user) => user.id !== env.DISCORD_BOT_ID).map((user) => user.id),
+      mentionedChannelIds: [...targetMessage.mentions.channels.values()].map((mentionedChannel) => mentionedChannel.id),
+    };
+
+    // Prefer images from the target message, then the referenced message:
+    const imagePriority = ({ id, isTarget }: (typeof output.conversation)[number]) => {
+      if (isTarget) return 0;
+      return id === output.referencedMessageId ? 1 : 2;
+    };
+    const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+    const images = output.conversation.toReversed()
+      .sort((a, b) => imagePriority(a) - imagePriority(b))
+      .flatMap(({ id: messageId, isTarget, attachments }) => attachments.map((attachment) => ({ ...attachment, messageId, isTarget })))
+      .filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
+    const content: UserContent = [{ type: "text", text: JSON.stringify(output) }];
+    if (images.length > 0 && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
+      // Download images within the shared byte budget for inline delivery:
+      const signal = AbortSignal.timeout(20_000);
+      let remainingBytes = 10 * 1024 * 1024;
+      for (const { id, url, mediaType, size, messageId, isTarget } of images) {
+        if (mediaType === null || size > remainingBytes) continue;
+        const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
+        if (!image.ok || image.value.length === 0) continue;
+        remainingBytes -= image.value.length;
+        content.push(
+          { type: "text", text: `Inline image from Discord message ${messageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
+          { type: "image", image: image.value, mediaType },
+        );
+      }
+    }
+
+    // Bind tools and outgoing attachments to this conversation run:
     const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
     const requestApproval = member === null ? undefined : async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary);
     const discordTools = getDiscordToolsForMessage(message, replyAttachments, requestApproval);
@@ -156,21 +251,22 @@ trigger.discordEvent("messageCreate", async (message) => {
       onError: () => undefined,
     });
 
+    // Consume stream results and stop typing when a reply is sent:
     const sentReplies: string[] = [];
     for await (const part of result.stream) {
       if (part.type === "error") throw new Error(`${logPrefix} Reply stream failed`, { cause: part.error });
       if (part.type === "tool-error") {
         await saveReplyError(part.error, message, `${logPrefix} Tool ${part.toolName} failed`);
+        continue;
       }
-      if (part.type === "tool-result" && isReplyTool(part.toolName)) {
-        stopTyping();
-        const input: unknown = part.input;
-        if (typeof input === "object" && input !== null && "content" in input && typeof input.content === "string") {
-          sentReplies.push(input.content);
-        }
+      if (part.type !== "tool-result" || !isReplyTool(part.toolName)) continue;
+      clearInterval(typingTimer);
+      const input: unknown = part.input;
+      if (typeof input === "object" && input !== null && "content" in input && typeof input.content === "string") {
+        sentReplies.push(input.content);
       }
     }
-    stopTyping();
+    clearInterval(typingTimer);
 
     // Log the reply and save usage for all steps:
     const durationMs = Date.now() - startedAt;
@@ -185,6 +281,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     logger.info(`${logPrefix} Reply: ${sentReplies.length ? JSON.stringify(redactWebhookTokens(sentReplies.join("\n"))) : "(none)"}`);
     logger.info(`${logPrefix} Reply finished in ${String(durationMs)}ms`);
 
+    // Price the observed model usage and persist it:
     const modelUsed = steps.at(-1)?.model.modelId;
     if (modelUsed === undefined) {
       throw new Error(`${logPrefix} Cannot resolve the used model: no step available`);
@@ -203,6 +300,6 @@ trigger.discordEvent("messageCreate", async (message) => {
     });
   }
   finally {
-    stopTyping();
+    clearInterval(typingTimer);
   }
 }, async (error, message) => saveReplyError(error, message, "Discord reply failed"));

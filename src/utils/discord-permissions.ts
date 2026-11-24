@@ -2,9 +2,10 @@ import type { DiscordToolName as ToolName } from "#/tools/discord";
 import type { RequestApproval } from "#/tools/discord-approval";
 import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
-import { discordClient, findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord";
+import { discordClient } from "#/integrations/discord";
 import { discordReadTools, discordTools, getDiscordToolInputSchema } from "#/tools/discord";
 import { discordApprovalTools } from "#/tools/discord-approval";
+import { findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/utils/discord";
 import { ChannelType, GuildScheduledEventEntityType, PermissionFlagsBits as permissionFlags } from "discord.js";
 import { z } from "zod";
 
@@ -22,9 +23,8 @@ const denied = () => new Error("The requesting member does not have permission f
 const hasGuildPermission = (member: GuildMember, permission: bigint) => permission === 0n
   || (!member.isCommunicationDisabled() && member.permissions.has(permission));
 
-const targetChannel = async (member: GuildMember, channelId: unknown) => member.guild.channels.fetch(id.parse(channelId));
 const checkChannel = async (member: GuildMember, channelId: unknown, permission: bigint) => {
-  const channel = await targetChannel(member, channelId);
+  const channel = await member.guild.channels.fetch(id.parse(channelId));
   if (channel === null) throw denied();
   await requireDiscordChannelPermissions(member, channel, permission);
   return channel;
@@ -435,8 +435,8 @@ const filterChannelResults = (name: ToolName, result: unknown, member: GuildMemb
   if (name === "getActiveThreads") {
     const data = z.object({ threads: z.array(object), members: z.array(object) }).parse(result);
     const threads = data.threads.filter((item) => visible(item.parent_id, item.type === ChannelType.PrivateThread ? permissionFlags.ManageThreads : 0n));
-    const ids = new Set(threads.map((item) => item.id));
-    return { threads, members: data.members.filter((item) => ids.has(item.id)) };
+    const visibleThreadIds = new Set(threads.map((item) => item.id));
+    return { threads, members: data.members.filter((item) => visibleThreadIds.has(item.id)) };
   }
   return result;
 };
@@ -444,6 +444,7 @@ const filterChannelResults = (name: ToolName, result: unknown, member: GuildMemb
 const tools: ToolSet = discordTools;
 
 const parseToolArguments = (input: unknown) => {
+  // Validate top-level Discord identifiers before selecting targets:
   const args = object.parse(input);
   for (const [key, value] of Object.entries(args)) {
     if (key.endsWith("Id") && value !== undefined) id.parse(value);
@@ -452,11 +453,14 @@ const parseToolArguments = (input: unknown) => {
 };
 
 const requireGuildToolPermission = async (args: Input, requester: GuildMember | null, rule: Rule) => {
+  // Reject requests outside the member's guild or authority:
   if (requester === null || !hasGuildPermission(requester, rule.guild ?? 0n)) throw denied();
   if (args.guildId !== undefined && args.guildId !== requester.guild.id) throw denied();
+
+  // Enforce target channel permissions and action-specific checks:
   const scope = rule.channel;
   if (scope?.resolve !== undefined) {
-    const target = await targetChannel(requester, scope.resolve(args, requester));
+    const target = await requester.guild.channels.fetch(id.parse(scope.resolve(args, requester)));
     if (target === null) throw denied();
     await requireDiscordChannelPermissions(requester, target, permissionIn(target, scope));
   }
@@ -465,6 +469,7 @@ const requireGuildToolPermission = async (args: Input, requester: GuildMember | 
 };
 
 export const validateDiscordApprovalAction = async (name: string, input: unknown, requester: GuildMember) => {
+  // Resolve an allowed mutation and validate its exact input:
   if (!Object.hasOwn(discordTools, name) || !Object.hasOwn(rules, name)) throw denied();
   const toolName = name as ToolName;
   const rule = rules[toolName];
@@ -481,6 +486,7 @@ export const executeApprovedDiscordAction = async (
   requester: GuildMember,
   toolCallId: string,
 ) => {
+  // Revalidate the approved input and execute the registered tool:
   const args = await validateDiscordApprovalAction(name, input, requester);
   const execute = tools[name]?.execute as ToolExecuteFunction<Input, unknown, undefined> | undefined;
   if (execute === undefined) throw new Error(`Discord tool ${name} cannot be executed`);
@@ -492,6 +498,7 @@ export const getDiscordToolsForMessage = (
   replyAttachments: ReadonlyMap<string, { attachment: Buffer; name: string }>,
   requestApproval: RequestApproval | undefined,
 ) => {
+  // Resolve visible channels for the initial tool selection:
   const isDm = message.guildId === null;
   const member = message.member;
   const visibleChannels = member?.guild.channels.cache.map((target) => ({
@@ -507,6 +514,7 @@ export const getDiscordToolsForMessage = (
       ...definition,
       contextSchema: isReply ? undefined : definition.contextSchema,
       execute: async (input, options) => {
+        // Bind reply attachments to the current conversation:
         const args = parseToolArguments(input);
         const toolOptions = isReply ? { ...options, context: { replyAttachments } } : options;
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
