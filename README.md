@@ -24,6 +24,7 @@ The tool loop can read conversation context, perform Discord actions, propose Di
 config:
     sequence:
         mirrorActors: false
+        noteAlign: left
 ---
 sequenceDiagram
     actor User
@@ -34,7 +35,7 @@ sequenceDiagram
     User->>Bot: Mention or reply to the bot
     Bot->>Tools: Read recent conversation
     Tools-->>Bot: Conversation context
-    Note over Tools: Conversation context<br/>Discord actions and approval plans<br/>Web search and pages<br/>GitHub search and repositories
+    Note over Tools: - Conversation context<br/>- Discord actions and approval plans<br/>- Web search and pages<br/>- GitHub search and repositories
     loop While more tools are needed
         Bot->>Tools: Run the next tool
         Tools-->>Bot: Return the result
