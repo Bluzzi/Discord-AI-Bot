@@ -1,4 +1,4 @@
-import { columns } from "#/integrations/postgres-timestamps.helper";
+import { columns } from "#/integrations/postgres.helper-timestamps";
 import { pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 export const messageFeedbackReactionEnum = pgEnum("message_feedback_reaction", [

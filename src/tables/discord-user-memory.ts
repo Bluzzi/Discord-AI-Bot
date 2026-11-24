@@ -1,4 +1,4 @@
-import { columns } from "#/integrations/postgres-timestamps.helper";
+import { columns } from "#/integrations/postgres.helper-timestamps";
 import { pgTable, text } from "drizzle-orm/pg-core";
 
 export const tableDiscordUserMemory = pgTable("discord_user_memory", {

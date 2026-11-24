@@ -1,1 +1,0 @@
-The `AGENTS.md` standard is used for AI-specific instructions; these files must therefore be read and followed in the order defined by the standard.

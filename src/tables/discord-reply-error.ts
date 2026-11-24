@@ -1,4 +1,4 @@
-import { columns } from "#/integrations/postgres-timestamps.helper";
+import { columns } from "#/integrations/postgres.helper-timestamps";
 import { pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 export const tableDiscordReplyError = pgTable("discord_reply_error", {

@@ -1,5 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { reportOpenRouterFailure } from "#/integrations/openrouter-quota.helper";
+import { reportOpenRouterFailure } from "#/integrations/openrouter.helper-quota";
 import { env } from "#/utils/env";
 
 const openRouterProvider = createOpenRouter({

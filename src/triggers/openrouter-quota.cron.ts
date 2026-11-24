@@ -1,6 +1,6 @@
 import { OpenRouterError } from "@openrouter/sdk/models/errors";
-import { openRouterQuota, quotaState } from "#/integrations/openrouter-quota.helper";
 import { openRouterSdk } from "#/integrations/openrouter.client";
+import { openRouterQuota, quotaState } from "#/integrations/openrouter.helper-quota";
 import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
