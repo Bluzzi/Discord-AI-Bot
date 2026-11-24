@@ -3,6 +3,7 @@ import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
 import { discordClient, findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord";
 import { discordReadTools, discordTools, getDiscordToolInputSchema } from "#/tools/discord";
+import { discordApprovalTools } from "#/tools/discord-approval";
 import { ChannelType, GuildScheduledEventEntityType, PermissionFlagsBits as permissionFlags } from "discord.js";
 import { z } from "zod";
 
@@ -487,7 +488,7 @@ export const executeApprovedDiscordAction = async (
 
 export const getDiscordToolsForMessage = (
   message: Message,
-  resolveAttachment: (attachmentRef: string) => { attachment: Buffer; name: string },
+  replyAttachments: ReadonlyMap<string, { attachment: Buffer; name: string }>,
 ) => {
   const isDm = message.guildId === null;
   const member = message.member;
@@ -505,7 +506,7 @@ export const getDiscordToolsForMessage = (
       contextSchema: isReply ? undefined : definition.contextSchema,
       execute: async (input, options) => {
         const args = parseToolArguments(input);
-        const toolOptions = isReply ? { ...options, context: { resolveAttachment } } : options;
+        const toolOptions = isReply ? { ...options, context: { replyAttachments } } : options;
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
         if (name === "sendMessage" && (args.attachmentRef !== undefined || args.attachmentRefs !== undefined) && args.channelId !== message.channelId) throw denied();
         // Allow responses in the originating channel under the conversation rules:
@@ -524,7 +525,7 @@ export const getDiscordToolsForMessage = (
     };
   };
 
-  const available: Partial<Record<ToolName, ToolSet[string]>> = {};
+  const available: ToolSet = {};
   const approvalToolNames: ToolName[] = [];
   for (const [name, rule] of Object.entries(rules) as [ToolName, Rule][]) {
     // Expose only the conversation's read tools in DMs:
@@ -546,12 +547,25 @@ export const getDiscordToolsForMessage = (
     available[name] = wrap(name, rule);
   }
 
+  // Offer only the approval actions available to the requesting member:
+  const approvalTool = discordApprovalTools.proposeDiscordActions;
+  const [firstAction, ...otherActions] = approvalToolNames.map((name) => {
+    const action = approvalTool.inputSchema.shape.actions.element.options.find((option) => option.shape.toolName.value === name);
+    if (action === undefined) throw new Error(`No schema for Discord approval action ${name}`);
+    return action;
+  });
+  if (firstAction !== undefined) {
+    available.proposeDiscordActions = {
+      ...approvalTool,
+      inputSchema: approvalTool.inputSchema.extend({
+        actions: z.array(z.discriminatedUnion("toolName", [firstAction, ...otherActions])).min(1).max(10),
+      }),
+    };
+  }
+
   return {
-    tools: {
-      ...available,
-      sendMessage: wrap("sendMessage", channel(permissionFlags.SendMessages)),
-      sendReply: wrap("sendReply", {}),
-    },
-    approvalToolNames,
+    ...available,
+    sendMessage: wrap("sendMessage", channel(permissionFlags.SendMessages)),
+    sendReply: wrap("sendReply", {}),
   };
 };

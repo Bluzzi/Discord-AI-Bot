@@ -8,522 +8,708 @@ import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, G
 import { Readable } from "node:stream";
 import { z } from "zod";
 
-const id = z.string().regex(/^\d{1,20}$/u);
-const pathSegment = z.string().min(1).regex(/^[\w-]+$/u);
-const text = z.string();
-export const discordNativeMessageSyntax = dedent`
-  Discord also supports native message syntax:
-  - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
-  - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
-  - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
-  - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
-`;
-const discordMessageContent = z.string().min(1).describe(dedent`
-  Discord Markdown supports:
-  - Plain text with paragraphs separated by blank lines.
-  - Bold (**text**), italics (*text* or _text_), underline (__text__), strikethrough (~~text~~), and spoilers (||text||).
-  - Headings (# Heading, ## Heading, ### Heading) and subtext (-# text) at the start of a line.
-  - Bulleted lists (- item or * item), numbered lists (1. item), and nested lists with indentation.
-  - Single-line quotes (> text) and quotes that continue to the end of the message (>>> text), starting on a new line.
-  - Inline code with single backticks and code blocks with triple backticks, optionally followed by a language name on the opening line.
-  - Links as bare URLs or with labels ([label](https://example.com)).
-
-  ${discordNativeMessageSyntax}
-`);
-const replyAttachmentRef = z.uuid().optional().describe("Attachment reference returned by a tool");
-const replyAttachmentRefs = z.array(z.uuid()).max(10).optional().describe("Attachment references returned by tools when replying with multiple files");
-const replyContextSchema = z.object({
-  resolveAttachment: z.custom<(attachmentRef: string) => { attachment: Buffer; name: string }>((value) => typeof value === "function"),
-});
-
-const prepareReplyChunks = (
-  content: string | undefined,
-  attachmentRefs: string[],
-  context: z.infer<typeof replyContextSchema>,
-  options?: { prefixContinuations: boolean },
-) => {
-  if (content === undefined && attachmentRefs.length === 0) throw new Error("Reply requires text or an attachment");
-  if (attachmentRefs.length > 10) throw new Error("Reply supports at most 10 attachments");
-  const files = attachmentRefs.map(context.resolveAttachment);
-
-  const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content), options);
-  return chunks.map((chunk, index) => ({
-    content: chunk,
-    files: files.length > 0 && index === chunks.length - 1 ? files : undefined,
-  }));
-};
-
-const integer = z.number().int();
-const flag = z.boolean();
-const date = z.iso.datetime({ offset: true });
-const jsonObject = z.record(z.string(), z.json());
-const ids = z.array(id);
-const limit = integer.min(1).max(100).optional();
-const page = z.object({ limit, before: id.optional(), after: id.optional() });
-const reason = text.max(512).optional();
-const image = z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u);
-const mediaUrl = z.url({ protocol: /^https?$/u });
-const webhookFields = z.object({ name: text, avatar: text.nullable(), channel_id: id }).partial();
-const entityType = integer.min(1).max(3);
-
-const decodeDiscordRestResult = (result: unknown) => {
-  if (result instanceof ArrayBuffer) {
-    return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
-  }
-  return result ?? {};
-};
-
-const memberSearch = z.object({ query: text.min(1), limit });
-const permissionOverwrite = z.object({
-  id,
-  type: z.union([z.literal(0), z.literal(1)]),
-  allow: z.string().regex(/^\d+$/u).optional(),
-  deny: z.string().regex(/^\d+$/u).optional(),
-});
-const forumTag = z.object({
-  id: id.optional(),
-  name: text.min(1).max(20),
-  moderated: flag.optional(),
-  emoji_id: id.nullable().optional(),
-  emoji_name: text.nullable().optional(),
-});
-const roleFields = z.object({
-  name: text.max(100),
-  permissions: z.string().regex(/^\d+$/u),
-  colors: z.object({ primary_color: integer, secondary_color: integer.optional(), tertiary_color: integer.optional() }),
-  hoist: flag,
-  mentionable: flag,
-  icon: image.nullable(),
-  unicode_emoji: text.nullable(),
-}).partial();
-const stageFields = z.object({
-  topic: text.min(1).max(120),
-  privacy_level: z.literal(2).optional(),
-});
-const autoModFields = z.object({
-  name: text.min(1),
-  event_type: integer,
-  trigger_metadata: jsonObject,
-  actions: z.array(z.object({ type: integer, metadata: jsonObject.optional() })),
-  enabled: flag,
-  exempt_roles: ids,
-  exempt_channels: ids,
-});
-const eventFields = z.object({
-  name: text.min(1).max(100),
-  description: text.max(1000).nullable(),
-  scheduled_start_time: date,
-  scheduled_end_time: date.nullable(),
-  channel_id: id.nullable(),
-  entity_type: entityType,
-  entity_metadata: z.object({ location: text.max(100) }).nullable(),
-  privacy_level: z.literal(2),
-  status: integer.min(1).max(4),
-  image: image.nullable(),
-  recurrence_rule: jsonObject.nullable(),
-}).partial();
-const stickerFields = z.object({ name: text.min(2).max(30), description: text.max(100).nullable(), tags: text.max(200) });
-const guildWebhooks = z.object({ guildId: id });
-const webhookId = z.object({ webhookId: id });
-const webhookMessage = webhookId.extend({ messageId: id, threadId: id.optional() });
-const messageTarget = z.object({ channelId: id, messageId: id });
-const reactionTarget = messageTarget.extend({ emoji: text.min(1).describe("Unicode emoji, name:id or custom emoji markup") });
-const threadFields = z.object({
-  name: text.min(1).max(100),
-  auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]).optional(),
-  rate_limit_per_user: integer.min(0).max(21600).optional(),
-});
-const messageFields = z.object({
-  content: text.max(2000),
-  embeds: z.array(jsonObject).max(10),
-  components: z.array(jsonObject),
-  sticker_ids: ids.max(3),
-  flags: integer.nonnegative(),
-}).partial();
-const allowedMentions = { parse: ["users", "roles"] };
-
-const reactionIdentifier = (emoji: string) => {
-  const resolved = parseEmoji(emoji);
-  if (resolved === null) {
-    throw new Error("Invalid emoji");
-  }
-  return encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
-};
-
-const webhookSummary = (webhook: { id: string; name: string | null; channelId: string; type: number; avatarURL: () => string | null }) => ({
-  id: webhook.id,
-  name: webhook.name,
-  channelId: webhook.channelId,
-  type: webhook.type,
-  avatarUrl: webhook.avatarURL(),
-});
-
 export const discordTools = {
   // Guilds And Members
   getBotGuilds: tool({
     description: "List guilds the bot belongs to.",
-    inputSchema: z.object({ query: page.extend({ limit: integer.min(1).max(200).optional(), with_counts: flag.optional() }).optional() }),
-    execute: async ({ query }) => decodeDiscordRestResult(await discordClient.rest.get("/users/@me/guilds", {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      query: z.object({
+        limit: z.number().int().min(1).max(200).optional(),
+        before: z.string().regex(/^\d{1,20}$/u).optional(),
+        after: z.string().regex(/^\d{1,20}$/u).optional(),
+        with_counts: z.boolean().optional(),
+      }).optional(),
+    }),
+    execute: async ({ query }) => {
+      const result = await discordClient.rest.get("/users/@me/guilds", {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildDetails: tool({
     description: "Get full guild settings and features.",
-    inputSchema: z.object({ guildId: id, query: z.object({ with_counts: flag.optional() }).optional() }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), query: z.object({ with_counts: z.boolean().optional() }).optional() }),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editGuild: tool({
     description: "Edit guild settings.",
     inputSchema: z.object({
-      guildId: id,
-      reason,
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
       body: z.object({
-        name: text.min(2).max(100),
-        description: text.max(120).nullable(),
-        verification_level: integer.min(0).max(4),
-        default_message_notifications: integer.min(0).max(1),
-        explicit_content_filter: integer.min(0).max(2),
-        afk_channel_id: id.nullable(),
-        afk_timeout: integer,
-        icon: image.nullable(),
-        splash: image.nullable(),
-        discovery_splash: image.nullable(),
-        banner: image.nullable(),
-        system_channel_id: id.nullable(),
-        system_channel_flags: integer,
-        rules_channel_id: id.nullable(),
-        public_updates_channel_id: id.nullable(),
-        safety_alerts_channel_id: id.nullable(),
-        preferred_locale: text,
-        features: z.array(text),
-        premium_progress_bar_enabled: flag,
+        name: z.string().min(2).max(100),
+        description: z.string().max(120).nullable(),
+        verification_level: z.number().int().min(0).max(4),
+        default_message_notifications: z.number().int().min(0).max(1),
+        explicit_content_filter: z.number().int().min(0).max(2),
+        afk_channel_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+        afk_timeout: z.number().int(),
+        icon: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u).nullable(),
+        splash: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u).nullable(),
+        discovery_splash: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u).nullable(),
+        banner: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u).nullable(),
+        system_channel_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+        system_channel_flags: z.number().int(),
+        rules_channel_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+        public_updates_channel_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+        safety_alerts_channel_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+        preferred_locale: z.string(),
+        features: z.array(z.string()),
+        premium_progress_bar_enabled: z.boolean(),
       }).partial(),
     }),
-    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}`, { reason, body })),
+    execute: async ({ guildId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   leaveGuild: tool({
     description: "Make the bot leave a guild.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/users/@me/guilds/${guildId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.delete(`/users/@me/guilds/${guildId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   listGuildMembers: tool({
     description: "List guild members by user ID page.",
-    inputSchema: z.object({ guildId: id, query: z.object({ limit: integer.min(1).max(1000).optional(), after: id.optional() }).optional() }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/members`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ limit: z.number().int().min(1).max(1000).optional(), after: z.string().regex(/^\d{1,20}$/u).optional() }).optional(),
+    }),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/members`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   searchGuildMembers: tool({
     description: "Find guild members by username or nickname prefix.",
-    inputSchema: z.object({ guildId: id, query: memberSearch.extend({ limit: integer.min(1).max(1000).optional() }) }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/members/search`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(1000).optional() }),
+    }),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/members/search`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildMember: tool({
     description: "Get a guild member, including assigned role IDs.",
-    inputSchema: z.object({ guildId: id, userId: id }),
-    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/members/${userId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, userId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/members/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildMemberPermissions: tool({
     description: "Get a member's computed guild permissions.",
-    inputSchema: z.object({ guildId: id, userId: id }),
-    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/permissions/member/${userId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, userId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/permissions/member/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildRolePermissions: tool({
     description: "Get a role's computed guild permissions.",
-    inputSchema: z.object({ guildId: id, roleId: id }),
-    execute: async ({ guildId, roleId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/permissions/role/${roleId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), roleId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, roleId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/permissions/role/${roleId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   setMemberRoles: tool({
     description: "Replace a guild member's complete list of roles.",
-    inputSchema: z.object({ guildId: id, userId: id, reason, body: z.object({ roles: ids }) }),
-    execute: async ({ guildId, userId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/members/${userId}`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ roles: z.array(z.string().regex(/^\d{1,20}$/u)) }),
+    }),
+    execute: async ({ guildId, userId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/members/${userId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   removeMemberTimeout: tool({
     description: "Remove a guild member's timeout.",
-    inputSchema: z.object({ guildId: id, userId: id, reason, body: z.object({ communication_disabled_until: z.null().default(null) }).default({ communication_disabled_until: null }) }),
-    execute: async ({ guildId, userId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/members/${userId}`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ communication_disabled_until: z.null().default(null) }).default({ communication_disabled_until: null }),
+    }),
+    execute: async ({ guildId, userId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/members/${userId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   kickMember: tool({
     description: "Remove a member from a guild.",
-    inputSchema: z.object({ guildId: id, userId: id, reason }),
-    execute: async ({ guildId, userId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/members/${userId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, userId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/members/${userId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildBans: tool({
     description: "List guild bans.",
-    inputSchema: z.object({ guildId: id, query: page.extend({ limit: integer.min(1).max(1000).optional() }).optional() }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/bans`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({
+        limit: z.number().int().min(1).max(1000).optional(),
+        before: z.string().regex(/^\d{1,20}$/u).optional(),
+        after: z.string().regex(/^\d{1,20}$/u).optional(),
+      }).optional(),
+    }),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/bans`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildBan: tool({
     description: "Get a guild ban.",
-    inputSchema: z.object({ guildId: id, userId: id }),
-    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/bans/${userId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, userId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/bans/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   banMember: tool({
     description: "Ban a user from a guild.",
-    inputSchema: z.object({ guildId: id, userId: id, reason, body: z.object({ delete_message_seconds: integer.min(0).max(604800).optional() }).default({}) }),
-    execute: async ({ guildId, userId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/guilds/${guildId}/bans/${userId}`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ delete_message_seconds: z.number().int().min(0).max(604800).optional() }).default({}),
+    }),
+    execute: async ({ guildId, userId, reason, body }) => {
+      const result = await discordClient.rest.put(`/guilds/${guildId}/bans/${userId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   bulkBanMembers: tool({
     description: "Ban up to 200 users from a guild.",
-    inputSchema: z.object({ guildId: id, reason, body: z.object({ user_ids: ids.min(1).max(200), delete_message_seconds: integer.min(0).max(604800).optional() }) }),
-    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/guilds/${guildId}/bulk-ban`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({
+        user_ids: z.array(z.string().regex(/^\d{1,20}$/u)).min(1).max(200),
+        delete_message_seconds: z.number().int().min(0).max(604800).optional(),
+      }),
+    }),
+    execute: async ({ guildId, reason, body }) => {
+      const result = await discordClient.rest.post(`/guilds/${guildId}/bulk-ban`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   unbanMember: tool({
     description: "Remove a user's guild ban.",
-    inputSchema: z.object({ guildId: id, userId: id, reason }),
-    execute: async ({ guildId, userId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/bans/${userId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, userId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/bans/${userId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getPruneCount: tool({
     description: "Count inactive members a prune would remove.",
-    inputSchema: z.object({ guildId: id, query: z.object({ days: integer.min(1).max(30).optional(), include_roles: ids.optional().describe("Role IDs as an array") }).optional() }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/prune`, {
-      query: makeURLSearchParams({ ...query, include_roles: query?.include_roles?.join(",") }),
-    })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({
+        days: z.number().int().min(1).max(30).optional(),
+        include_roles: z.array(z.string().regex(/^\d{1,20}$/u)).optional().describe("Role IDs as an array"),
+      }).optional(),
+    }),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/prune`, {
+        query: makeURLSearchParams({ ...query, include_roles: query?.include_roles?.join(",") }),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   pruneMembers: tool({
     description: "Remove inactive guild members.",
-    inputSchema: z.object({ guildId: id, reason, body: z.object({ days: integer.min(1).max(30), compute_prune_count: flag.optional(), include_roles: ids.optional() }) }),
-    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/guilds/${guildId}/prune`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({
+        days: z.number().int().min(1).max(30),
+        compute_prune_count: z.boolean().optional(),
+        include_roles: z.array(z.string().regex(/^\d{1,20}$/u)).optional(),
+      }),
+    }),
+    execute: async ({ guildId, reason, body }) => {
+      const result = await discordClient.rest.post(`/guilds/${guildId}/prune`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editGuildIncidentActions: tool({
     description: "Temporarily pause guild invites or DMs. Null resumes them.",
-    inputSchema: z.object({ guildId: id, body: z.object({ invites_disabled_until: date.nullable(), dms_disabled_until: date.nullable() }).partial() }),
-    execute: async ({ guildId, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/guilds/${guildId}/incident-actions`, { body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      body: z.object({
+        invites_disabled_until: z.iso.datetime({ offset: true }).nullable(),
+        dms_disabled_until: z.iso.datetime({ offset: true }).nullable(),
+      }).partial(),
+    }),
+    execute: async ({ guildId, body }) => {
+      const result = await discordClient.rest.put(`/guilds/${guildId}/incident-actions`, { body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
 
   // Channels And Threads
   getChannelDetails: tool({
     description: "Get full channel settings and permission overwrites.",
-    inputSchema: z.object({ channelId: id }),
-    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editChannel: tool({
     description: "Edit a channel or thread.",
     inputSchema: z.object({
-      channelId: id,
-      reason,
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
       body: z.object({
-        name: text.min(1).max(100),
-        type: integer,
-        position: integer.nonnegative(),
-        topic: text.max(4096).nullable(),
-        nsfw: flag,
-        rate_limit_per_user: integer.min(0).max(21600),
-        bitrate: integer,
-        user_limit: integer,
-        permission_overwrites: z.array(permissionOverwrite),
-        parent_id: id.nullable(),
-        rtc_region: text.nullable(),
-        video_quality_mode: integer.min(1).max(2),
+        name: z.string().min(1).max(100),
+        type: z.number().int(),
+        position: z.number().int().nonnegative(),
+        topic: z.string().max(4096).nullable(),
+        nsfw: z.boolean(),
+        rate_limit_per_user: z.number().int().min(0).max(21600),
+        bitrate: z.number().int(),
+        user_limit: z.number().int(),
+        permission_overwrites: z.array(z.object({
+          id: z.string().regex(/^\d{1,20}$/u),
+          type: z.union([z.literal(0), z.literal(1)]),
+          allow: z.string().regex(/^\d+$/u).optional(),
+          deny: z.string().regex(/^\d+$/u).optional(),
+        })),
+        parent_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+        rtc_region: z.string().nullable(),
+        video_quality_mode: z.number().int().min(1).max(2),
         default_auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]),
-        flags: integer.nonnegative(),
-        available_tags: z.array(forumTag),
-        applied_tags: ids,
-        default_reaction_emoji: z.object({ emoji_id: id.nullable().optional(), emoji_name: text.nullable().optional() }).nullable(),
-        default_thread_rate_limit_per_user: integer.min(0).max(21600),
-        default_sort_order: integer.min(0).max(1).nullable(),
-        default_forum_layout: integer.min(0).max(2),
-        archived: flag,
-        auto_archive_duration: integer,
-        locked: flag,
-        invitable: flag,
+        flags: z.number().int().nonnegative(),
+        available_tags: z.array(z.object({
+          id: z.string().regex(/^\d{1,20}$/u).optional(),
+          name: z.string().min(1).max(20),
+          moderated: z.boolean().optional(),
+          emoji_id: z.string().regex(/^\d{1,20}$/u).nullable().optional(),
+          emoji_name: z.string().nullable().optional(),
+        })),
+        applied_tags: z.array(z.string().regex(/^\d{1,20}$/u)),
+        default_reaction_emoji: z.object({
+          emoji_id: z.string().regex(/^\d{1,20}$/u).nullable().optional(),
+          emoji_name: z.string().nullable().optional(),
+        }).nullable(),
+        default_thread_rate_limit_per_user: z.number().int().min(0).max(21600),
+        default_sort_order: z.number().int().min(0).max(1).nullable(),
+        default_forum_layout: z.number().int().min(0).max(2),
+        archived: z.boolean(),
+        auto_archive_duration: z.number().int(),
+        locked: z.boolean(),
+        invitable: z.boolean(),
       }).partial(),
     }),
-    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/channels/${channelId}`, { reason, body })),
+    execute: async ({ channelId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/channels/${channelId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteChannel: tool({
     description: "Delete a guild channel or close a DM.",
-    inputSchema: z.object({ channelId: id, reason }),
-    execute: async ({ channelId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}`, { reason })),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional() }),
+    execute: async ({ channelId, reason }) => {
+      const result = await discordClient.rest.delete(`/channels/${channelId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   reorderChannels: tool({
     description: "Reorder or move guild channels.",
-    inputSchema: z.object({ guildId: id, reason, body: z.array(z.object({ id, position: integer.nonnegative().nullable().optional(), lock_permissions: flag.nullable().optional(), parent_id: id.nullable().optional() })).min(1) }),
-    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/channels`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.array(z.object({
+        id: z.string().regex(/^\d{1,20}$/u),
+        position: z.number().int().nonnegative().nullable().optional(),
+        lock_permissions: z.boolean().nullable().optional(),
+        parent_id: z.string().regex(/^\d{1,20}$/u).nullable().optional(),
+      })).min(1),
+    }),
+    execute: async ({ guildId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/channels`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   setChannelPermission: tool({
     description: "Set a channel permission overwrite. Allow and deny are decimal bitsets.",
-    inputSchema: z.object({ channelId: id, overwriteId: id, reason, body: permissionOverwrite.omit({ id: true }) }),
-    execute: async ({ channelId, overwriteId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${channelId}/permissions/${overwriteId}`, { reason, body })),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), overwriteId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
+      id: z.string().regex(/^\d{1,20}$/u),
+      type: z.union([z.literal(0), z.literal(1)]),
+      allow: z.string().regex(/^\d+$/u).optional(),
+      deny: z.string().regex(/^\d+$/u).optional(),
+    }).omit({ id: true }) }),
+    execute: async ({ channelId, overwriteId, reason, body }) => {
+      const result = await discordClient.rest.put(`/channels/${channelId}/permissions/${overwriteId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteChannelPermission: tool({
     description: "Delete a channel permission overwrite.",
-    inputSchema: z.object({ channelId: id, overwriteId: id, reason }),
-    execute: async ({ channelId, overwriteId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}/permissions/${overwriteId}`, { reason })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      overwriteId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ channelId, overwriteId, reason }) => {
+      const result = await discordClient.rest.delete(`/channels/${channelId}/permissions/${overwriteId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getChannelMemberPermissions: tool({
     description: "Get a member's computed permissions in a channel.",
-    inputSchema: z.object({ channelId: id, userId: id, query: z.object({ implicit: flag.optional() }).optional() }),
-    execute: async ({ channelId, userId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/permissions/member/${userId}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ implicit: z.boolean().optional() }).optional(),
+    }),
+    execute: async ({ channelId, userId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/permissions/member/${userId}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getChannelRolePermissions: tool({
     description: "Get a role's computed permissions in a channel.",
-    inputSchema: z.object({ channelId: id, roleId: id, query: z.object({ implicit: flag.optional() }).optional() }),
-    execute: async ({ channelId, roleId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/permissions/role/${roleId}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      roleId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ implicit: z.boolean().optional() }).optional(),
+    }),
+    execute: async ({ channelId, roleId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/permissions/role/${roleId}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   followAnnouncementChannel: tool({
     description: "Forward announcements to a destination channel.",
-    inputSchema: z.object({ channelId: id, body: z.object({ webhook_channel_id: id }) }),
-    execute: async ({ channelId, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/followers`, { body })),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), body: z.object({ webhook_channel_id: z.string().regex(/^\d{1,20}$/u) }) }),
+    execute: async ({ channelId, body }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/followers`, { body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   triggerTyping: tool({
     description: "Show the bot's typing indicator in a channel.",
-    inputSchema: z.object({ channelId: id }),
-    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/typing`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/typing`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   createPrivateThread: tool({
     description: "Create a private thread in a guild text channel.",
-    inputSchema: z.object({ channelId: id, reason, body: threadFields.extend({ type: z.literal(12).default(12), invitable: flag.optional() }) }),
-    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/threads`, { reason, body })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({
+        name: z.string().min(1).max(100),
+        auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]).optional(),
+        rate_limit_per_user: z.number().int().min(0).max(21600).optional(),
+        type: z.literal(12).default(12),
+        invitable: z.boolean().optional(),
+      }),
+    }),
+    execute: async ({ channelId, reason, body }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/threads`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   createForumPost: tool({
     description: "Create a post in a forum or media channel.",
-    inputSchema: z.object({ channelId: id, body: threadFields.extend({ message: messageFields, applied_tags: ids.max(5).optional() }), reason }),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), body: z.object({ name: z.string().min(1).max(100), auto_archive_duration: z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)]).optional(), rate_limit_per_user: z.number().int().min(0).max(21600).optional(), message: z.object({
+      content: z.string().max(2000),
+      embeds: z.array(z.record(z.string(), z.json())).max(10),
+      components: z.array(z.record(z.string(), z.json())),
+      sticker_ids: z.array(z.string().regex(/^\d{1,20}$/u)).max(3),
+      flags: z.number().int().nonnegative(),
+    }).partial(), applied_tags: z.array(z.string().regex(/^\d{1,20}$/u)).max(5).optional() }), reason: z.string().max(512).optional() }),
     execute: async ({ channelId, body, reason }) => discordClient.rest.post(Routes.threads(channelId), {
-      body: { ...body, message: { ...body.message, allowed_mentions: allowedMentions } },
+      body: { ...body, message: { ...body.message, allowed_mentions: { parse: ["users", "roles"] } } },
       reason,
     }),
   }),
   getActiveThreads: tool({
     description: "List active guild threads visible to the bot.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/threads/active`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/threads/active`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getPublicArchivedThreads: tool({
     description: "List archived public threads in a channel.",
-    inputSchema: z.object({ channelId: id, query: z.object({ limit, before: date.optional() }).optional() }),
-    execute: async ({ channelId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/threads/archived/public`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.iso.datetime({ offset: true }).optional() }).optional(),
+    }),
+    execute: async ({ channelId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/threads/archived/public`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getPrivateArchivedThreads: tool({
     description: "List archived private threads in a channel.",
-    inputSchema: z.object({ channelId: id, query: z.object({ limit, before: date.optional() }).optional() }),
-    execute: async ({ channelId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/threads/archived/private`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.iso.datetime({ offset: true }).optional() }).optional(),
+    }),
+    execute: async ({ channelId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/threads/archived/private`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getJoinedArchivedThreads: tool({
     description: "List archived private threads the bot joined.",
-    inputSchema: z.object({ channelId: id, query: z.object({ limit, before: id.optional() }).optional() }),
-    execute: async ({ channelId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/users/@me/threads/archived/private`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().regex(/^\d{1,20}$/u).optional() }).optional(),
+    }),
+    execute: async ({ channelId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/users/@me/threads/archived/private`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   joinThread: tool({
     description: "Join a thread.",
-    inputSchema: z.object({ threadId: id }),
-    execute: async ({ threadId }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${threadId}/thread-members/@me`)),
+    inputSchema: z.object({ threadId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ threadId }) => {
+      const result = await discordClient.rest.put(`/channels/${threadId}/thread-members/@me`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   leaveThread: tool({
     description: "Leave a thread.",
-    inputSchema: z.object({ threadId: id }),
-    execute: async ({ threadId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${threadId}/thread-members/@me`)),
+    inputSchema: z.object({ threadId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ threadId }) => {
+      const result = await discordClient.rest.delete(`/channels/${threadId}/thread-members/@me`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   addThreadMember: tool({
     description: "Add a guild member to a thread.",
-    inputSchema: z.object({ threadId: id, userId: id }),
-    execute: async ({ threadId, userId }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${threadId}/thread-members/${userId}`)),
+    inputSchema: z.object({ threadId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ threadId, userId }) => {
+      const result = await discordClient.rest.put(`/channels/${threadId}/thread-members/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   removeThreadMember: tool({
     description: "Remove a member from a thread.",
-    inputSchema: z.object({ threadId: id, userId: id }),
-    execute: async ({ threadId, userId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${threadId}/thread-members/${userId}`)),
+    inputSchema: z.object({ threadId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ threadId, userId }) => {
+      const result = await discordClient.rest.delete(`/channels/${threadId}/thread-members/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getThreadMember: tool({
     description: "Get a thread member.",
-    inputSchema: z.object({ threadId: id, userId: id, query: z.object({ with_member: flag.optional() }).optional() }),
-    execute: async ({ threadId, userId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${threadId}/thread-members/${userId}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      threadId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ with_member: z.boolean().optional() }).optional(),
+    }),
+    execute: async ({ threadId, userId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${threadId}/thread-members/${userId}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getThreadMembers: tool({
     description: "List thread members.",
-    inputSchema: z.object({ threadId: id, query: z.object({ with_member: flag.optional(), after: id.optional(), limit }).optional() }),
-    execute: async ({ threadId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${threadId}/thread-members`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      threadId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({
+        with_member: z.boolean().optional(),
+        after: z.string().regex(/^\d{1,20}$/u).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }).optional(),
+    }),
+    execute: async ({ threadId, query }) => {
+      const result = await discordClient.rest.get(`/channels/${threadId}/thread-members`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
 
   // Messages And Polls
   getMessage: tool({
     description: "Get a message by ID.",
-    inputSchema: z.object({ channelId: id, messageId: id }),
-    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/messages/${messageId}`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), messageId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId, messageId }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/messages/${messageId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   searchGuildMessages: tool({
     description: "Search indexed messages within the specified guild channels.",
     inputSchema: z.object({
-      guildId: id,
+      guildId: z.string().regex(/^\d{1,20}$/u),
       query: z.object({
-        content: text.max(1024),
-        channel_id: ids.min(1).max(500),
-        author_id: ids.max(100),
-        author_type: z.array(text),
-        mentions: ids.max(100),
-        mentions_role_id: ids.max(100),
-        mention_everyone: flag,
-        pinned: flag,
-        has: z.array(text),
-        embed_type: z.array(text),
-        embed_provider: z.array(text).max(100),
-        link_hostname: z.array(text).max(100),
-        attachment_filename: z.array(text).max(100),
-        attachment_extension: z.array(text).max(100),
-        replied_to_user_id: ids.max(100),
-        replied_to_message_id: ids.max(100),
-        include_nsfw: flag,
+        content: z.string().max(1024),
+        channel_id: z.array(z.string().regex(/^\d{1,20}$/u)).min(1).max(500),
+        author_id: z.array(z.string().regex(/^\d{1,20}$/u)).max(100),
+        author_type: z.array(z.string()),
+        mentions: z.array(z.string().regex(/^\d{1,20}$/u)).max(100),
+        mentions_role_id: z.array(z.string().regex(/^\d{1,20}$/u)).max(100),
+        mention_everyone: z.boolean(),
+        pinned: z.boolean(),
+        has: z.array(z.string()),
+        embed_type: z.array(z.string()),
+        embed_provider: z.array(z.string()).max(100),
+        link_hostname: z.array(z.string()).max(100),
+        attachment_filename: z.array(z.string()).max(100),
+        attachment_extension: z.array(z.string()).max(100),
+        replied_to_user_id: z.array(z.string().regex(/^\d{1,20}$/u)).max(100),
+        replied_to_message_id: z.array(z.string().regex(/^\d{1,20}$/u)).max(100),
+        include_nsfw: z.boolean(),
         sort_by: z.enum(["timestamp", "relevance"]),
         sort_order: z.enum(["asc", "desc"]),
-        slop: integer.min(0).max(100),
-        limit: integer.min(1).max(25),
-        offset: integer.min(0).max(9975),
-        min_id: id,
-        max_id: id,
+        slop: z.number().int().min(0).max(100),
+        limit: z.number().int().min(1).max(25),
+        offset: z.number().int().min(0).max(9975),
+        min_id: z.string().regex(/^\d{1,20}$/u),
+        max_id: z.string().regex(/^\d{1,20}$/u),
       }).partial().required({ channel_id: true }),
     }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/messages/search`, {
-      query: makeURLSearchParams(query),
-    })),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/messages/search`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   sendRichMessage: tool({
     description: "Send a Discord message with embeds, components, stickers, TTS or files.",
     inputSchema: z.object({
-      channelId: id,
-      body: messageFields.extend({ tts: flag.optional(), files: z.array(z.object({ url: mediaUrl, name: text.min(1) })).max(10).optional() }),
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      body: z.object({
+        content: z.string().max(2000),
+        embeds: z.array(z.record(z.string(), z.json())).max(10),
+        components: z.array(z.record(z.string(), z.json())),
+        sticker_ids: z.array(z.string().regex(/^\d{1,20}$/u)).max(3),
+        flags: z.number().int().nonnegative(),
+      }).partial().extend({ tts: z.boolean().optional(), files: z.array(z.object({
+        url: z.url({ protocol: /^https?$/u }),
+        name: z.string().min(1),
+      })).max(10).optional() }),
     }),
     execute: async ({ channelId, body: { files, ...body } }) => {
       return discordClient.rest.post(Routes.channelMessages(channelId), {
-        body: { ...body, attachments: files?.map(({ name }, index) => ({ id: index, filename: name })), allowed_mentions: allowedMentions },
+        body: { ...body, attachments: files?.map(({ name }, index) => ({ id: index, filename: name })), allowed_mentions: { parse: ["users", "roles"] } },
         files: files === undefined ? undefined : await Promise.all(files.map(async ({ url, name }) => MessagePayload.resolveFile({ attachment: url, name }))),
       });
     },
   }),
   editRichMessage: tool({
     description: "Edit the text, embeds, components or retained attachments of the bot's message.",
-    inputSchema: messageTarget.extend({
-      body: messageFields.omit({ sticker_ids: true }).extend({
-        content: text.max(2000).nullable().optional(),
-        attachments: z.array(z.object({ id, description: text.max(1024).optional() })).optional(),
-      }),
-    }),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), messageId: z.string().regex(/^\d{1,20}$/u), body: z.object({
+      content: z.string().max(2000),
+      embeds: z.array(z.record(z.string(), z.json())).max(10),
+      components: z.array(z.record(z.string(), z.json())),
+      sticker_ids: z.array(z.string().regex(/^\d{1,20}$/u)).max(3),
+      flags: z.number().int().nonnegative(),
+    }).partial().omit({ sticker_ids: true }).extend({
+      content: z.string().max(2000).nullable().optional(),
+      attachments: z.array(z.object({ id: z.string().regex(/^\d{1,20}$/u), description: z.string().max(1024).optional() })).optional(),
+    }) }),
     execute: async ({ channelId, messageId, body }) => discordClient.rest.patch(Routes.channelMessage(channelId, messageId), {
-      body: { ...body, allowed_mentions: allowedMentions },
+      body: { ...body, allowed_mentions: { parse: ["users", "roles"] } },
     }),
   }),
   sendVoiceMessage: tool({
     description: "Send a voice message using an Ogg Opus audio URL and its waveform.",
-    inputSchema: z.object({ channelId: id, url: mediaUrl, durationSeconds: z.number().positive(), waveform: text.min(1).max(344) }),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      url: z.url({ protocol: /^https?$/u }),
+      durationSeconds: z.number().positive(),
+      waveform: z.string().min(1).max(344),
+    }),
     execute: async ({ channelId, url, durationSeconds, waveform }) => {
       const response = await fetch(url);
       if (!response.ok) {
@@ -540,42 +726,80 @@ export const discordTools = {
   }),
   forwardMessage: tool({
     description: "Forward an existing message to another channel.",
-    inputSchema: messageTarget.extend({ toChannelId: id, guildId: id.optional() }),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      toChannelId: z.string().regex(/^\d{1,20}$/u),
+      guildId: z.string().regex(/^\d{1,20}$/u).optional(),
+    }),
     execute: async ({ channelId, messageId, toChannelId, guildId }) => discordClient.rest.post(Routes.channelMessages(toChannelId), {
       body: { message_reference: { type: 1, channel_id: channelId, message_id: messageId, guild_id: guildId }, allowed_mentions: { parse: [] } },
     }),
   }),
   crosspostMessage: tool({
     description: "Publish an announcement message to following channels.",
-    inputSchema: z.object({ channelId: id, messageId: id }),
-    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/messages/${messageId}/crosspost`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), messageId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId, messageId }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/messages/${messageId}/crosspost`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   bulkDeleteMessages: tool({
     description: "Delete 2–100 guild messages less than two weeks old.",
-    inputSchema: z.object({ channelId: id, reason, body: z.object({ messages: ids.min(2).max(100) }) }),
-    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/messages/bulk-delete`, { reason, body })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ messages: z.array(z.string().regex(/^\d{1,20}$/u)).min(2).max(100) }),
+    }),
+    execute: async ({ channelId, reason, body }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/messages/bulk-delete`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   unpinMessage: tool({
     description: "Unpin a message.",
-    inputSchema: z.object({ channelId: id, messageId: id, reason }),
-    execute: async ({ channelId, messageId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}/messages/pins/${messageId}`, { reason })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ channelId, messageId, reason }) => {
+      const result = await discordClient.rest.delete(`/channels/${channelId}/messages/pins/${messageId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getReactionUsers: tool({
     description: "List users who used an emoji reaction.",
-    inputSchema: reactionTarget.extend({ after: id.optional(), limit, type: z.union([z.literal(0), z.literal(1)]).optional().describe("0 normal, 1 super reaction") }),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      emoji: z.string().min(1).describe("Unicode emoji, name:id or custom emoji markup"),
+    }).extend({ after: z.string().regex(/^\d{1,20}$/u).optional(), limit: z.number().int().min(1).max(100).optional(), type: z.union([z.literal(0), z.literal(1)]).optional().describe("0 normal, 1 super reaction") }),
     execute: async ({ channelId, messageId, emoji, after, limit, type }) => {
       const query = new URLSearchParams();
       if (after !== undefined) query.set("after", after);
       if (limit !== undefined) query.set("limit", String(limit));
       if (type !== undefined) query.set("type", String(type));
-      return discordClient.rest.get(Routes.channelMessageReaction(channelId, messageId, reactionIdentifier(emoji)), { query });
+      const resolved = parseEmoji(emoji);
+      if (resolved === null) throw new Error("Invalid emoji");
+      const reaction = encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
+      return discordClient.rest.get(Routes.channelMessageReaction(channelId, messageId, reaction), { query });
     },
   }),
   removeReaction: tool({
     description: "Remove the bot's reaction or a specified user's reaction.",
-    inputSchema: reactionTarget.extend({ userId: id.optional() }),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      emoji: z.string().min(1).describe("Unicode emoji, name:id or custom emoji markup"),
+    }).extend({ userId: z.string().regex(/^\d{1,20}$/u).optional() }),
     execute: async ({ channelId, messageId, emoji, userId }) => {
-      const reaction = reactionIdentifier(emoji);
+      const resolved = parseEmoji(emoji);
+      if (resolved === null) throw new Error("Invalid emoji");
+      const reaction = encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
       const route = userId === undefined ? Routes.channelMessageOwnReaction(channelId, messageId, reaction) : Routes.channelMessageUserReaction(channelId, messageId, reaction, userId);
       await discordClient.rest.delete(route);
       return {};
@@ -583,86 +807,190 @@ export const discordTools = {
   }),
   clearEmojiReactions: tool({
     description: "Remove all reactions with one emoji from a message.",
-    inputSchema: reactionTarget,
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      emoji: z.string().min(1).describe("Unicode emoji, name:id or custom emoji markup"),
+    }),
     execute: async ({ channelId, messageId, emoji }) => {
-      await discordClient.rest.delete(Routes.channelMessageReaction(channelId, messageId, reactionIdentifier(emoji)));
+      const resolved = parseEmoji(emoji);
+      if (resolved === null) throw new Error("Invalid emoji");
+      const reaction = encodeURIComponent(resolved.id === undefined ? resolved.name : `${resolved.name}:${resolved.id}`);
+      await discordClient.rest.delete(Routes.channelMessageReaction(channelId, messageId, reaction));
       return {};
     },
   }),
   clearMessageReactions: tool({
     description: "Remove all reactions from a message.",
-    inputSchema: z.object({ channelId: id, messageId: id }),
-    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.delete(`/channels/${channelId}/messages/${messageId}/reactions`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), messageId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId, messageId }) => {
+      const result = await discordClient.rest.delete(`/channels/${channelId}/messages/${messageId}/reactions`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   endPoll: tool({
     description: "End a poll created by the bot.",
-    inputSchema: z.object({ channelId: id, messageId: id }),
-    execute: async ({ channelId, messageId }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/polls/${messageId}/expire`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), messageId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId, messageId }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/polls/${messageId}/expire`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getPollVoters: tool({
     description: "List voters for a specific poll answer.",
-    inputSchema: z.object({ channelId: id, messageId: id, answer: pathSegment, query: z.object({ after: id.optional(), limit }).optional() }),
-    execute: async ({ channelId, messageId, answer, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/polls/${messageId}/answers/${encodeURIComponent(answer)}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      answer: z.string().min(1).regex(/^[\w-]+$/u),
+      query: z.object({ after: z.string().regex(/^\d{1,20}$/u).optional(), limit: z.number().int().min(1).max(100).optional() }).optional(),
+    }),
+    execute: async ({ channelId, messageId, answer, query }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/polls/${messageId}/answers/${encodeURIComponent(answer)}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
 
   // Roles And Auto Mod
   getRole: tool({
     description: "Get a guild role and its permissions.",
-    inputSchema: z.object({ guildId: id, roleId: id }),
-    execute: async ({ guildId, roleId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/roles/${roleId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), roleId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, roleId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/roles/${roleId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editRole: tool({
     description: "Edit a guild role.",
-    inputSchema: z.object({ guildId: id, roleId: id, reason, body: roleFields }),
-    execute: async ({ guildId, roleId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/roles/${roleId}`, { reason, body })),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), roleId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
+      name: z.string().max(100),
+      permissions: z.string().regex(/^\d+$/u),
+      colors: z.object({
+        primary_color: z.number().int(),
+        secondary_color: z.number().int().optional(),
+        tertiary_color: z.number().int().optional(),
+      }),
+      hoist: z.boolean(),
+      mentionable: z.boolean(),
+      icon: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u).nullable(),
+      unicode_emoji: z.string().nullable(),
+    }).partial() }),
+    execute: async ({ guildId, roleId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/roles/${roleId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteRole: tool({
     description: "Delete a guild role.",
-    inputSchema: z.object({ guildId: id, roleId: id, reason }),
-    execute: async ({ guildId, roleId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/roles/${roleId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      roleId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, roleId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/roles/${roleId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   reorderRoles: tool({
     description: "Reorder guild roles.",
-    inputSchema: z.object({ guildId: id, reason, body: z.array(z.object({ id, position: integer.min(1) })).min(1) }),
-    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/roles`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.array(z.object({ id: z.string().regex(/^\d{1,20}$/u), position: z.number().int().min(1) })).min(1),
+    }),
+    execute: async ({ guildId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/roles`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getRoleMemberCounts: tool({
     description: "Get member counts by role in a guild.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/roles/member-counts`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/roles/member-counts`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   listAutoModerationRules: tool({
     description: "List guild AutoMod rules.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/auto-moderation/rules`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/auto-moderation/rules`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getAutoModerationRule: tool({
     description: "Get an AutoMod rule.",
-    inputSchema: z.object({ guildId: id, ruleId: id }),
-    execute: async ({ guildId, ruleId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), ruleId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, ruleId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   createAutoModerationRule: tool({
     description: "Create an AutoMod rule.",
-    inputSchema: z.object({ guildId: id, reason, body: autoModFields.partial().required({ name: true, event_type: true, actions: true }).extend({ trigger_type: integer }) }),
-    execute: async ({ guildId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/guilds/${guildId}/auto-moderation/rules`, { reason, body })),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
+      name: z.string().min(1),
+      event_type: z.number().int(),
+      trigger_metadata: z.record(z.string(), z.json()),
+      actions: z.array(z.object({ type: z.number().int(), metadata: z.record(z.string(), z.json()).optional() })),
+      enabled: z.boolean(),
+      exempt_roles: z.array(z.string().regex(/^\d{1,20}$/u)),
+      exempt_channels: z.array(z.string().regex(/^\d{1,20}$/u)),
+    }).partial().required({ name: true, event_type: true, actions: true }).extend({ trigger_type: z.number().int() }) }),
+    execute: async ({ guildId, reason, body }) => {
+      const result = await discordClient.rest.post(`/guilds/${guildId}/auto-moderation/rules`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editAutoModerationRule: tool({
     description: "Edit an AutoMod rule.",
-    inputSchema: z.object({ guildId: id, ruleId: id, reason, body: autoModFields.partial() }),
-    execute: async ({ guildId, ruleId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`, { reason, body })),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), ruleId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
+      name: z.string().min(1),
+      event_type: z.number().int(),
+      trigger_metadata: z.record(z.string(), z.json()),
+      actions: z.array(z.object({ type: z.number().int(), metadata: z.record(z.string(), z.json()).optional() })),
+      enabled: z.boolean(),
+      exempt_roles: z.array(z.string().regex(/^\d{1,20}$/u)),
+      exempt_channels: z.array(z.string().regex(/^\d{1,20}$/u)),
+    }).partial() }),
+    execute: async ({ guildId, ruleId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteAutoModerationRule: tool({
     description: "Delete an AutoMod rule.",
-    inputSchema: z.object({ guildId: id, ruleId: id, reason }),
-    execute: async ({ guildId, ruleId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      ruleId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, ruleId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/auto-moderation/rules/${ruleId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
 
   // Voice And Stage
   controlVoiceAudio: tool({
     description: "Pause, resume or stop the bot's audio.",
-    inputSchema: z.object({ guildId: id, operation: z.enum(["pause", "resume", "stop"]) }),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), operation: z.enum(["pause", "resume", "stop"]) }),
     execute: ({ guildId, operation }) => {
       const player = getDiscordAudioPlayer(fetchDiscordVoiceConnection(guildId));
       if (player === undefined) {
@@ -674,7 +1002,7 @@ export const discordTools = {
   }),
   setBotVoiceMute: tool({
     description: "Set the bot's own mute or deafen state in voice.",
-    inputSchema: z.object({ guildId: id, mute: flag.optional(), deaf: flag.optional() }),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), mute: z.boolean().optional(), deaf: z.boolean().optional() }),
     execute: ({ guildId, mute, deaf }) => {
       const connection = fetchDiscordVoiceConnection(guildId);
       if (!connection.rejoin({
@@ -689,121 +1017,260 @@ export const discordTools = {
   }),
   getBotVoiceState: tool({
     description: "Get the bot's voice state in a guild.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/voice-states/@me`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/voice-states/@me`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getMemberVoiceState: tool({
     description: "Get a member's voice state.",
-    inputSchema: z.object({ guildId: id, userId: id }),
-    execute: async ({ guildId, userId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/voice-states/${userId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), userId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, userId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/voice-states/${userId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editBotStageVoiceState: tool({
     description: "Suppress the bot on stage or request to speak.",
-    inputSchema: z.object({ guildId: id, body: z.object({ channel_id: id, suppress: flag.optional(), request_to_speak_timestamp: date.nullable().optional() }) }),
-    execute: async ({ guildId, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/voice-states/@me`, { body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      body: z.object({
+        channel_id: z.string().regex(/^\d{1,20}$/u),
+        suppress: z.boolean().optional(),
+        request_to_speak_timestamp: z.iso.datetime({ offset: true }).nullable().optional(),
+      }),
+    }),
+    execute: async ({ guildId, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/voice-states/@me`, { body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   setStageMemberSuppressed: tool({
     description: "Set whether a stage member is suppressed.",
-    inputSchema: z.object({ guildId: id, userId: id, body: z.object({ channel_id: id, suppress: flag }) }),
-    execute: async ({ guildId, userId, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/voice-states/${userId}`, { body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      userId: z.string().regex(/^\d{1,20}$/u),
+      body: z.object({ channel_id: z.string().regex(/^\d{1,20}$/u), suppress: z.boolean() }),
+    }),
+    execute: async ({ guildId, userId, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/voice-states/${userId}`, { body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   setVoiceChannelStatus: tool({
     description: "Set or clear a voice channel status.",
-    inputSchema: z.object({ channelId: id, reason, body: z.object({ status: text.max(500).nullable() }) }),
-    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.put(`/channels/${channelId}/voice-status`, { reason, body })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ status: z.string().max(500).nullable() }),
+    }),
+    execute: async ({ channelId, reason, body }) => {
+      const result = await discordClient.rest.put(`/channels/${channelId}/voice-status`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   createStageInstance: tool({
     description: "Open a stage with a topic.",
-    inputSchema: z.object({ reason, body: stageFields.extend({ channel_id: id, send_start_notification: flag.optional(), guild_scheduled_event_id: id.optional() }) }),
-    execute: async ({ reason, body }) => decodeDiscordRestResult(await discordClient.rest.post("/stage-instances", { reason, body })),
+    inputSchema: z.object({
+      reason: z.string().max(512).optional(),
+      body: z.object({
+        topic: z.string().min(1).max(120),
+        privacy_level: z.literal(2).optional(),
+        channel_id: z.string().regex(/^\d{1,20}$/u),
+        send_start_notification: z.boolean().optional(),
+        guild_scheduled_event_id: z.string().regex(/^\d{1,20}$/u).optional(),
+      }),
+    }),
+    execute: async ({ reason, body }) => {
+      const result = await discordClient.rest.post("/stage-instances", { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getStageInstance: tool({
     description: "Get the active stage in a channel.",
-    inputSchema: z.object({ channelId: id }),
-    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.get(`/stage-instances/${channelId}`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId }) => {
+      const result = await discordClient.rest.get(`/stage-instances/${channelId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editStageInstance: tool({
     description: "Edit a stage instance.",
-    inputSchema: z.object({ channelId: id, reason, body: stageFields.partial() }),
-    execute: async ({ channelId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/stage-instances/${channelId}`, { reason, body })),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
+      topic: z.string().min(1).max(120),
+      privacy_level: z.literal(2).optional(),
+    }).partial() }),
+    execute: async ({ channelId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/stage-instances/${channelId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteStageInstance: tool({
     description: "Close a stage instance.",
-    inputSchema: z.object({ channelId: id, reason }),
-    execute: async ({ channelId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/stage-instances/${channelId}`, { reason })),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional() }),
+    execute: async ({ channelId, reason }) => {
+      const result = await discordClient.rest.delete(`/stage-instances/${channelId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   sendSoundboardSound: tool({
     description: "Play a soundboard sound in the bot's voice channel.",
-    inputSchema: z.object({ channelId: id, body: z.object({ sound_id: id, source_guild_id: id.optional() }) }),
-    execute: async ({ channelId, body }) => decodeDiscordRestResult(await discordClient.rest.post(`/channels/${channelId}/send-soundboard-sound`, { body })),
+    inputSchema: z.object({
+      channelId: z.string().regex(/^\d{1,20}$/u),
+      body: z.object({ sound_id: z.string().regex(/^\d{1,20}$/u), source_guild_id: z.string().regex(/^\d{1,20}$/u).optional() }),
+    }),
+    execute: async ({ channelId, body }) => {
+      const result = await discordClient.rest.post(`/channels/${channelId}/send-soundboard-sound`, { body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getDefaultSoundboardSounds: tool({
     description: "List default Discord soundboard sounds.",
     inputSchema: z.object({}),
-    execute: async () => decodeDiscordRestResult(await discordClient.rest.get("/soundboard-default-sounds")),
+    execute: async () => {
+      const result = await discordClient.rest.get("/soundboard-default-sounds");
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildSoundboardSounds: tool({
     description: "List guild soundboard sounds.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildSoundboardSound: tool({
     description: "Get a guild soundboard sound.",
-    inputSchema: z.object({ guildId: id, soundId: id }),
-    execute: async ({ guildId, soundId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds/${soundId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), soundId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, soundId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/soundboard-sounds/${soundId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   // Invites And Webhooks
   getInvite: tool({
     description: "Get an invite by code.",
-    inputSchema: z.object({ code: pathSegment, query: z.object({ with_counts: flag.optional(), with_expiration: flag.optional(), guild_scheduled_event_id: id.optional() }).optional() }),
-    execute: async ({ code, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/invites/${encodeURIComponent(code)}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      code: z.string().min(1).regex(/^[\w-]+$/u),
+      query: z.object({
+        with_counts: z.boolean().optional(),
+        with_expiration: z.boolean().optional(),
+        guild_scheduled_event_id: z.string().regex(/^\d{1,20}$/u).optional(),
+      }).optional(),
+    }),
+    execute: async ({ code, query }) => {
+      const result = await discordClient.rest.get(`/invites/${encodeURIComponent(code)}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getChannelInvites: tool({
     description: "List channel invites.",
-    inputSchema: z.object({ channelId: id }),
-    execute: async ({ channelId }) => decodeDiscordRestResult(await discordClient.rest.get(`/channels/${channelId}/invites`)),
+    inputSchema: z.object({ channelId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ channelId }) => {
+      const result = await discordClient.rest.get(`/channels/${channelId}/invites`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildInvites: tool({
     description: "List guild invites.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/invites`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/invites`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteInvite: tool({
     description: "Revoke an invite.",
-    inputSchema: z.object({ code: pathSegment, reason }),
-    execute: async ({ code, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/invites/${encodeURIComponent(code)}`, { reason })),
+    inputSchema: z.object({ code: z.string().min(1).regex(/^[\w-]+$/u), reason: z.string().max(512).optional() }),
+    execute: async ({ code, reason }) => {
+      const result = await discordClient.rest.delete(`/invites/${encodeURIComponent(code)}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildWebhooks: tool({
     description: "List guild webhooks.",
-    inputSchema: guildWebhooks,
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
     execute: async ({ guildId }) => {
       const guild = await discordClient.guilds.fetch(guildId);
-      return (await guild.fetchWebhooks()).map(webhookSummary);
+      return (await guild.fetchWebhooks()).map((webhook) => ({
+        id: webhook.id,
+        name: webhook.name,
+        channelId: webhook.channelId,
+        type: webhook.type,
+        avatarUrl: webhook.avatarURL(),
+      }));
     },
   }),
   getWebhook: tool({
     description: "Get webhook details.",
-    inputSchema: webhookId,
-    execute: async ({ webhookId }) => webhookSummary(await discordClient.fetchWebhook(webhookId)),
+    inputSchema: z.object({ webhookId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ webhookId }) => {
+      const webhook = await discordClient.fetchWebhook(webhookId);
+      return {
+        id: webhook.id,
+        name: webhook.name,
+        channelId: webhook.channelId,
+        type: webhook.type,
+        avatarUrl: webhook.avatarURL(),
+      };
+    },
   }),
   editWebhook: tool({
     description: "Edit a webhook's name, avatar or channel.",
-    inputSchema: webhookId.extend({ body: webhookFields, reason }),
+    inputSchema: z.object({
+      webhookId: z.string().regex(/^\d{1,20}$/u),
+      body: z.object({ name: z.string(), avatar: z.string().nullable(), channel_id: z.string().regex(/^\d{1,20}$/u) }).partial(),
+      reason: z.string().max(512).optional(),
+    }),
     execute: async ({ webhookId, body, reason }) => {
       const webhook = await discordClient.fetchWebhook(webhookId);
-      return webhookSummary(await webhook.edit({ name: body.name, avatar: body.avatar, channel: body.channel_id, reason }));
+      const editedWebhook = await webhook.edit({ name: body.name, avatar: body.avatar, channel: body.channel_id, reason });
+      return {
+        id: editedWebhook.id,
+        name: editedWebhook.name,
+        channelId: editedWebhook.channelId,
+        type: editedWebhook.type,
+        avatarUrl: editedWebhook.avatarURL(),
+      };
     },
   }),
   deleteWebhook: tool({
     description: "Delete a webhook.",
-    inputSchema: z.object({ webhookId: id, reason }),
-    execute: async ({ webhookId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/webhooks/${webhookId}`, { reason })),
+    inputSchema: z.object({ webhookId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional() }),
+    execute: async ({ webhookId, reason }) => {
+      const result = await discordClient.rest.delete(`/webhooks/${webhookId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getWebhookMessage: tool({
     description: "Get a message sent by a webhook.",
-    inputSchema: webhookMessage,
+    inputSchema: z.object({
+      webhookId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      threadId: z.string().regex(/^\d{1,20}$/u).optional(),
+    }),
     execute: async ({ webhookId, messageId, threadId }) => {
       const webhook = await discordClient.fetchWebhook(webhookId);
       const message = await webhook.fetchMessage(messageId, { threadId });
@@ -812,7 +1279,11 @@ export const discordTools = {
   }),
   editWebhookMessage: tool({
     description: "Edit the text of a webhook message.",
-    inputSchema: webhookMessage.extend({ content: text.max(2000).nullable() }),
+    inputSchema: z.object({
+      webhookId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      threadId: z.string().regex(/^\d{1,20}$/u).optional(),
+    }).extend({ content: z.string().max(2000).nullable() }),
     execute: async ({ webhookId, messageId, threadId, content }) => {
       const webhook = await discordClient.fetchWebhook(webhookId);
       const message = await webhook.editMessage(messageId, { content, threadId, allowedMentions: { parse: ["users", "roles"] } });
@@ -821,7 +1292,11 @@ export const discordTools = {
   }),
   deleteWebhookMessage: tool({
     description: "Delete a message sent by a webhook.",
-    inputSchema: webhookMessage,
+    inputSchema: z.object({
+      webhookId: z.string().regex(/^\d{1,20}$/u),
+      messageId: z.string().regex(/^\d{1,20}$/u),
+      threadId: z.string().regex(/^\d{1,20}$/u).optional(),
+    }),
     execute: async ({ webhookId, messageId, threadId }) => {
       const webhook = await discordClient.fetchWebhook(webhookId);
       await webhook.deleteMessage(messageId, threadId);
@@ -832,47 +1307,95 @@ export const discordTools = {
   // Expressions and events
   getGuildEmoji: tool({
     description: "Get a custom guild emoji.",
-    inputSchema: z.object({ guildId: id, emojiId: id }),
-    execute: async ({ guildId, emojiId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/emojis/${emojiId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), emojiId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, emojiId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/emojis/${emojiId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editEmoji: tool({
     description: "Edit a guild emoji's name or allowed roles.",
-    inputSchema: z.object({ guildId: id, emojiId: id, reason, body: z.object({ name: text.min(2).max(32), roles: ids.nullable() }).partial() }),
-    execute: async ({ guildId, emojiId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/emojis/${emojiId}`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      emojiId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ name: z.string().min(2).max(32), roles: z.array(z.string().regex(/^\d{1,20}$/u)).nullable() }).partial(),
+    }),
+    execute: async ({ guildId, emojiId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/emojis/${emojiId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteEmoji: tool({
     description: "Delete a custom guild emoji.",
-    inputSchema: z.object({ guildId: id, emojiId: id, reason }),
-    execute: async ({ guildId, emojiId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/emojis/${emojiId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      emojiId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, emojiId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/emojis/${emojiId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getApplicationEmojis: tool({
     description: "List emojis owned by the application.",
-    inputSchema: z.object({ applicationId: id }),
-    execute: async ({ applicationId }) => decodeDiscordRestResult(await discordClient.rest.get(`/applications/${applicationId}/emojis`)),
+    inputSchema: z.object({ applicationId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ applicationId }) => {
+      const result = await discordClient.rest.get(`/applications/${applicationId}/emojis`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getApplicationEmoji: tool({
     description: "Get an application emoji.",
-    inputSchema: z.object({ applicationId: id, emojiId: id }),
-    execute: async ({ applicationId, emojiId }) => decodeDiscordRestResult(await discordClient.rest.get(`/applications/${applicationId}/emojis/${emojiId}`)),
+    inputSchema: z.object({ applicationId: z.string().regex(/^\d{1,20}$/u), emojiId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ applicationId, emojiId }) => {
+      const result = await discordClient.rest.get(`/applications/${applicationId}/emojis/${emojiId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getSticker: tool({
     description: "Get a sticker by ID.",
-    inputSchema: z.object({ stickerId: id }),
-    execute: async ({ stickerId }) => decodeDiscordRestResult(await discordClient.rest.get(`/stickers/${stickerId}`)),
+    inputSchema: z.object({ stickerId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ stickerId }) => {
+      const result = await discordClient.rest.get(`/stickers/${stickerId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildStickers: tool({
     description: "List custom guild stickers.",
-    inputSchema: z.object({ guildId: id }),
-    execute: async ({ guildId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/stickers`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/stickers`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildSticker: tool({
     description: "Get a custom guild sticker.",
-    inputSchema: z.object({ guildId: id, stickerId: id }),
-    execute: async ({ guildId, stickerId }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/stickers/${stickerId}`)),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), stickerId: z.string().regex(/^\d{1,20}$/u) }),
+    execute: async ({ guildId, stickerId }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/stickers/${stickerId}`);
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   createSticker: tool({
     description: "Create a guild sticker from a PNG, APNG, GIF or Lottie URL.",
-    inputSchema: z.object({ guildId: id, url: mediaUrl, name: text.min(2).max(30), tags: text.max(200), description: text.max(100).optional(), reason }),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      url: z.url({ protocol: /^https?$/u }),
+      name: z.string().min(2).max(30),
+      tags: z.string().max(200),
+      description: z.string().max(100).optional(),
+      reason: z.string().max(512).optional(),
+    }),
     execute: async ({ guildId, url, name, tags, description, reason }) => {
       const guild = await discordClient.guilds.fetch(guildId);
       const sticker = await guild.stickers.create({ file: url, name, tags, description, reason });
@@ -881,50 +1404,120 @@ export const discordTools = {
   }),
   editSticker: tool({
     description: "Edit a custom guild sticker.",
-    inputSchema: z.object({ guildId: id, stickerId: id, reason, body: stickerFields.partial() }),
-    execute: async ({ guildId, stickerId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/stickers/${stickerId}`, { reason, body })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      stickerId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+      body: z.object({ name: z.string().min(2).max(30), description: z.string().max(100).nullable(), tags: z.string().max(200) }).partial(),
+    }),
+    execute: async ({ guildId, stickerId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/stickers/${stickerId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteSticker: tool({
     description: "Delete a custom guild sticker.",
-    inputSchema: z.object({ guildId: id, stickerId: id, reason }),
-    execute: async ({ guildId, stickerId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/stickers/${stickerId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      stickerId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, stickerId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/stickers/${stickerId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildEvents: tool({
     description: "List scheduled guild events.",
-    inputSchema: z.object({ guildId: id, query: z.object({ with_user_count: flag.optional() }).optional() }),
-    execute: async ({ guildId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/scheduled-events`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), query: z.object({ with_user_count: z.boolean().optional() }).optional() }),
+    execute: async ({ guildId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/scheduled-events`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildEvent: tool({
     description: "Get a scheduled guild event.",
-    inputSchema: z.object({ guildId: id, eventId: id, query: z.object({ with_user_count: flag.optional() }).optional() }),
-    execute: async ({ guildId, eventId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/scheduled-events/${eventId}`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      eventId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({ with_user_count: z.boolean().optional() }).optional(),
+    }),
+    execute: async ({ guildId, eventId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/scheduled-events/${eventId}`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   editGuildEvent: tool({
     description: "Edit an event or change its status (1 scheduled, 2 active, 3 completed, 4 canceled).",
-    inputSchema: z.object({ guildId: id, eventId: id, reason, body: eventFields }),
-    execute: async ({ guildId, eventId, reason, body }) => decodeDiscordRestResult(await discordClient.rest.patch(`/guilds/${guildId}/scheduled-events/${eventId}`, { reason, body })),
+    inputSchema: z.object({ guildId: z.string().regex(/^\d{1,20}$/u), eventId: z.string().regex(/^\d{1,20}$/u), reason: z.string().max(512).optional(), body: z.object({
+      name: z.string().min(1).max(100),
+      description: z.string().max(1000).nullable(),
+      scheduled_start_time: z.iso.datetime({ offset: true }),
+      scheduled_end_time: z.iso.datetime({ offset: true }).nullable(),
+      channel_id: z.string().regex(/^\d{1,20}$/u).nullable(),
+      entity_type: z.number().int().min(1).max(3),
+      entity_metadata: z.object({ location: z.string().max(100) }).nullable(),
+      privacy_level: z.literal(2),
+      status: z.number().int().min(1).max(4),
+      image: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/u).nullable(),
+      recurrence_rule: z.record(z.string(), z.json()).nullable(),
+    }).partial() }),
+    execute: async ({ guildId, eventId, reason, body }) => {
+      const result = await discordClient.rest.patch(`/guilds/${guildId}/scheduled-events/${eventId}`, { reason, body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   deleteGuildEvent: tool({
     description: "Delete a scheduled guild event.",
-    inputSchema: z.object({ guildId: id, eventId: id, reason }),
-    execute: async ({ guildId, eventId, reason }) => decodeDiscordRestResult(await discordClient.rest.delete(`/guilds/${guildId}/scheduled-events/${eventId}`, { reason })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      eventId: z.string().regex(/^\d{1,20}$/u),
+      reason: z.string().max(512).optional(),
+    }),
+    execute: async ({ guildId, eventId, reason }) => {
+      const result = await discordClient.rest.delete(`/guilds/${guildId}/scheduled-events/${eventId}`, { reason });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   getGuildEventSubscribers: tool({
     description: "List users interested in a scheduled guild event.",
-    inputSchema: z.object({ guildId: id, eventId: id, query: page.extend({ with_member: flag.optional() }).optional() }),
-    execute: async ({ guildId, eventId, query }) => decodeDiscordRestResult(await discordClient.rest.get(`/guilds/${guildId}/scheduled-events/${eventId}/users`, {
-      query: makeURLSearchParams(query),
-    })),
+    inputSchema: z.object({
+      guildId: z.string().regex(/^\d{1,20}$/u),
+      eventId: z.string().regex(/^\d{1,20}$/u),
+      query: z.object({
+        limit: z.number().int().min(1).max(100).optional(),
+        before: z.string().regex(/^\d{1,20}$/u).optional(),
+        after: z.string().regex(/^\d{1,20}$/u).optional(),
+        with_member: z.boolean().optional(),
+      }).optional(),
+    }),
+    execute: async ({ guildId, eventId, query }) => {
+      const result = await discordClient.rest.get(`/guilds/${guildId}/scheduled-events/${eventId}/users`, {
+        query: makeURLSearchParams(query),
+      });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
   // Direct messages
   openDm: tool({
     description: "Open a direct message channel with a user.",
-    inputSchema: z.object({ body: z.object({ recipient_id: id }) }),
-    execute: async ({ body }) => decodeDiscordRestResult(await discordClient.rest.post("/users/@me/channels", { body })),
+    inputSchema: z.object({ body: z.object({ recipient_id: z.string().regex(/^\d{1,20}$/u) }) }),
+    execute: async ({ body }) => {
+      const result = await discordClient.rest.post("/users/@me/channels", { body });
+      if (result instanceof ArrayBuffer) return result.byteLength === 0 ? {} : new TextDecoder().decode(result);
+      return result ?? {};
+    },
   }),
 
   // Guilds:
@@ -1581,24 +2174,54 @@ export const discordTools = {
     description: "Send a channel message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       channelId: z.string(),
-      content: discordMessageContent.optional(),
-      attachmentRef: replyAttachmentRef,
-      attachmentRefs: replyAttachmentRefs,
+      content: z.string().min(1).describe(dedent`
+        Discord Markdown supports:
+        - Plain text with paragraphs separated by blank lines.
+        - Bold (**text**), italics (*text* or _text_), underline (__text__), strikethrough (~~text~~), and spoilers (||text||).
+        - Headings (# Heading, ## Heading, ### Heading) and subtext (-# text) at the start of a line.
+        - Bulleted lists (- item or * item), numbered lists (1. item), and nested lists with indentation.
+        - Single-line quotes (> text) and quotes that continue to the end of the message (>>> text), starting on a new line.
+        - Inline code with single backticks and code blocks with triple backticks, optionally followed by a language name on the opening line.
+        - Links as bare URLs or with labels ([label](https://example.com)).
+
+        Discord also supports native message syntax:
+        - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
+        - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
+        - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
+        - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
+      `).optional(),
+      attachmentRef: z.uuid().optional().describe("Attachment reference returned by a tool"),
+      attachmentRefs: z.array(z.uuid()).max(10).optional().describe("Attachment references returned by tools when replying with multiple files"),
     }),
-    contextSchema: replyContextSchema,
+    contextSchema: z.object({
+      replyAttachments: z.custom<ReadonlyMap<string, { attachment: Buffer; name: string }>>((value) => value instanceof Map),
+    }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
     execute: async ({ channelId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
-      const chunks = prepareReplyChunks(content, attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs], context, { prefixContinuations: true });
+      // Prepare message chunks and attach files to the final chunk:
+      const refs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
+      if (content === undefined && refs.length === 0) throw new Error("Reply requires text or an attachment");
+      if (refs.length > 10) throw new Error("Reply supports at most 10 attachments");
+      const files = refs.map((ref) => {
+        const file = context.replyAttachments.get(ref);
+        if (file === undefined) throw new Error("Attachment not found in this conversation run");
+        return file;
+      });
+      const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content), { prefixContinuations: true });
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
       const messageIds: string[] = [];
 
-      for (const chunk of chunks) {
-        const message = await channel.send({ ...chunk, flags: MessageFlags.SuppressEmbeds });
+      for (const [index, chunk] of chunks.entries()) {
+        const message = await channel.send({
+          content: chunk,
+          files: files.length > 0 && index === chunks.length - 1 ? files : undefined,
+          flags: MessageFlags.SuppressEmbeds,
+        });
         messageIds.push(message.id);
       }
 
@@ -1681,7 +2304,22 @@ export const discordTools = {
     description: "Send a direct message with Discord Markdown. Long text is split automatically, preserving links and inline code that fit in one message.",
     inputSchema: z.object({
       userId: z.string(),
-      content: discordMessageContent,
+      content: z.string().min(1).describe(dedent`
+        Discord Markdown supports:
+        - Plain text with paragraphs separated by blank lines.
+        - Bold (**text**), italics (*text* or _text_), underline (__text__), strikethrough (~~text~~), and spoilers (||text||).
+        - Headings (# Heading, ## Heading, ### Heading) and subtext (-# text) at the start of a line.
+        - Bulleted lists (- item or * item), numbered lists (1. item), and nested lists with indentation.
+        - Single-line quotes (> text) and quotes that continue to the end of the message (>>> text), starting on a new line.
+        - Inline code with single backticks and code blocks with triple backticks, optionally followed by a language name on the opening line.
+        - Links as bare URLs or with labels ([label](https://example.com)).
+
+        Discord also supports native message syntax:
+        - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
+        - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
+        - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
+        - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
+      `),
     }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
@@ -1836,25 +2474,52 @@ export const discordTools = {
     inputSchema: z.object({
       channelId: z.string(),
       messageId: z.string(),
-      content: discordMessageContent.optional(),
-      attachmentRef: replyAttachmentRef,
-      attachmentRefs: replyAttachmentRefs,
+      content: z.string().min(1).describe(dedent`
+        Discord Markdown supports:
+        - Plain text with paragraphs separated by blank lines.
+        - Bold (**text**), italics (*text* or _text_), underline (__text__), strikethrough (~~text~~), and spoilers (||text||).
+        - Headings (# Heading, ## Heading, ### Heading) and subtext (-# text) at the start of a line.
+        - Bulleted lists (- item or * item), numbered lists (1. item), and nested lists with indentation.
+        - Single-line quotes (> text) and quotes that continue to the end of the message (>>> text), starting on a new line.
+        - Inline code with single backticks and code blocks with triple backticks, optionally followed by a language name on the opening line.
+        - Links as bare URLs or with labels ([label](https://example.com)).
+
+        Discord also supports native message syntax:
+        - User mentions (<@USER_ID>), channel or thread links (<#CHANNEL_ID>), and role mentions (<@&ROLE_ID>).
+        - Custom emoji (<:name:EMOJI_ID>) and animated custom emoji (<a:name:EMOJI_ID>).
+        - Slash command links (</command:COMMAND_ID>, </command subcommand:COMMAND_ID>, or </command group subcommand:COMMAND_ID>).
+        - Localized timestamps (<t:UNIX_SECONDS:f>) and relative timestamps (<t:UNIX_SECONDS:R>).
+      `).optional(),
+      attachmentRef: z.uuid().optional().describe("Attachment reference returned by a tool"),
+      attachmentRefs: z.array(z.uuid()).max(10).optional().describe("Attachment references returned by tools when replying with multiple files"),
     }),
-    contextSchema: replyContextSchema,
+    contextSchema: z.object({
+      replyAttachments: z.custom<ReadonlyMap<string, { attachment: Buffer; name: string }>>((value) => value instanceof Map),
+    }),
     outputSchema: z.object({
       messageIds: z.array(z.string()),
     }),
     execute: async ({ channelId, messageId, content, attachmentRef, attachmentRefs = [] }, { context }) => {
-      const chunks = prepareReplyChunks(content, attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs], context);
+      // Prepare message chunks and attach files to the final chunk:
+      const refs = attachmentRef === undefined ? attachmentRefs : [attachmentRef, ...attachmentRefs];
+      if (content === undefined && refs.length === 0) throw new Error("Reply requires text or an attachment");
+      if (refs.length > 10) throw new Error("Reply supports at most 10 attachments");
+      const files = refs.map((ref) => {
+        const file = context.replyAttachments.get(ref);
+        if (file === undefined) throw new Error("Attachment not found in this conversation run");
+        return file;
+      });
+      const chunks = content === undefined ? [undefined] : splitDiscordMessage(sanitizeDiscordMessage(content));
       const channel = await discordClient.channels.fetch(channelId);
       if (channel === null) throw new Error("Channel not found");
       if (!channel.isSendable()) throw new Error("Channel does not support sending messages");
 
       const messageIds: string[] = [];
 
-      for (const chunk of chunks) {
+      for (const [index, chunk] of chunks.entries()) {
         const message = await channel.send({
-          ...chunk,
+          content: chunk,
+          files: files.length > 0 && index === chunks.length - 1 ? files : undefined,
           flags: MessageFlags.SuppressEmbeds,
           reply: { messageReference: messageId },
         });

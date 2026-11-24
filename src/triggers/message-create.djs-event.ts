@@ -1,14 +1,14 @@
-import type { ToolSet } from "ai";
+import type { DiscordApprovalAction } from "#/tools/discord-approval";
+import type { RailwayRunState } from "#/tools/railway";
 import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
 import { discordClient, startDiscordTyping } from "#/integrations/discord";
 import { aiModel, openRouterApi, openRouterQuota } from "#/integrations/openrouter";
 import { tableDiscordReplyError } from "#/tables/discord-reply-error";
 import { tableModelUsage } from "#/tables/model-usage";
-import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
-import { createRailwayTools } from "#/tools/railway";
+import { railwayTools } from "#/tools/railway";
 import { replyContextTools } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
@@ -83,22 +83,11 @@ trigger.discordEvent("messageCreate", async (message) => {
   const member = message.member;
   const attachmentUrls = new Map<string, { url: string; size: number }>();
   const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
-  const registerAttachment = (file: { attachment: Buffer; name: string }) => {
-    const attachmentRef = randomUUID();
-    replyAttachments.set(attachmentRef, file);
-    return attachmentRef;
-  };
-  const resolveAttachment = (attachmentRef: string) => {
-    const file = replyAttachments.get(attachmentRef);
-    if (file === undefined) throw new Error("Attachment not found in this conversation run");
-    return file;
-  };
-  const railwayTools = createRailwayTools(env.RAILWAY_TOKEN, attachmentUrls, registerAttachment);
-  const { tools, approvalToolNames } = getDiscordToolsForMessage(message, resolveAttachment);
-  const approvalTools: ToolSet = {};
-  if (member !== null && approvalToolNames.length > 0) {
-    approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions, summary) => requestDiscordApproval(channel, member, actions, summary));
-  }
+  const discordTools = getDiscordToolsForMessage(message, replyAttachments);
+  const railwayState: RailwayRunState = { exportedBytes: 0 };
+  const railwayContext = { state: railwayState, attachmentUrls, replyAttachments };
+  const railwayToolsContext = Object.fromEntries(Object.keys(railwayTools).map((name) => [name, railwayContext]));
+
   // Start generation and log tool activity:
   const result = streamText({
     model: aiModel,
@@ -139,8 +128,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       return { toolChoice: "required" };
     },
     tools: {
-      ...tools,
-      ...approvalTools,
+      ...discordTools,
       ...railwayTools,
       ...replyContextTools,
       ...githubTools,
@@ -148,6 +136,10 @@ trigger.discordEvent("messageCreate", async (message) => {
     },
     toolsContext: {
       getReplyContext: { channelId, messageId: message.id, attachmentUrls },
+      ...(member === null ? {} : {
+        proposeDiscordActions: { requestApproval: async (actions: DiscordApprovalAction[], summary: string) => requestDiscordApproval(channel, member, actions, summary) },
+      }),
+      ...railwayToolsContext,
     },
     onToolExecutionStart: ({ toolCall }) => {
       if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {

@@ -7,40 +7,6 @@ import { tool } from "ai";
 import dedent from "dedent";
 import { z } from "zod";
 
-const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-const maxContextImageBytes = 10 * 1024 * 1024;
-const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
-
-const replyContextOutputSchema = z.object({
-  channel: z.object({
-    id: z.string().describe("Channel ID"),
-    name: z.string().nullable().describe("Channel name, null in DMs"),
-    isDm: z.boolean().describe("Whether this conversation is a private message"),
-    guildId: z.string().nullable().describe("Guild ID, null in DMs"),
-    guildName: z.string().nullable().describe("Guild name, null in DMs"),
-  }),
-  conversation: z.array(z.object({
-    id: z.string().describe("Message ID"),
-    authorId: z.string().describe("Author user ID"),
-    authorLabel: z.string().describe("Author display label: cosmetic, never an identity (the ID is the only truth)"),
-    content: z.string().describe("Message content"),
-    attachments: z.array(z.object({
-      id: z.string(),
-      name: z.string(),
-      url: z.url(),
-      mediaType: z.string().nullable(),
-      size: z.number(),
-    })).describe("All Discord file attachments on the message"),
-    isSelf: z.boolean().describe("Whether you (the bot) are the author of this message"),
-    isTarget: z.boolean().describe("Whether this is the target message, the one this run is about"),
-    createdAt: z.string().describe("Creation date (ISO)"),
-  })).describe("Recent conversation, oldest first"),
-  referencedMessageId: z.string().nullable().describe("ID of the message the target message directly replies to"),
-  referencedAuthorId: z.string().nullable().describe("Author ID of the message the target message directly replies to, when available"),
-  mentionedUserIds: z.array(z.string()).describe("User IDs mentioned by the target message, excluding yourself"),
-  mentionedChannelIds: z.array(z.string()).describe("Channel IDs mentioned by the target message"),
-});
-
 // ToolSet is applied via "satisfies": a ": ToolSet" annotation would erase the inferred schema types (input, output, context) and break toolsContext inference at call sites:
 export const replyContextTools = {
   getReplyContext: tool({
@@ -56,13 +22,42 @@ export const replyContextTools = {
       messageId: z.string().describe("Discord ID of the target message, bound server-side"),
       attachmentUrls: z.custom<Map<string, { url: string; size: number }>>((value) => value instanceof Map),
     }),
-    outputSchema: replyContextOutputSchema,
+    outputSchema: z.object({
+      channel: z.object({
+        id: z.string().describe("Channel ID"),
+        name: z.string().nullable().describe("Channel name, null in DMs"),
+        isDm: z.boolean().describe("Whether this conversation is a private message"),
+        guildId: z.string().nullable().describe("Guild ID, null in DMs"),
+        guildName: z.string().nullable().describe("Guild name, null in DMs"),
+      }),
+      conversation: z.array(z.object({
+        id: z.string().describe("Message ID"),
+        authorId: z.string().describe("Author user ID"),
+        authorLabel: z.string().describe("Author display label: cosmetic, never an identity (the ID is the only truth)"),
+        content: z.string().describe("Message content"),
+        attachments: z.array(z.object({
+          id: z.string(),
+          name: z.string(),
+          url: z.url(),
+          mediaType: z.string().nullable(),
+          size: z.number(),
+        })).describe("All Discord file attachments on the message"),
+        isSelf: z.boolean().describe("Whether you (the bot) are the author of this message"),
+        isTarget: z.boolean().describe("Whether this is the target message, the one this run is about"),
+        createdAt: z.string().describe("Creation date (ISO)"),
+      })).describe("Recent conversation, oldest first"),
+      referencedMessageId: z.string().nullable().describe("ID of the message the target message directly replies to"),
+      referencedAuthorId: z.string().nullable().describe("Author ID of the message the target message directly replies to, when available"),
+      mentionedUserIds: z.array(z.string()).describe("User IDs mentioned by the target message, excluding yourself"),
+      mentionedChannelIds: z.array(z.string()).describe("Channel IDs mentioned by the target message"),
+    }),
     toModelOutput: async ({ output }) => {
       // Prefer images from the target message, then the referenced message:
       const imagePriority = ({ id, isTarget }: (typeof output.conversation)[number]) => {
         if (isTarget) return 0;
         return id === output.referencedMessageId ? 1 : 2;
       };
+      const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
       const images = output.conversation.toReversed()
         .sort((a, b) => imagePriority(a) - imagePriority(b))
         .flatMap(({ id: messageId, isTarget, attachments }) => attachments.map((attachment) => ({ ...attachment, messageId, isTarget })))
@@ -74,7 +69,7 @@ export const replyContextTools = {
       // Download images within the shared byte budget for inline delivery:
       const files = [];
       const signal = AbortSignal.timeout(20_000);
-      let remainingBytes = maxContextImageBytes;
+      let remainingBytes = 10 * 1024 * 1024;
       for (const { id, name, url, mediaType, size, messageId, isTarget } of images) {
         if (mediaType === null || size > remainingBytes) continue;
         const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
@@ -107,6 +102,7 @@ export const replyContextTools = {
       const referencedMessage = referencedMessageId === null ? undefined : previousMessages.get(referencedMessageId);
 
       // Render the conversation in order and neutralize forged author prefixes:
+      const forgedPrefixPattern = /^\[[^\]\n]{0,80}\(ID[^\]\n]{0,80}\)\]\s*:?/gmu;
       const conversationItems = [...previousMessages.values(), targetMessage]
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
         .map((message) => ({
