@@ -162,7 +162,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       .sort((a, b) => imagePriority(a) - imagePriority(b))
       .flatMap(({ id: messageId, isTarget, attachments }) => attachments.map((attachment) => ({ ...attachment, messageId, isTarget })))
       .filter(({ mediaType }) => mediaType !== null && supportedImageTypes.has(mediaType));
-    const content: UserContent = [{ type: "text", text: JSON.stringify(output) }];
+    const imageParts: Exclude<UserContent, string> = [];
     if (images.length > 0 && await openRouterApi.acceptsImages(env.OPENROUTER_MODEL)) {
       // Download images within the shared byte budget for inline delivery:
       const signal = AbortSignal.timeout(20_000);
@@ -172,7 +172,7 @@ trigger.discordEvent("messageCreate", async (message) => {
         const image = await attempt(async () => downloadDiscordAttachment(url, remainingBytes, signal));
         if (!image.ok || image.value.length === 0) continue;
         remainingBytes -= image.value.length;
-        content.push(
+        imageParts.push(
           { type: "text", text: `Inline image from Discord message ${messageId}${isTarget ? " (target message)" : ""}, attachment ${id}.` },
           { type: "image", image: image.value, mediaType },
         );
@@ -204,23 +204,20 @@ trigger.discordEvent("messageCreate", async (message) => {
         Si proposeDiscordActions est disponible et que la demande nécessite des créations, des modifications ou des suppressions, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les autres tâches.
 
         Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
+
+        Contexte d'exécution :
+        - Ton ID Discord : ${env.DISCORD_BOT_ID}
+        - Channel ID : ${channelId}
+        - Message cible : ID ${message.id} (auteur ID ${message.author.id})
+        ${guild ? `- Guild ID : ${guild.id}` : "- Message privé (pas de guild)"}
+        - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
+
+        La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
+        Chaque image intégrée est précédée de son ID de message et de son ID de pièce jointe. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
       `,
       messages: [{
         role: "user",
-        content: [
-          { type: "text", text: dedent`
-            Contexte d'exécution :
-            - Ton ID Discord : ${env.DISCORD_BOT_ID}
-            - Channel ID : ${channelId}
-            - Message cible : ID ${message.id} (auteur ID ${message.author.id})
-            ${guild ? `- Guild ID : ${guild.id}` : "- Message privé (pas de guild)"}
-            - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
-
-            La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
-            Chaque image intégrée est précédée de son ID de message et de son ID de pièce jointe. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
-          ` },
-          ...content,
-        ],
+        content: [{ type: "text", text: JSON.stringify(output) }, ...imageParts],
       }],
       prepareStep: ({ stepNumber, steps }) => {
         if (stepNumber === maxSteps - 1) {
