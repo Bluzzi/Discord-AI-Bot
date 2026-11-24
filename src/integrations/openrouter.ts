@@ -252,16 +252,3 @@ const openRouterProvider = createOpenRouter({
 });
 
 export const aiModel = openRouterProvider(env.OPENROUTER_MODEL);
-
-export const generateOpenRouterImage = async (prompt: string) => {
-  const response = await openRouterSdk.images.generate({
-    imageGenerationRequest: { model: env.OPENROUTER_MODEL_IMAGE, prompt },
-  }, { timeoutMs: 60_000 });
-  const image = response.data[0];
-  if (image === undefined || image.b64Json === "") throw new Error("OpenRouter returned no generated image");
-
-  const extension = image.mediaType?.split("/")[1]?.replace("+xml", "") ?? "png";
-  if (!(/^[a-z0-9]+$/u).test(extension)) throw new Error("OpenRouter returned an unsupported image format");
-
-  return { attachment: Buffer.from(image.b64Json, "base64"), name: `image.${extension}` };
-};

@@ -8,7 +8,6 @@ import { tableModelUsage } from "#/tables/model-usage";
 import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
-import { createImageTools } from "#/tools/image";
 import { createRailwayTools } from "#/tools/railway";
 import { replyContextTools } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
@@ -91,7 +90,6 @@ trigger.discordEvent("messageCreate", async (message) => {
     if (file === undefined) throw new Error("Attachment not found in this conversation run");
     return file;
   };
-  const imageTools = createImageTools(registerAttachment);
   const railwayTools = createRailwayTools(env.RAILWAY_TOKEN, attachmentUrls, registerAttachment);
   const { tools, approvalToolNames } = getDiscordToolsForMessage(message, resolveAttachment);
   const approvalTools: ToolSet = {};
@@ -116,7 +114,7 @@ trigger.discordEvent("messageCreate", async (message) => {
 
       Si proposeDiscordActions est disponible et que la demande nécessite des créations, des modifications ou des suppressions, regroupe les actions prévues dans un seul plan. Un résultat waiting_approval indique que les actions sont en attente d’un clic du demandeur sur le bouton « Approuver ». Continue les autres tâches.
 
-      Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon. Si le demandeur veut créer une image, appelle d’abord \`generateImage\`, puis passe l’\`attachmentRef\` retourné à l’outil de réponse. Ajoute du texte si nécessaire.
+      Réponds via \`sendReply\`. En cas d'échec, utilise \`sendMessage\` dans le même salon.
     `,
     prompt: dedent`
       Contexte d'exécution :
@@ -139,7 +137,6 @@ trigger.discordEvent("messageCreate", async (message) => {
     tools: {
       ...tools,
       ...approvalTools,
-      ...imageTools,
       ...railwayTools,
       ...replyContextTools,
       ...githubTools,
