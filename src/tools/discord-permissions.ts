@@ -476,7 +476,10 @@ export const executeApprovedDiscordAction = async (
   await execute(args, { toolCallId, messages: [], context: undefined });
 };
 
-export const getDiscordToolsForMessage = (message: Message) => {
+export const getDiscordToolsForMessage = (
+  message: Message,
+  resolveAttachment: (attachmentRef: string) => { attachment: Buffer; name: string },
+) => {
   const isDm = message.guildId === null;
   const member = message.member;
   const visibleChannels = member?.guild.channels.cache.map((target) => ({
@@ -487,20 +490,24 @@ export const getDiscordToolsForMessage = (message: Message) => {
   const wrap = (name: ToolName, rule: Rule): ToolSet[string] => {
     const definition = tools[name]!;
     const execute = definition.execute!;
+    const isReply = name === "sendMessage" || name === "sendReply";
     return {
       ...definition,
+      contextSchema: isReply ? undefined : definition.contextSchema,
       execute: async (input, options) => {
         const args = parseToolArguments(input);
+        const toolOptions = isReply ? { ...options, context: { resolveAttachment } } : options;
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
-        const isConversationReply = (name === "sendMessage" || name === "sendReply") && args.channelId === message.channelId;
+        if (name === "sendMessage" && (args.attachmentRef !== undefined || args.attachmentRefs !== undefined) && args.channelId !== message.channelId) throw denied();
+        const isConversationReply = isReply && args.channelId === message.channelId;
         if (isDm || isConversationReply) {
           if (args.channelId !== message.channelId || args.userId !== undefined) throw denied();
-          const result: unknown = await execute(input, options);
+          const result: unknown = await execute(input, toolOptions);
           return result;
         }
 
         const requester = await requireGuildToolPermission(args, message.member, rule);
-        const result: unknown = await execute(input, options);
+        const result: unknown = await execute(input, toolOptions);
         return filterChannelResults(name, result, requester);
       },
     };

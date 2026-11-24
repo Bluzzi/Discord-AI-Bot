@@ -8,6 +8,7 @@ import { tableModelUsage } from "#/tables/model-usage";
 import { createDiscordApprovalTool } from "#/tools/discord-approval";
 import { getDiscordToolsForMessage } from "#/tools/discord-permissions";
 import { githubTools } from "#/tools/github";
+import { createRailwayTools } from "#/tools/railway";
 import { replyContextTools } from "#/tools/reply-context";
 import { webTools } from "#/tools/web";
 import { aiUsage } from "#/utils/ai-usage";
@@ -77,7 +78,20 @@ trigger.discordEvent("messageCreate", async (message) => {
   const channelId = channel.id;
   const guild = message.guild;
   const member = message.member;
-  const { tools, approvalToolNames } = getDiscordToolsForMessage(message);
+  const attachmentUrls = new Map<string, { url: string; size: number }>();
+  const replyAttachments = new Map<string, { attachment: Buffer; name: string }>();
+  const registerAttachment = (file: { attachment: Buffer; name: string }) => {
+    const attachmentRef = randomUUID();
+    replyAttachments.set(attachmentRef, file);
+    return attachmentRef;
+  };
+  const resolveAttachment = (attachmentRef: string) => {
+    const file = replyAttachments.get(attachmentRef);
+    if (file === undefined) throw new Error("Attachment not found in this conversation run");
+    return file;
+  };
+  const railwayTools = createRailwayTools(env.RAILWAY_TOKEN, attachmentUrls, registerAttachment);
+  const { tools, approvalToolNames } = getDiscordToolsForMessage(message, resolveAttachment);
   const approvalTools: ToolSet = {};
   if (member !== null && approvalToolNames.length > 0) {
     approvalTools.proposeDiscordActions = createDiscordApprovalTool(approvalToolNames, async (actions, summary) => requestDiscordApproval(channel, member, actions, summary));
@@ -123,19 +137,22 @@ trigger.discordEvent("messageCreate", async (message) => {
     tools: {
       ...tools,
       ...approvalTools,
+      ...railwayTools,
       ...replyContextTools,
       ...githubTools,
       ...webTools,
     },
     toolsContext: {
-      getReplyContext: { channelId, messageId: message.id },
+      getReplyContext: { channelId, messageId: message.id, attachmentUrls },
     },
     onToolExecutionStart: ({ toolCall }) => {
       if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
         logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
         return;
       }
-      logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(toolCall.input))}`);
+      const input: unknown = toolCall.input;
+      const loggedInput = toolCall.toolName === "writeRailwayFile" ? { path: input !== null && typeof input === "object" && "path" in input ? input.path : undefined } : input;
+      logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(loggedInput))}`);
     },
     onStepEnd: ({ stepNumber, text }) => {
       if (text) logger.info(`${logPrefix} Step ${String(stepNumber + 1)} text: ${redactWebhookTokens(text)}`);
