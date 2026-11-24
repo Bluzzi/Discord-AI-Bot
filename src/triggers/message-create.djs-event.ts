@@ -92,7 +92,7 @@ trigger.discordEvent("messageCreate", async (message) => {
     return file;
   };
   const imageTools = createImageTools(registerAttachment);
-  const railway = createRailwayTools(env.RAILWAY_TOKEN, attachmentUrls, registerAttachment);
+  const railwayTools = createRailwayTools(env.RAILWAY_TOKEN, attachmentUrls, registerAttachment);
   const { tools, approvalToolNames } = getDiscordToolsForMessage(message, resolveAttachment);
   const approvalTools: ToolSet = {};
   if (member !== null && approvalToolNames.length > 0) {
@@ -140,7 +140,7 @@ trigger.discordEvent("messageCreate", async (message) => {
       ...tools,
       ...approvalTools,
       ...imageTools,
-      ...railway.tools,
+      ...railwayTools,
       ...replyContextTools,
       ...githubTools,
       ...webTools,
@@ -149,11 +149,13 @@ trigger.discordEvent("messageCreate", async (message) => {
       getReplyContext: { channelId, messageId: message.id, attachmentUrls },
     },
     onToolExecutionStart: ({ toolCall }) => {
-      if (toolCall.toolName === "proposeDiscordActions" || toolCall.toolName === "railwaySandbox" || isReplyTool(toolCall.toolName)) {
+      if (toolCall.toolName === "proposeDiscordActions" || isReplyTool(toolCall.toolName)) {
         logger.info(`${logPrefix} Tool ${toolCall.toolName}`);
         return;
       }
-      logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(toolCall.input))}`);
+      const input: unknown = toolCall.input;
+      const loggedInput = toolCall.toolName === "writeRailwayFile" ? { path: input !== null && typeof input === "object" && "path" in input ? input.path : undefined } : input;
+      logger.info(`${logPrefix} Tool ${toolCall.toolName} ${redactWebhookTokens(JSON.stringify(loggedInput))}`);
     },
     onStepEnd: ({ stepNumber, text }) => {
       if (text) logger.info(`${logPrefix} Step ${String(stepNumber + 1)} text: ${redactWebhookTokens(text)}`);
@@ -182,8 +184,6 @@ trigger.discordEvent("messageCreate", async (message) => {
   }
   finally {
     stopTyping();
-    const cleanup = await attempt(railway.destroy);
-    if (!cleanup.ok) logger.warn(`${logPrefix} Could not destroy Railway sandbox. Its idle timeout remains active.`);
   }
 
   // Log and save the metrics for all steps.
