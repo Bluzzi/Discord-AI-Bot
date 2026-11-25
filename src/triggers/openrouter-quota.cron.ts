@@ -8,10 +8,13 @@ import dedent from "dedent";
 
 const usesFreeModel = env.OPENROUTER_MODEL.endsWith(":free") || env.OPENROUTER_MODEL === "openrouter/free";
 
-await trigger.cron(
-  "openrouter-quota",
-  "* * * * *",
-  async () => {
+await trigger.cron({
+  cronName: "openrouter-quota",
+  cronPattern: "* * * * *",
+  options: {
+    triggerAtStartup: true,
+  },
+  handler: async () => {
     // Snapshot quota before fetching the key and account limits in parallel:
     const wasExhausted = openRouterQuota.isExhausted();
     const [{ data: keyData }, creditsResponse] = await Promise.all([
@@ -61,7 +64,4 @@ await trigger.cron(
 
     logger.info(`OpenRouter quota recovered:\n${quotaDetails}`);
   },
-  {
-    triggerAtStartup: true,
-  },
-);
+});

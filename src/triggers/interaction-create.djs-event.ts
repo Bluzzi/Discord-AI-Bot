@@ -76,68 +76,71 @@ export const requestDiscordApproval = async (
   return { status: "waiting_approval" as const, approvalMessageUrl: message.url };
 };
 
-trigger.discordEvent("interactionCreate", async (interaction) => {
+trigger.discordEvent({
+  eventName: "interactionCreate",
+  handler: async (interaction) => {
   // Accept approval buttons in a server:
-  if (!interaction.isButton() || (interaction.customId !== applyButtonId && interaction.customId !== cancelButtonId)) return;
-  const { guild, message, user } = interaction;
-  if (guild === null) return;
+    if (!interaction.isButton() || (interaction.customId !== applyButtonId && interaction.customId !== cancelButtonId)) return;
+    const { guild, message, user } = interaction;
+    if (guild === null) return;
 
-  // Claim the request once and only for its author:
-  await interaction.deferUpdate();
-  const [approval] = await postgres.delete(tableWaitingApproval).where(and(
-    eq(tableWaitingApproval.validatingMessageId, message.id),
-    eq(tableWaitingApproval.channelId, message.channelId),
-    eq(tableWaitingApproval.requesterMember, user.id),
-  )).returning();
-  if (approval === undefined) {
-    await interaction.followUp({ content: "Cette demande est indisponible ou vous n’en êtes pas l’auteur.", flags: MessageFlags.Ephemeral });
-    return;
-  }
+    // Claim the request once and only for its author:
+    await interaction.deferUpdate();
+    const [approval] = await postgres.delete(tableWaitingApproval).where(and(
+      eq(tableWaitingApproval.validatingMessageId, message.id),
+      eq(tableWaitingApproval.channelId, message.channelId),
+      eq(tableWaitingApproval.requesterMember, user.id),
+    )).returning();
+    if (approval === undefined) {
+      await interaction.followUp({ content: "Cette demande est indisponible ou vous n’en êtes pas l’auteur.", flags: MessageFlags.Ephemeral });
+      return;
+    }
 
-  // Reject edited, expired or cancelled plans:
-  const approvalMessage = await message.fetch();
-  if (approvalMessage.editedTimestamp !== null) {
-    await approvalMessage.edit({
-      embeds: [new EmbedBuilder().setTitle("Actions Discord").setDescription("Le message d’approbation a été modifié.").setFooter({ text: "Demande annulée" })],
-      components: [],
-    });
-    return;
-  }
-  const embed = new EmbedBuilder(approvalMessage.embeds[0]?.toJSON()).setTitle("Actions Discord").setFields();
-  const description = embed.data.description;
-  if (description !== undefined) {
-    embed.setDescription(description.replace(/^(- 👤 Demande de <@\d+>), en attente de son approbation\n- ⏳ Expire <t:\d+:R>/u, "$1"));
-  }
-  if (approval.expiresAt.getTime() <= Date.now()) {
-    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande expirée" })], components: [] });
-    return;
-  }
-  if (interaction.customId === cancelButtonId) {
-    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande annulée" })], components: [] });
-    return;
-  }
+    // Reject edited, expired or cancelled plans:
+    const approvalMessage = await message.fetch();
+    if (approvalMessage.editedTimestamp !== null) {
+      await approvalMessage.edit({
+        embeds: [new EmbedBuilder().setTitle("Actions Discord").setDescription("Le message d’approbation a été modifié.").setFooter({ text: "Demande annulée" })],
+        components: [],
+      });
+      return;
+    }
+    const embed = new EmbedBuilder(approvalMessage.embeds[0]?.toJSON()).setTitle("Actions Discord").setFields();
+    const description = embed.data.description;
+    if (description !== undefined) {
+      embed.setDescription(description.replace(/^(- 👤 Demande de <@\d+>), en attente de son approbation\n- ⏳ Expire <t:\d+:R>/u, "$1"));
+    }
+    if (approval.expiresAt.getTime() <= Date.now()) {
+      await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande expirée" })], components: [] });
+      return;
+    }
+    if (interaction.customId === cancelButtonId) {
+      await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande annulée" })], components: [] });
+      return;
+    }
 
-  // Reload the requester and recheck permissions as each action runs:
-  let member: GuildMember;
-  try {
-    member = await guild.members.fetch({ user: user.id, force: true });
-  }
-  catch (error) {
-    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Plan interrompu · Impossible de vérifier le membre demandeur." })], components: [] });
-    throw error;
-  }
-  let completed = 0;
-  for (const { toolName, input } of approval.actions) {
+    // Reload the requester and recheck permissions as each action runs:
+    let member: GuildMember;
     try {
-      await executeApprovedDiscordAction(toolName, input, member, `${approval.id}-${String(completed)}`);
+      member = await guild.members.fetch({ user: user.id, force: true });
     }
     catch (error) {
-      const text = `Plan interrompu · ${String(completed)}/${String(approval.actions.length)} actions exécutées. Arrêt sur ${toolName}.`;
-      await approvalMessage.edit({ embeds: [embed.setFooter({ text })], components: [] });
+      await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Plan interrompu · Impossible de vérifier le membre demandeur." })], components: [] });
       throw error;
     }
-    completed += 1;
-  }
+    let completed = 0;
+    for (const { toolName, input } of approval.actions) {
+      try {
+        await executeApprovedDiscordAction(toolName, input, member, `${approval.id}-${String(completed)}`);
+      }
+      catch (error) {
+        const text = `Plan interrompu · ${String(completed)}/${String(approval.actions.length)} actions exécutées. Arrêt sur ${toolName}.`;
+        await approvalMessage.edit({ embeds: [embed.setFooter({ text })], components: [] });
+        throw error;
+      }
+      completed += 1;
+    }
 
-  await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande validée" })], components: [] });
+    await approvalMessage.edit({ embeds: [embed.setFooter({ text: "Demande validée" })], components: [] });
+  },
 });
