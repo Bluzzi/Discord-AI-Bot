@@ -1,6 +1,5 @@
-import "dotenv/config";
-// env loading first
 import { z } from "zod";
+import "dotenv/config";
 
 const schema = z.object({
   POSTGRESQL_URL: z.url().describe("PostgreSQL connection URL."),
@@ -17,4 +16,5 @@ const schema = z.object({
   EXA_API_KEY: z.string().describe("Exa API key used for web search."),
 });
 
+// Validate configuration after loading environment variables:
 export const env = schema.parse(process.env);

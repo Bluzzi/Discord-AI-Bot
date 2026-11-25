@@ -1,10 +1,8 @@
 import type { ToolSet } from "ai";
-import { attempt } from "#/utils/attempt";
-import { env } from "#/utils/env";
+import { exa } from "#/integrations/exa.client";
 import { getPublicPage, parseWebUrl, PublicWebError, readPageBody } from "#/utils/public-web";
 import { extractWebContent } from "#/utils/web-content";
 import { tool } from "ai";
-import Exa from "exa-js";
 import { z } from "zod";
 
 export const webTools = {
@@ -16,19 +14,17 @@ export const webTools = {
       time_range: z.enum(["day", "week", "month", "year"]).nullable().default(null),
     }),
     execute: async ({ query, num_results: numResults, time_range: timeRange }) => {
+      // Search for sources within the requested publication window:
       const rangeDays = { day: 1, week: 7, month: 30, year: 365 };
-      const exa = new Exa(env.EXA_API_KEY, {
-        baseURL: "https://api.exa.ai",
-        fetch: async (input, init) => fetch(input, { ...init, redirect: "error" }),
-      });
       const { results } = await exa.search(query, {
         numResults,
         startPublishedDate: timeRange ? new Date(Date.now() - rangeDays[timeRange] * 86400000).toISOString() : undefined,
         contents: { highlights: true },
       }, { timeout: 10000 });
+      // Return normalized links and short snippets:
       return results.slice(0, numResults).flatMap((result) => {
         const url = parseWebUrl(result.url);
-        if (!url) return [];
+        if (url === null) return [];
         const highlight = Array.isArray(result.highlights) ? result.highlights[0] : undefined;
         return [{
           title: (result.title ?? "").trim() || url.hostname,
@@ -58,23 +54,27 @@ export const webTools = {
         "Accept-Encoding": "gzip, deflate, br",
       };
 
+      // Validate the URL and share one timeout across the request and redirects:
       const initialUrl = parseWebUrl(url);
-      if (!initialUrl) return failure("invalid_url");
+      if (initialUrl === null) return failure("invalid_url");
       const signal = AbortSignal.timeout(10000);
-      const result = await attempt(async () => {
+      try {
         let target = initialUrl;
         for (let redirects = 0; redirects <= 5; redirects += 1) {
           const response = await getPublicPage(target, headers, signal);
           const status = response.statusCode ?? 0;
+          // Handle redirects and close the previous response before following them:
           if ([301, 302, 303, 307, 308].includes(status)) {
             response.destroy();
             if (redirects === 5) return failure("redirect_limit", status);
             const location = response.headers.location;
-            const next: URL | null = location === undefined || location === "" ? null : parseWebUrl(location, target);
-            if (!next) return failure("invalid_redirect", status);
+            const next = location === undefined || location === "" ? null : parseWebUrl(location, target);
+            if (next === null) return failure("invalid_redirect", status);
             target = next;
             continue;
           }
+
+          // Map access restrictions and HTTP failures to tool errors:
           if (status === 429 || status === 403 || response.headers["cf-mitigated"] === "challenge") {
             response.destroy();
             return failure(status === 429 ? "rate_limited" : "access_blocked", status);
@@ -84,6 +84,7 @@ export const webTools = {
             return failure("http_error", status);
           }
 
+          // Read supported content types and extract the readable text:
           const contentType = response.headers["content-type"] ?? "";
           if (!(/^(?:text\/[^;\s]+|application\/(?:xhtml\+xml|json|xml))(?:\s*;|\s*$)/iu).test(contentType)) {
             response.destroy();
@@ -92,6 +93,8 @@ export const webTools = {
 
           const { title, markdown, links } = extractWebContent(await readPageBody(response, signal), contentType, target);
           if (!markdown.trim() && links.length === 0) return failure("no_readable_content", status);
+
+          // Return a page of text without splitting a surrogate pair:
           const start = Math.min(offset, markdown.length);
           let end = Math.min(start + maxLength, markdown.length);
           if (end < markdown.length) {
@@ -111,10 +114,12 @@ export const webTools = {
           };
         }
         return failure("redirect_limit");
-      });
-      if (result.ok) return result.value;
-      if (signal.aborted) return failure("timeout");
-      return failure(result.error instanceof PublicWebError ? result.error.code : "fetch_failed");
+      }
+      catch (error) {
+        if (signal.aborted) return failure("timeout");
+        if (error instanceof PublicWebError) return failure(error.code);
+        throw error;
+      }
     },
   }),
 } satisfies ToolSet;

@@ -1,9 +1,8 @@
 import { env } from "#/utils/env";
 import { Octokit } from "octokit";
 
-const token = env.GITHUB_TOKEN ?? "";
 export const octokit = new Octokit({
-  auth: token || undefined,
+  auth: env.GITHUB_TOKEN,
   userAgent: "discord-ai-bot-github-explorer",
   retry: { enabled: false },
   throttle: { enabled: false },

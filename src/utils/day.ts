@@ -4,6 +4,7 @@ import timezone from "dayjs/plugin/timezone.js";
 import utc from "dayjs/plugin/utc.js";
 import "dayjs/locale/fr.js";
 
+// Configure timezone support and French date formatting:
 dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.locale("fr");

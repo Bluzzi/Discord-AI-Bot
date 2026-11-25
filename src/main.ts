@@ -1,6 +1,10 @@
-import { discordClientStart } from "#/integrations/discord";
+import { discordClient } from "#/integrations/discord.client";
+import { postgres } from "#/integrations/postgres.client";
+import { env } from "#/utils/env";
 import { logger } from "#/utils/logger";
-import { migratePostgres } from "#/utils/postgres";
+import { ActivityType } from "discord.js";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { join } from "node:path";
 
 // Uncaught exception handler:
 process.on("uncaughtException", (error, origin) => {
@@ -8,11 +12,20 @@ process.on("uncaughtException", (error, origin) => {
   process.exit(1);
 });
 
-// Start services and related triggers:
-await migratePostgres();
+// Apply database migrations:
+await migrate(postgres, { migrationsFolder: join(process.cwd(), "drizzle") });
 
-await discordClientStart(async () => {
-  await import("#/triggers/message-create.djs-event");
+// Set the bot's initial presence when Discord is ready:
+discordClient.once("clientReady", (readyClient) => {
+  readyClient.user.setPresence({
+    activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "📜 Je respecte le règlement." }],
+  });
+  logger.info(`Discord bot successfully started!! Logged in as ${readyClient.user.tag}`);
 });
 
+// Register Discord events before connecting:
+await import("#/triggers/message-create.djs-event");
+await discordClient.login(env.DISCORD_BOT_TOKEN);
+
+// Start the quota refresh schedule:
 await import("#/triggers/openrouter-quota.cron");

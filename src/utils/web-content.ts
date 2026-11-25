@@ -38,14 +38,17 @@ const trackingParam = /^(?:utm_.+|fbclid|gclid|dclid|msclkid|mc_[ce]id)$/iu;
 const compact = (text: string, max: number) => text.replace(/\s+/gu, " ").trim().slice(0, max);
 
 const collectLinks = (root: Element, navigation: HTMLAnchorElement[], pageUrl: URL, baseUrl: URL) => {
+  // Keep distinct, labeled links from the content and navigation:
   const links = new Map<string, { text: string; url: string }>();
   for (const anchor of [...root.querySelectorAll<HTMLAnchorElement>("a[href]"), ...navigation]) {
     const href = anchor.getAttribute("href")?.trim() ?? "";
     if (!href || href.startsWith("#") || anchor.hasAttribute("download")) continue;
     const url = parseWebUrl(href, baseUrl);
-    if (!url || url.port || socialHost.test(url.hostname) || unwantedPath.test(url.pathname)) continue;
-    const trackingKeys = [...url.searchParams.keys()].filter((key) => trackingParam.test(key));
-    for (const key of trackingKeys) url.searchParams.delete(key);
+    if (url === null || url.port || socialHost.test(url.hostname) || unwantedPath.test(url.pathname)) continue;
+    // Strip tracking parameters before comparing URLs:
+    for (const key of [...url.searchParams.keys()]) {
+      if (trackingParam.test(key)) url.searchParams.delete(key);
+    }
     if (url.href === pageUrl.href) continue;
 
     const text = compact(anchor.textContent, 140) || compact(anchor.getAttribute("aria-label") ?? "", 140);
@@ -72,18 +75,21 @@ export const extractWebContent = (bytes: Buffer, contentType: string, pageUrl: U
     return { title: pageUrl.hostname, markdown: decodeText(bytes, contentType).trim(), links: [] };
   }
 
-  // jsdom does not execute scripts or load subresources with its default settings.
+  // Parse HTML with script execution and subresource loading disabled by default:
   const dom = new JSDOM(bytes, {
     url: pageUrl.href,
     contentType: contentType.replace(/^application\/xhtml\+xml/iu, "text/html"),
     virtualConsole: new VirtualConsole(),
   });
   try {
+    // Preserve same-origin navigation links before removing page chrome:
     const { document } = dom.window;
     const baseUrl = parseWebUrl(document.baseURI) ?? pageUrl;
     const navigation = [...document.querySelectorAll<HTMLAnchorElement>("nav a[href], [role='navigation'] a[href]")]
       .filter((anchor) => parseWebUrl(anchor.href)?.origin === pageUrl.origin);
     for (const element of document.querySelectorAll(unwantedElements)) element.remove();
+
+    // Prefer semantic content and fall back to Readability or the page body:
     const main = document.querySelector<HTMLElement>("main, [role='main']") ?? document.querySelector("article");
     const article = main ? null : new Readability<HTMLElement>(document.cloneNode(true) as Document, {
       serializer: (element) => element as HTMLElement,

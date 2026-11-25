@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.113",
-    "@discordjs/voice": "^0.19.2",
     "@mozilla/readability": "0.6.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@openrouter/sdk": "^1.5.110",
