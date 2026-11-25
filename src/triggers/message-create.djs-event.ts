@@ -141,9 +141,9 @@ trigger.discordEvent({
 
       Donne la réponse dès la première phrase. Ajoute seulement les détails utiles. Écris en texte simple, avec des paragraphes courts séparés par une ligne vide. Utilise une liste à puces pour une énumération si elle facilite la lecture. Par défaut, évite les titres, le gras et les séparateurs comme \`---\`.
 
-      Mets les noms de fichiers, chemins, commandes, identifiants de code et autre si pertinent entre backticks, par exemple \`GuildAdminPolicy\`, \`missingPermissions\` et \`access-policy.ts\`.
+      Mets les noms de fichiers, chemins, commandes, identifiants de code et autre si pertinent entre backticks.
 
-      Utilise des liens Markdown avec un libellé court et précis, par exemple [Communiqué de Nvidia](https://example.com/communique). Intègre chaque lien au passage qu'il documente, sur les mots concernés ou à la fin du paragraphe (ou de la puce) qu'il appuie. N'affiche pas d'URL brute et ne regroupe pas les sources en bas du message, sauf si l'utilisateur le demande.
+      Utilise des liens Markdown avec un libellé court et précis. Intègre chaque lien au passage qu'il documente, sur les mots concernés ou à la fin du paragraphe (ou de la puce) qu'il appuie. N'affiche pas d'URL brute et ne regroupe pas les sources en bas du message, sauf si l'utilisateur le demande.
 
       Évite les salutations, les emojis décoratifs, les tirets (—, -) et les offres d'aide génériques.
 
@@ -155,12 +155,9 @@ trigger.discordEvent({
 
       Contexte d'exécution :
       - Ton ID Discord : ${env.DISCORD_BOT_ID}
-      - Channel ID : ${message.channel.id}
-      - Message cible : ID ${message.id} (auteur ID ${message.author.id})
-      - Guild ID : ${message.guild.id}
       - Date et heure actuelles : ${day().tz().format("DD/MM/YYYY [à] HH[h]mm")}
 
-      La conversation récente suit par ordre chronologique. Le message cible est marqué isTarget.
+      Le message cible est marqué isTarget.
       Chaque message liste les métadonnées de ses pièces jointes. Utilise \`readFile\` avec l'ID de la pièce jointe si tu as besoin de lire son contenu. Si le message demande de traiter une image sans la préciser, privilégie les images du message cible, puis celles du message auquel il répond.
     `,
       messages: [
