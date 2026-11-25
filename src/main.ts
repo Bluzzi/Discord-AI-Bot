@@ -27,5 +27,6 @@ discordClient.once("clientReady", (readyClient) => {
 await import("#/triggers/message-create.djs-event");
 await discordClient.login(env.DISCORD_BOT_TOKEN);
 
-// Start the quota refresh schedule:
+// Start scheduled jobs:
+await import("#/triggers/railway-sandbox-expiration.cron");
 await import("#/triggers/openrouter-quota.cron");

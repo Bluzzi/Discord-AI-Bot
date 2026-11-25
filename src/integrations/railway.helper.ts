@@ -11,7 +11,8 @@ export const railwayFileSchema = z.object({
 
 export const connectRailwaySandbox = async (sandboxId: string, messages: ModelMessage[]) => {
   // Accept only a sandbox ID returned by a successful tool call in this run:
-  const wasCreated = messages.some((message) => message.role === "tool" && message.content.some((part) => part.type === "tool-result" && part.toolName === "createRailwaySandbox"
+  const wasCreated = messages.some((message) => message.role === "tool" && message.content.some((part) => part.type === "tool-result"
+    && (part.toolName === "createRailwaySandbox" || part.toolName === "createRailwaySandboxWithURL")
     && part.output.type === "json" && typeof part.output.value === "object" && part.output.value !== null
     && "sandboxId" in part.output.value && part.output.value.sandboxId === sandboxId,
   ));
