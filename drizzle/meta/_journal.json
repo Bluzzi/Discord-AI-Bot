@@ -134,6 +134,20 @@
       "when": 1795696496796,
       "tag": "0018_add_discord_data_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795727575292,
+      "tag": "0019_discord_timestamps_without_timezone",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795727711192,
+      "tag": "0020_shared_timestamps_without_timezone",
+      "breakpoints": true
     }
   ]
 }

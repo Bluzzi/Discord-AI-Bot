@@ -10,9 +10,9 @@ export const tableDiscordVoiceMinute = pgTable("discord_voice_minute", {
   channelId: uuid("channel_id").notNull(),
   memberId: uuid("member_id").notNull(),
 
-  createdAt: timestamp("created_at", { withTimezone: true, precision: 0 })
+  createdAt: timestamp("created_at", { precision: 0 })
     .notNull()
-    .default(sql`date_trunc('second', statement_timestamp())`),
+    .default(sql`date_trunc('second', statement_timestamp() at time zone 'UTC')`),
 }, (table) => [
   foreignKey({
     name: "discord_voice_minute_channel_fk",

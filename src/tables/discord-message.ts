@@ -11,8 +11,8 @@ export const tableDiscordMessage = pgTable("discord_message", {
   messageId: text("message_id").notNull().unique(),
   messageContent: text("message_content").notNull(),
 
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at"),
 }, (table) => [
   foreignKey({
     name: "discord_message_channel_fk",

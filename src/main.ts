@@ -24,8 +24,17 @@ discordClient.once("clientReady", (readyClient) => {
 });
 
 // Register Discord events before connecting:
+await import("#/triggers/channel-metadata-saver.djs-event");
+await import("#/triggers/guild-inventory-sync.djs-event");
+await import("#/triggers/guild-member-saver.djs-event");
+await import("#/triggers/guild-update.djs-event");
 await import("#/triggers/message-create.djs-event");
+await import("#/triggers/message-update.djs-event");
+await import("#/triggers/new-message-saver.djs-event");
+await import("#/triggers/user-update.djs-event");
+await import("#/triggers/voice-state-update.djs-event");
 await discordClient.login(env.DISCORD_BOT_TOKEN);
 
-// Start the quota refresh schedule:
+// Start scheduled jobs:
+await import("#/triggers/discord-voice-minute.cron");
 await import("#/triggers/openrouter-quota.cron");
