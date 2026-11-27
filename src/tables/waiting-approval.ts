@@ -1,6 +1,6 @@
 import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-export const tableWaitingApproval = pgTable("waiting_approval", {
+export const tableWaitingApproval = pgTable("tool_waiting_approval", {
   id: uuid("id").primaryKey().defaultRandom(),
   requesterMember: text("requester_member").notNull(),
   validatingMessageId: text("validating_message_id").notNull().unique(),
