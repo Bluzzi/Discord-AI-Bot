@@ -3,6 +3,7 @@ import { defaultDiscordGuildTimezone, tableDiscordGuild } from "#/tables/discord
 import { tableDiscordMember } from "#/tables/discord-member.table";
 import { tableDiscordVoiceMinute } from "#/tables/discord-voice-minute.table";
 import { day } from "#/utils/day";
+import { getDiscordReplyGuildId } from "#/utils/discord-reply-context";
 import { tool } from "ai";
 import { and, count, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -10,7 +11,6 @@ import { z } from "zod";
 export const discordMetricTools = {
   getMembersVoiceMinutesPerDay: tool({
     description: "Get recorded voice minutes by member and day in the guild timezone. Defaults to 30 days ago through today.",
-    contextSchema: z.object({ guildId: z.string() }),
     inputSchema: z.strictObject({
       dateRange: z.strictObject({
         startDate: z.iso.date().default(() => day().subtract(30, "day").format("YYYY-MM-DD")),
@@ -19,11 +19,11 @@ export const discordMetricTools = {
         message: "startDate must be on or before endDate",
       }).prefault({}).describe("Inclusive date range (YYYY-MM-DD)"),
     }),
-    execute: async ({ dateRange: { startDate, endDate } }, { context }) => {
+    execute: async ({ dateRange: { startDate, endDate } }) => {
       // Read the timezone for the current guild:
       const [guild] = await postgres.select({ id: tableDiscordGuild.id, timezone: tableDiscordGuild.timezone })
         .from(tableDiscordGuild)
-        .where(eq(tableDiscordGuild.guildId, context.guildId));
+        .where(eq(tableDiscordGuild.guildId, getDiscordReplyGuildId()));
       if (!guild) return { startDate, endDate, timezone: defaultDiscordGuildTimezone, entries: [] };
 
       // Convert local day boundaries to UTC timestamps for PostgreSQL:
