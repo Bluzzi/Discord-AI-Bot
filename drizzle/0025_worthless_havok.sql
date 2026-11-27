@@ -1,0 +1,1 @@
+ALTER TABLE "discord_message" ADD COLUMN "attachment_urls" text[] DEFAULT '{}' NOT NULL;

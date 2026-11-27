@@ -64,6 +64,7 @@ trigger.discordEvent({
       memberId: memberRow!.id,
       messageId: id,
       messageContent: content,
+      attachmentUrls: message.attachments.map((attachment) => attachment.url),
       createdAt,
       updatedAt: editedAt,
     }).onConflictDoNothing({ target: tableDiscordMessage.messageId });

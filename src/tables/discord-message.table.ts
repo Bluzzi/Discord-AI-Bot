@@ -10,6 +10,7 @@ export const tableDiscordMessage = pgTable("discord_message", {
   memberId: uuid("member_id").notNull(),
   messageId: text("message_id").notNull().unique(),
   messageContent: text("message_content").notNull(),
+  attachmentUrls: text("attachment_urls").array().notNull().default([]),
 
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at"),
