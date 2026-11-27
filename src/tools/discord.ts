@@ -3,6 +3,7 @@ import type { ActivitiesOptions, APIActionRowComponent, APIButtonComponent, APIB
 import { discordClient } from "#/integrations/discord.client";
 import { sanitizeDiscordMessage, splitDiscordMessage } from "#/integrations/discord.helper";
 import { railwayFileSchema, readRailwayReplyFiles } from "#/integrations/railway.helper";
+import { getDiscordReplyGuildId } from "#/utils/discord-reply-context";
 import { tool } from "ai";
 import dedent from "dedent";
 import { ActivityType, AuditLogEvent, ButtonStyle, ChannelType, ComponentType, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, InviteTargetType, makeURLSearchParams, MessageFlags, MessagePayload, parseEmoji, Routes, ThreadAutoArchiveDuration, WebhookClient } from "discord.js";
@@ -3110,4 +3111,14 @@ export const getDiscordToolInputSchema = (name: DiscordToolName) => {
   const schema = discordTools[name].inputSchema;
   if (!(schema instanceof z.ZodObject)) throw new Error(`Expected an object schema for Discord tool ${name}`);
   return schema;
+};
+
+export const getDiscordReplyToolInputSchema = (name: DiscordToolName) => {
+  const schema = getDiscordToolInputSchema(name);
+  return schema.shape.guildId instanceof z.ZodString ? schema.omit({ guildId: true }) : schema;
+};
+
+export const resolveDiscordReplyToolInput = (name: DiscordToolName, input: Record<string, unknown>) => {
+  if (!(getDiscordToolInputSchema(name).shape.guildId instanceof z.ZodString)) return input;
+  return { ...input, guildId: getDiscordReplyGuildId() };
 };

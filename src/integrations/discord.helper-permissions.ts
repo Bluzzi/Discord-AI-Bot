@@ -4,9 +4,8 @@ import type { ToolExecuteFunction, ToolSet } from "ai";
 import type { GuildBasedChannel, GuildMember, Message } from "discord.js";
 import { discordClient } from "#/integrations/discord.client";
 import { findDiscordGuildMember, getDiscordChannelPermissions, requireDiscordChannelPermissions } from "#/integrations/discord.helper";
-import { discordReadTools, discordTools, getDiscordToolInputSchema } from "#/tools/discord";
+import { discordReadTools, discordTools, getDiscordReplyToolInputSchema, getDiscordToolInputSchema, resolveDiscordReplyToolInput } from "#/tools/discord";
 import { discordApprovalTools } from "#/tools/discord-approval";
-import { getDiscordReplyGuildId } from "#/utils/discord-reply-context";
 import { ChannelType, GuildScheduledEventEntityType, PermissionFlagsBits as permissionFlags } from "discord.js";
 import { z } from "zod";
 
@@ -435,8 +434,6 @@ const filterChannelResults = (name: ToolName, result: unknown, member: GuildMemb
 
 const tools: ToolSet = discordTools;
 
-const requiresGuildId = (schema: z.ZodObject) => schema.shape.guildId instanceof z.ZodString;
-
 const parseToolArguments = (input: unknown) => {
   // Validate top-level Discord identifiers before selecting targets:
   const args = object.parse(input);
@@ -502,16 +499,13 @@ export const getDiscordToolsForMessage = (
   const wrap = (name: ToolName, rule: Rule): ToolSet[string] => {
     const definition = tools[name]!;
     const execute = definition.execute!;
-    const schema = getDiscordToolInputSchema(name);
-    const useReplyGuild = !isDm && requiresGuildId(schema);
     const isReply = name === "sendMessage" || name === "sendReply";
     return {
       ...definition,
-      inputSchema: useReplyGuild ? schema.omit({ guildId: true }) : definition.inputSchema,
+      inputSchema: isDm ? definition.inputSchema : getDiscordReplyToolInputSchema(name),
       execute: async (input, options) => {
         // Restrict replies and Railway attachments to the originating conversation:
         const args = parseToolArguments(input);
-        if (useReplyGuild) args.guildId = getDiscordReplyGuildId();
         if (name === "sendReply" && (args.channelId !== message.channelId || args.messageId !== message.id)) throw denied();
         if (name === "sendMessage" && args.attachments !== undefined && args.channelId !== message.channelId) throw denied();
         // Allow responses in the originating channel under the conversation rules:
@@ -523,9 +517,10 @@ export const getDiscordToolsForMessage = (
         }
 
         // Check the requester's permissions on every other server target:
-        const requester = await requireGuildToolPermission(args, message.member, rule);
-        const result: unknown = await execute(args, options);
-        return filterChannelResults(name, result, requester, args);
+        const resolvedInput = resolveDiscordReplyToolInput(name, args);
+        const requester = await requireGuildToolPermission(resolvedInput, message.member, rule);
+        const result: unknown = await execute(resolvedInput, options);
+        return filterChannelResults(name, result, requester, resolvedInput);
       },
     };
   };
@@ -557,8 +552,7 @@ export const getDiscordToolsForMessage = (
   const [firstAction, ...otherActions] = approvalToolNames.map((name) => {
     const action = approvalTool.inputSchema.shape.actions.element.options.find((option) => option.shape.toolName.value === name);
     if (action === undefined) throw new Error(`No schema for Discord approval action ${name}`);
-    if (!requiresGuildId(action.shape.input)) return action;
-    return action.extend({ input: action.shape.input.omit({ guildId: true }).describe(action.shape.input.description ?? name) });
+    return action.extend({ input: getDiscordReplyToolInputSchema(name).describe(action.shape.input.description ?? name) });
   });
   if (firstAction !== undefined && requestApproval !== undefined) {
     available.proposeDiscordActions = {
@@ -570,7 +564,7 @@ export const getDiscordToolsForMessage = (
         // Store the resolved guild ID with each action for approval-time validation:
         const resolvedActions = actions.map(({ toolName, input }) => ({
           toolName,
-          input: requiresGuildId(getDiscordToolInputSchema(toolName)) ? { ...input, guildId: getDiscordReplyGuildId() } : input,
+          input: resolveDiscordReplyToolInput(toolName, input),
         }));
         return approvalTool.execute({ actions: resolvedActions, summary }, { ...options, context: { requestApproval } });
       },
