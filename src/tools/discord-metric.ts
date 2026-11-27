@@ -27,8 +27,8 @@ export const discordMetricTools = {
       if (!guild) return { startDate, endDate, timezone: defaultDiscordGuildTimezone, entries: [] };
 
       // Convert local day boundaries to UTC timestamps for PostgreSQL:
-      const startAt = day.tz(startDate, timezone).startOf("day").utc().toDate();
-      const endAt = day.tz(endDate, timezone).endOf("day").utc().toDate();
+      const startAt = day.tz(startDate, guild.timezone).startOf("day").utc().toDate();
+      const endAt = day.tz(endDate, guild.timezone).endOf("day").utc().toDate();
 
       // Count recorded minutes per member and local day in the current guild:
       const date = sql<string>`to_char(${tableDiscordVoiceMinute.createdAt} at time zone 'UTC' at time zone ${guild.timezone}, 'YYYY-MM-DD')`.as("voice_date");
@@ -43,12 +43,7 @@ export const discordMetricTools = {
         .groupBy(date, tableDiscordMember.id)
         .orderBy(date, tableDiscordMember.userId);
 
-      return { 
-        startDate: startDate, 
-        endDate: endDate, 
-        timezone: timezone, 
-        entries: entries 
-      };
+      return { startDate, endDate, timezone: guild.timezone, entries };
     },
   }),
 };
