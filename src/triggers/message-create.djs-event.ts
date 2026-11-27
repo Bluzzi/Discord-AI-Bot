@@ -10,6 +10,7 @@ import { openRouterQuota } from "#/integrations/openrouter.helper-quota";
 import { postgres } from "#/integrations/postgres.client";
 import { reportError } from "#/tables/error-reporting.helper";
 import { tableModelUsage } from "#/tables/model-usage.table";
+import { discordMetricTools } from "#/tools/discord-metric";
 import { fileTools } from "#/tools/file";
 import { githubTools } from "#/tools/github";
 import { railwayTools } from "#/tools/railway";
@@ -157,10 +158,14 @@ trigger.discordEvent({
       },
       tools: {
         ...discordTools,
+        ...discordMetricTools,
         ...fileTools,
         ...(env.RAILWAY_TOKEN === undefined ? {} : railwayTools),
         ...githubTools,
         ...webTools,
+      },
+      toolsContext: {
+        getMembersVoiceMinutesPerDay: { guildId: message.guildId },
       },
       onToolExecutionStart: ({ toolCall }) => {
         // Omit reply, approval and sandbox file contents from tool logs:

@@ -1,0 +1,1 @@
+ALTER TABLE "discord_guild" ADD COLUMN "timezone" text DEFAULT 'Europe/Paris' NOT NULL;
