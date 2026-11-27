@@ -1,5 +1,4 @@
 import type { DiscordApprovalAction } from "#/tools/discord-approval";
-import type { Message } from "discord.js";
 import { requestDiscordApproval } from "./interaction-create.djs-event";
 import { aiModel } from "#/integrations/ai-sdk.client";
 import { aiUsage } from "#/integrations/ai-sdk.helper-usage";
@@ -9,7 +8,9 @@ import { channelTypingManager } from "#/integrations/discord.helper-typing";
 import { openRouterApi } from "#/integrations/openrouter.helper-pricing";
 import { openRouterQuota } from "#/integrations/openrouter.helper-quota";
 import { postgres } from "#/integrations/postgres.client";
-import { tableDiscordReplyError } from "#/tables/discord-reply-error";
+import { utcNow } from "#/integrations/postgres.helper-timestamps";
+import { tableErrorReporting } from "#/tables/error-reporting";
+import { tableErrorReportingOccurrence } from "#/tables/error-reporting-occurrence";
 import { tableModelUsage } from "#/tables/model-usage";
 import { fileTools } from "#/tools/file";
 import { githubTools } from "#/tools/github";
@@ -31,15 +32,30 @@ const MAX_STEP = 50;
 
 const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
 
-const saveReplyError = async (error: unknown, message: Message, label: string) => {
-  // Save the error with webhook tokens redacted:
+const saveReplyError = async (error: unknown, label: string) => {
+  // Use the underlying error message when the reply stream wraps an error:
+  const cause = error instanceof Error ? error.cause : undefined;
+  const reportedError: unknown = cause instanceof Error || typeof cause === "string" ? cause : error;
+  const message = reportedError instanceof Error ? reportedError.message || reportedError.name : (
+    typeof reportedError === "string" && reportedError ? reportedError : "Unknown error"
+  );
+
+  // Update the error group and save the occurrence atomically:
   const id = randomUUID();
   try {
-    await postgres.insert(tableDiscordReplyError).values({
-      id: id,
-      messageId: message.id,
-      messageContent: message.content,
-      errorContent: inspect(error, { depth: null, customInspect: false }),
+    await postgres.transaction(async (transaction) => {
+      const [report] = await transaction.insert(tableErrorReporting).values({ message })
+        .onConflictDoUpdate({
+          target: tableErrorReporting.message,
+          set: { updatedAt: utcNow },
+        }).returning({ id: tableErrorReporting.id });
+      if (!report) throw new Error("Could not resolve error report");
+
+      await transaction.insert(tableErrorReportingOccurrence).values({
+        id,
+        errorId: report.id,
+        messageInspect: inspect(error, { depth: null, customInspect: false }),
+      });
     });
   }
   catch {
@@ -47,7 +63,7 @@ const saveReplyError = async (error: unknown, message: Message, label: string) =
     return;
   }
 
-  logger.error(`${label} (error ID ${id})`);
+  logger.error(`${label} (error occurrence ID ${id})`);
 };
 
 trigger.discordEvent({
@@ -210,11 +226,11 @@ trigger.discordEvent({
 
     for await (const part of result.stream) {
       if (part.type === "error") {
-        throw new Error(`${logPrefix} Reply stream failed`, { cause: part.error });
+        throw new Error("Reply stream failed", { cause: part.error });
       }
 
       if (part.type === "tool-error") {
-        await saveReplyError(part.error, message, `${logPrefix} Tool ${part.toolName} failed`);
+        await saveReplyError(part.error, `${logPrefix} Tool ${part.toolName} failed`);
         continue;
       }
 
@@ -244,7 +260,7 @@ trigger.discordEvent({
     // Price the observed model usage and persist it:
     const modelUsed = steps.at(-1)?.model.modelId;
     if (modelUsed === undefined) {
-      throw new Error(`${logPrefix} Cannot resolve the used model: no step available`);
+      throw new Error("Cannot resolve the used model: no step available");
     }
 
     const prices = await openRouterApi.computeUsagePrices(modelUsed, usage);
@@ -264,6 +280,6 @@ trigger.discordEvent({
   },
   onError: async (error, message) => {
     channelTypingManager.sub(message.channelId);
-    await saveReplyError(error, message, "Discord reply failed");
+    await saveReplyError(error, "Discord reply failed");
   },
 });

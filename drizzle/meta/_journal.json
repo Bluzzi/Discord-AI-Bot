@@ -155,6 +155,27 @@
       "when": 1795774595038,
       "tag": "0021_tool_waiting_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795775427217,
+      "tag": "0022_error_reporting",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795775489307,
+      "tag": "0023_error_reporting_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795775996393,
+      "tag": "0024_error_reporting_occurrence_cascade",
+      "breakpoints": true
     }
   ]
 }
