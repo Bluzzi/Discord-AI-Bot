@@ -1,5 +1,5 @@
 import { postgres } from "#/integrations/postgres.client";
-import { tableDiscordGuild } from "#/tables/discord-guild";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
 import { trigger } from "#/utils/trigger";
 import { sql } from "drizzle-orm";
 

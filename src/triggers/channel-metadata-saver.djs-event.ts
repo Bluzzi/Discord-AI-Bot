@@ -1,9 +1,9 @@
 import type { GuildBasedChannel } from "discord.js";
 import { postgres } from "#/integrations/postgres.client";
 import { utcNow } from "#/integrations/postgres.helper-timestamps";
-import { tableDiscordCategory } from "#/tables/discord-category";
-import { tableDiscordChannel } from "#/tables/discord-channel";
-import { tableDiscordGuild } from "#/tables/discord-guild";
+import { tableDiscordCategory } from "#/tables/discord-category.table";
+import { tableDiscordChannel } from "#/tables/discord-channel.table";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
 import { trigger } from "#/utils/trigger";
 import { ChannelType } from "discord.js";
 import { sql } from "drizzle-orm";

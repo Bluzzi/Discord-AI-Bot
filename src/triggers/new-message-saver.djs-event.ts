@@ -1,9 +1,9 @@
 import { postgres } from "#/integrations/postgres.client";
-import { tableDiscordCategory } from "#/tables/discord-category";
-import { tableDiscordChannel } from "#/tables/discord-channel";
-import { tableDiscordGuild } from "#/tables/discord-guild";
-import { tableDiscordMember } from "#/tables/discord-member";
-import { tableDiscordMessage } from "#/tables/discord-message";
+import { tableDiscordCategory } from "#/tables/discord-category.table";
+import { tableDiscordChannel } from "#/tables/discord-channel.table";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
+import { tableDiscordMember } from "#/tables/discord-member.table";
+import { tableDiscordMessage } from "#/tables/discord-message.table";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import { ChannelType } from "discord.js";

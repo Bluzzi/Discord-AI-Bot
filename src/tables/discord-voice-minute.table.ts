@@ -1,6 +1,6 @@
-import { tableDiscordChannel } from "#/tables/discord-channel";
-import { tableDiscordGuild } from "#/tables/discord-guild";
-import { tableDiscordMember } from "#/tables/discord-member";
+import { tableDiscordChannel } from "#/tables/discord-channel.table";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
+import { tableDiscordMember } from "#/tables/discord-member.table";
 import { sql } from "drizzle-orm";
 import { foreignKey, pgTable, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 

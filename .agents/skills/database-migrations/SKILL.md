@@ -5,7 +5,7 @@ description: MUST be loaded before changing a Drizzle table definition, generati
 
 # Database migrations
 
-Drizzle Kit reads the table definitions in [src/tables](../../../src/tables) and writes migrations to [drizzle](../../../drizzle) according to [drizzle.config.ts](../../../drizzle.config.ts). The application applies pending migrations automatically at startup in [src/main.ts](../../../src/main.ts).
+Drizzle Kit reads `src/tables/*.table.ts` and writes migrations to [drizzle](../../../drizzle) according to [drizzle.config.ts](../../../drizzle.config.ts). Table helpers use the `.helper.ts` suffix and sit outside the schema glob. The application applies pending migrations automatically at startup in [src/main.ts](../../../src/main.ts).
 
 ## Steps
 

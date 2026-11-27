@@ -1,6 +1,6 @@
 import type { Message, PartialMessage } from "discord.js";
 import { postgres } from "#/integrations/postgres.client";
-import { tableDiscordMessage } from "#/tables/discord-message";
+import { tableDiscordMessage } from "#/tables/discord-message.table";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import { and, eq, isNull, lt, or } from "drizzle-orm";

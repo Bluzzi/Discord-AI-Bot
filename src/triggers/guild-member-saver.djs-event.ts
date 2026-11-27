@@ -1,7 +1,7 @@
 import type { GuildMember, PartialGuildMember } from "discord.js";
 import { postgres } from "#/integrations/postgres.client";
-import { tableDiscordGuild } from "#/tables/discord-guild";
-import { tableDiscordMember } from "#/tables/discord-member";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
+import { tableDiscordMember } from "#/tables/discord-member.table";
 import { trigger } from "#/utils/trigger";
 import { sql } from "drizzle-orm";
 

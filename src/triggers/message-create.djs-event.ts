@@ -8,10 +8,8 @@ import { channelTypingManager } from "#/integrations/discord.helper-typing";
 import { openRouterApi } from "#/integrations/openrouter.helper-pricing";
 import { openRouterQuota } from "#/integrations/openrouter.helper-quota";
 import { postgres } from "#/integrations/postgres.client";
-import { utcNow } from "#/integrations/postgres.helper-timestamps";
-import { tableErrorReporting } from "#/tables/error-reporting";
-import { tableErrorReportingOccurrence } from "#/tables/error-reporting-occurrence";
-import { tableModelUsage } from "#/tables/model-usage";
+import { reportError } from "#/tables/error-reporting.helper";
+import { tableModelUsage } from "#/tables/model-usage.table";
 import { fileTools } from "#/tools/file";
 import { githubTools } from "#/tools/github";
 import { railwayTools } from "#/tools/railway";
@@ -25,46 +23,11 @@ import { stepCountIs, streamText, type ToolResultPart } from "ai";
 import dedent from "dedent";
 import { MessageType, PermissionFlagsBits } from "discord.js";
 import { randomUUID } from "node:crypto";
-import { inspect } from "node:util";
 
 const NO_QUOTA_REPLY = "J'ai trop bossé aujourd'hui, je cherche un financement pour tourner 24/7. Réveillez-moi quand le budget passe.";
 const MAX_STEP = 50;
 
 const isReplyTool = (toolName: string) => toolName === "sendReply" || toolName === "sendMessage";
-
-const saveReplyError = async (error: unknown, label: string) => {
-  // Use the underlying error message when the reply stream wraps an error:
-  const cause = error instanceof Error ? error.cause : undefined;
-  const reportedError: unknown = cause instanceof Error || typeof cause === "string" ? cause : error;
-  const message = reportedError instanceof Error ? reportedError.message || reportedError.name : (
-    typeof reportedError === "string" && reportedError ? reportedError : "Unknown error"
-  );
-
-  // Update the error group and save the occurrence atomically:
-  const id = randomUUID();
-  try {
-    await postgres.transaction(async (transaction) => {
-      const [report] = await transaction.insert(tableErrorReporting).values({ message })
-        .onConflictDoUpdate({
-          target: tableErrorReporting.message,
-          set: { updatedAt: utcNow },
-        }).returning({ id: tableErrorReporting.id });
-      if (!report) throw new Error("Could not resolve error report");
-
-      await transaction.insert(tableErrorReportingOccurrence).values({
-        id,
-        errorId: report.id,
-        messageInspect: inspect(error, { depth: null, customInspect: false }),
-      });
-    });
-  }
-  catch {
-    logger.error(`${label} (could not save error ${id})`);
-    return;
-  }
-
-  logger.error(`${label} (error occurrence ID ${id})`);
-};
 
 trigger.discordEvent({
   eventName: "messageCreate",
@@ -230,7 +193,7 @@ trigger.discordEvent({
       }
 
       if (part.type === "tool-error") {
-        await saveReplyError(part.error, `${logPrefix} Tool ${part.toolName} failed`);
+        await reportError(part.error, `${logPrefix} Tool ${part.toolName} failed`);
         continue;
       }
 
@@ -280,6 +243,6 @@ trigger.discordEvent({
   },
   onError: async (error, message) => {
     channelTypingManager.sub(message.channelId);
-    await saveReplyError(error, "Discord reply failed");
+    await reportError(error, "Discord reply failed");
   },
 });

@@ -2,7 +2,7 @@ import type { DiscordApprovalAction } from "#/tools/discord-approval";
 import type { GuildMember, SendableChannels } from "discord.js";
 import { executeApprovedDiscordAction, validateDiscordApprovalAction } from "#/integrations/discord.helper-permissions";
 import { postgres } from "#/integrations/postgres.client";
-import { tableWaitingApproval } from "#/tables/waiting-approval";
+import { tableWaitingApproval } from "#/tables/waiting-approval.table";
 import { logger } from "#/utils/logger";
 import { trigger } from "#/utils/trigger";
 import dedent from "dedent";

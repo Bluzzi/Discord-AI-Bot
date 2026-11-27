@@ -1,5 +1,5 @@
 import { columns } from "#/integrations/postgres.helper-timestamps";
-import { tableErrorReporting } from "#/tables/error-reporting";
+import { tableErrorReporting } from "#/tables/error-reporting.table";
 import { index, pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 export const tableErrorReportingOccurrence = pgTable("error_reporting_occurrence", {

@@ -1,10 +1,10 @@
 import { discordClient } from "#/integrations/discord.client";
 import { postgres } from "#/integrations/postgres.client";
-import { tableDiscordCategory } from "#/tables/discord-category";
-import { tableDiscordChannel } from "#/tables/discord-channel";
-import { tableDiscordGuild } from "#/tables/discord-guild";
-import { tableDiscordMember } from "#/tables/discord-member";
-import { tableDiscordVoiceMinute } from "#/tables/discord-voice-minute";
+import { tableDiscordCategory } from "#/tables/discord-category.table";
+import { tableDiscordChannel } from "#/tables/discord-channel.table";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
+import { tableDiscordMember } from "#/tables/discord-member.table";
+import { tableDiscordVoiceMinute } from "#/tables/discord-voice-minute.table";
 import { completedVoiceMinutes, guildSessions, minuteInMs } from "#/triggers/voice-state-update.djs-event";
 import { trigger } from "#/utils/trigger";
 import { ChannelType } from "discord.js";

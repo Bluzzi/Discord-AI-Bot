@@ -1,5 +1,5 @@
 import { columns } from "#/integrations/postgres.helper-timestamps";
-import { tableDiscordGuild } from "#/tables/discord-guild";
+import { tableDiscordGuild } from "#/tables/discord-guild.table";
 import { pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 
 export const tableDiscordCategory = pgTable("discord_category", {

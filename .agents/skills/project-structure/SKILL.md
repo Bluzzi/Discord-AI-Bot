@@ -19,7 +19,8 @@ Use lowercase English kebab-case for filename stems. In the patterns below, each
 | Model-callable tools and their input schemas | `src/tools/<domain>.ts`, grouped by capability such as `web.ts` or `discord.ts`. Use `<domain>-<purpose>.ts` for a distinct group such as `discord-approval.ts`. |
 | Discord.js event handler | `src/triggers/<event-name>.djs-event.ts`. Convert the Discord.js event name to kebab-case for the filename and pass the original name to `trigger.discordEvent`. For example, `messageCreate` lives in `message-create.djs-event.ts`. |
 | Scheduled job | `src/triggers/<job-name>.cron.ts`. Name it after the task, such as `openrouter-quota.cron.ts`, and register it with `trigger.cron`. |
-| Drizzle table definition | `src/tables/<table-name>.ts`. Use the singular table name in kebab-case for the file, snake_case for the SQL identifier, and `table<PascalCaseName>` for the exported table. Keep column definitions and table-specific enums with the table. |
+| Drizzle table definition | `src/tables/<table-name>.table.ts`. Use the singular table name in kebab-case for the file, snake_case for the SQL identifier, and `table<PascalCaseName>` for the exported table. Keep column definitions and table-specific enums with the table. |
+| Reusable logic for a table | `src/tables/<table-name>.helper.ts`. Match the corresponding table module's name. For example, `error-reporting.helper.ts` owns the workflow for recording an error occurrence. |
 | Shared utility | `src/utils/<purpose>.ts`. Use a short name such as `attempt.ts` or `web-content.ts`. Shared runtime setup such as environment validation and logging lives in the existing `env.ts` and `logger.ts` modules. |
 
 Keep feature-specific workflow code in the function handling the feature. For example, a tool declares its schema and executes its action in the matching tool module, and message handling stays in the message event handler. Place reusable integration policy such as Discord tool permissions in the integration helper. See [discord-tools](../discord-tools/SKILL.md) for Discord approval and permission requirements.
@@ -30,7 +31,7 @@ Use the `#/` alias for source imports across folders. A trigger registers when i
 
 | Path | Responsibility |
 | --- | --- |
-| `drizzle.config.ts` | Drizzle Kit configuration. Reads schema definitions from `src/tables/` and writes migrations to `drizzle/`. |
+| `drizzle.config.ts` | Drizzle Kit configuration. Reads schema definitions from `src/tables/*.table.ts` and writes migrations to `drizzle/`. |
 | `drizzle/` and `drizzle/meta/` | Migration SQL, Drizzle snapshots, and the migration journal. See [database-migrations](../database-migrations/SKILL.md) for the migration workflow. |
 | `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml` | Package scripts and declarations, pnpm workspace settings, and resolved dependencies. |
 | `tsconfig.json`, `eslint.config.js` | TypeScript settings and source aliases, and ESLint configuration. |
