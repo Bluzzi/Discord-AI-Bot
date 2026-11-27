@@ -4,6 +4,7 @@ import { utcNow } from "#/integrations/postgres.helper-timestamps";
 import { tableDiscordCategory } from "#/tables/discord-category.table";
 import { tableDiscordChannel } from "#/tables/discord-channel.table";
 import { tableDiscordGuild } from "#/tables/discord-guild.table";
+import { getDiscordMemberMetadata } from "#/tables/discord-member.helper";
 import { tableDiscordMember } from "#/tables/discord-member.table";
 import { trigger } from "#/utils/trigger";
 import { ChannelType } from "discord.js";
@@ -66,14 +67,10 @@ const syncGuildInventory = async (guild: Guild) => {
     // Fetch the full member list, including members not already cached:
     const members = [...(await guild.members.fetch()).values()];
     for (let index = 0; index < members.length; index += 500) {
-      await postgres.insert(tableDiscordMember).values(members.slice(index, index + 500).map((member): typeof tableDiscordMember.$inferInsert => ({
+      await postgres.insert(tableDiscordMember).values(members.slice(index, index + 500).map((member) => ({
         guildId,
         userId: member.id,
-        memberName: member.nickname,
-        userName: member.user.globalName,
-        userTag: member.user.username,
-        userProfilePicture: member.user.avatarURL(),
-        memberType: member.user.bot ? "bot" : "human",
+        ...getDiscordMemberMetadata(member),
       }))).onConflictDoUpdate({
         target: [tableDiscordMember.guildId, tableDiscordMember.userId],
         set: {

@@ -3,20 +3,14 @@ import { postgres } from "#/integrations/postgres.client";
 import { utcNow } from "#/integrations/postgres.helper-timestamps";
 import { tableDiscordCategory } from "#/tables/discord-category.table";
 import { tableDiscordChannel } from "#/tables/discord-channel.table";
-import { tableDiscordGuild } from "#/tables/discord-guild.table";
+import { ensureDiscordGuild } from "#/tables/discord-guild.helper";
 import { trigger } from "#/utils/trigger";
 import { ChannelType } from "discord.js";
 import { sql } from "drizzle-orm";
 
 const saveChannelMetadata = async (channel: GuildBasedChannel) => {
   // Seed the guild if the channel event arrives before the startup inventory:
-  const [guildRow] = await postgres.insert(tableDiscordGuild)
-    .values({ guildId: channel.guild.id, guildName: channel.guild.name })
-    .onConflictDoUpdate({
-      target: tableDiscordGuild.guildId,
-      set: { updatedAt: sql`${tableDiscordGuild.updatedAt}` },
-    }).returning({ id: tableDiscordGuild.id });
-  const guildId = guildRow!.id;
+  const guildId = await ensureDiscordGuild(channel.guild);
 
   // A category has its own row; a thread does not have a direct category:
   const category = channel.type === ChannelType.GuildCategory ? channel : channel.isThread() ? null : channel.parent;
