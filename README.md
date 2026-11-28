@@ -48,11 +48,14 @@ sequenceDiagram
 
 Railway hosts the Discord Agent application and its PostgreSQL database. The application connects to the Discord and GitHub APIs, Exa for web search, and OpenRouter for LLM inference.
 
+The bot creates [Railway Sandboxes](https://railway.com/sandboxes) on demand to run shell commands in isolated Linux VMs. It can copy Discord attachments into a sandbox, process them, and attach generated files to Discord messages. Sandboxes expire after five minutes of inactivity and can also be destroyed explicitly. See the [Railway Sandboxes documentation](https://docs.railway.com/sandboxes) and [the bot's sandbox tools](src/tools/railway.ts).
+
 ```mermaid
 architecture-beta
     group railway(cloud)[Railway]
     service db(database)[PostgreSQL] in railway
     service bot(server)[Discord Agent] in railway
+    service sandbox(server)[Railway Sandboxes] in railway
 
     service discord(internet)[Discord API]
     service github(internet)[GitHub API]
@@ -65,6 +68,7 @@ architecture-beta
     junction bottom
 
     db:R -- L:bot
+    bot:B -- T:sandbox
     bot:R -- L:middle
     top:B -- T:middle
     middle:B -- T:lower
