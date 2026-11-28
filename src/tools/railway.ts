@@ -9,7 +9,7 @@ const fileInput = railwayFileSchema.pick({ sandboxId: true, path: true });
 
 export const railwayTools = {
   createRailwaySandbox: tool({
-    description: "Create an isolated Linux VM. Create it once and pass the returned sandboxId to later tools. It expires after 5 minutes of inactivity.",
+    description: "Create an isolated, general-purpose Linux VM. Be creative: run shell commands or write scripts, and install open-source utilities, libraries, or lightweight models that fit the VM's resources. Use them to synthesize music, render images, process audio or video, convert documents, or analyze data. If one approach fails, try another. Create the VM once and reuse its sandboxId with later tools. To attach a file to your Discord reply, use sendReply with an attachments entry containing the VM's sandboxId, the file's absolute path in the VM, and the filename to display in Discord. Keep the VM running until the file is sent. It expires after 5 minutes of inactivity.",
     inputSchema: z.object({}),
     execute: async () => {
       // Create the VM and return its ID for subsequent calls:
